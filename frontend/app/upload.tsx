@@ -1,0 +1,249 @@
+import React, { useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  Image,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { api } from "@/src/api/client";
+import { theme } from "@/src/theme";
+import { CATEGORIES, SEASONS, GENDERS } from "@/src/constants/options";
+
+export default function Upload() {
+  const router = useRouter();
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("t-shirt");
+  const [color, setColor] = useState("");
+  const [size, setSize] = useState("");
+  const [price, setPrice] = useState("");
+  const [season, setSeason] = useState("");
+  const [gender, setGender] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permesso negato", "Concedi l'accesso alla galleria per caricare un capo.");
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      base64: true,
+      quality: 0.7,
+      allowsEditing: true,
+      aspect: [4, 5],
+    });
+    if (!res.canceled && res.assets[0]?.base64) {
+      setImageBase64(res.assets[0].base64);
+    }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permesso negato", "Concedi l'accesso alla fotocamera per scattare una foto.");
+      return;
+    }
+    const res = await ImagePicker.launchCameraAsync({
+      base64: true,
+      quality: 0.7,
+      allowsEditing: true,
+      aspect: [4, 5],
+    });
+    if (!res.canceled && res.assets[0]?.base64) {
+      setImageBase64(res.assets[0].base64);
+    }
+  };
+
+  const save = async () => {
+    if (!imageBase64) return Alert.alert("Foto richiesta", "Scegli o scatta una foto del capo.");
+    if (!name.trim()) return Alert.alert("Nome richiesto", "Inserisci il nome del capo.");
+    setSaving(true);
+    try {
+      await api.createGarment({
+        name: name.trim(),
+        image_base64: imageBase64,
+        category,
+        color: color.trim() || null,
+        size: size.trim() || null,
+        price: price ? parseFloat(price) : null,
+        season: season || null,
+        gender: gender || null,
+      });
+      router.back();
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile salvare");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+      >
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => router.back()} testID="upload-close">
+            <Ionicons name="close" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+          <Text style={s.headerTitle}>Nuovo capo</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+          {/* Image */}
+          {imageBase64 ? (
+            <View style={s.preview}>
+              <Image source={{ uri: `data:image/png;base64,${imageBase64}` }} style={s.previewImg} />
+              <TouchableOpacity style={s.previewChange} onPress={pickImage} testID="upload-change">
+                <Text style={s.previewChangeText}>Cambia</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={s.pickRow}>
+              <TouchableOpacity style={s.pickBox} onPress={pickImage} testID="upload-from-library">
+                <Ionicons name="images-outline" size={26} color={theme.colors.text} />
+                <Text style={s.pickText}>Galleria</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.pickBox} onPress={takePhoto} testID="upload-from-camera">
+                <Ionicons name="camera-outline" size={26} color={theme.colors.text} />
+                <Text style={s.pickText}>Scatta foto</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <Text style={s.fieldLabel}>Nome capo</Text>
+          <TextInput
+            value={name} onChangeText={setName}
+            placeholder="es. Maglione cashmere rosa"
+            placeholderTextColor={theme.colors.textMuted}
+            style={s.input}
+            testID="upload-name"
+          />
+
+          <Text style={s.fieldLabel}>Categoria</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
+            {CATEGORIES.map((c) => (
+              <TouchableOpacity
+                key={c.value} onPress={() => setCategory(c.value)}
+                style={[s.chip, category === c.value && s.chipA]}
+                testID={`upload-cat-${c.value}`}
+              >
+                <Text style={[s.chipT, category === c.value && s.chipTA]}>{c.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <View style={s.row2}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.fieldLabel}>Colore</Text>
+              <TextInput value={color} onChangeText={setColor} placeholder="es. Beige"
+                placeholderTextColor={theme.colors.textMuted} style={s.input} testID="upload-color" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.fieldLabel}>Taglia</Text>
+              <TextInput value={size} onChangeText={setSize} placeholder="S, M, L, 42…"
+                placeholderTextColor={theme.colors.textMuted} style={s.input} testID="upload-size" />
+            </View>
+          </View>
+
+          <Text style={s.fieldLabel}>Prezzo (€)</Text>
+          <TextInput
+            value={price} onChangeText={setPrice} keyboardType="decimal-pad"
+            placeholder="49.90"
+            placeholderTextColor={theme.colors.textMuted} style={s.input}
+            testID="upload-price"
+          />
+
+          <Text style={s.fieldLabel}>Stagione</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
+            {SEASONS.map((c) => (
+              <TouchableOpacity key={c.value} onPress={() => setSeason(c.value)}
+                style={[s.chip, season === c.value && s.chipA]} testID={`upload-season-${c.value}`}>
+                <Text style={[s.chipT, season === c.value && s.chipTA]}>{c.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <Text style={s.fieldLabel}>Per</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
+            {GENDERS.map((c) => (
+              <TouchableOpacity key={c.value} onPress={() => setGender(c.value)}
+                style={[s.chip, gender === c.value && s.chipA]} testID={`upload-gender-${c.value}`}>
+                <Text style={[s.chipT, gender === c.value && s.chipTA]}>{c.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <View style={{ height: 30 }} />
+        </ScrollView>
+
+        <View style={s.footer}>
+          <TouchableOpacity onPress={save} style={s.saveBtn} disabled={saving} testID="upload-save">
+            {saving
+              ? <ActivityIndicator color={theme.colors.primaryFg} />
+              : <Text style={s.saveBtnText}>Salva nel guardaroba</Text>}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.colors.bg },
+  header: {
+    paddingHorizontal: 20, paddingVertical: 14,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    borderBottomWidth: 1, borderBottomColor: theme.colors.border,
+  },
+  headerTitle: { color: theme.colors.text, fontSize: 14, letterSpacing: 2, textTransform: "uppercase" },
+  scroll: { padding: 24, gap: 6 },
+  pickRow: { flexDirection: "row", gap: 12, marginBottom: 6 },
+  pickBox: {
+    flex: 1, height: 180, alignItems: "center", justifyContent: "center", gap: 10,
+    borderWidth: 1, borderColor: theme.colors.border, borderStyle: "dashed",
+    backgroundColor: theme.colors.surface,
+  },
+  pickText: { color: theme.colors.text, fontSize: 12, letterSpacing: 1 },
+  preview: { height: 280, position: "relative", marginBottom: 6 },
+  previewImg: { width: "100%", height: "100%" },
+  previewChange: {
+    position: "absolute", bottom: 10, right: 10,
+    backgroundColor: "rgba(0,0,0,0.6)", paddingVertical: 8, paddingHorizontal: 14,
+  },
+  previewChangeText: { color: theme.colors.text, fontSize: 12, letterSpacing: 0.4 },
+  fieldLabel: {
+    color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2,
+    textTransform: "uppercase", marginTop: 14, marginBottom: 6,
+  },
+  input: {
+    backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border,
+    color: theme.colors.text, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14,
+  },
+  row2: { flexDirection: "row", gap: 12 },
+  chipRow: { gap: 8, paddingRight: 16 },
+  chip: { paddingVertical: 8, paddingHorizontal: 14, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  chipA: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
+  chipT: { color: theme.colors.text, fontSize: 12 },
+  chipTA: { color: theme.colors.primaryFg, fontWeight: "600" },
+  footer: {
+    padding: 20, borderTopWidth: 1, borderTopColor: theme.colors.border, backgroundColor: theme.colors.bg,
+  },
+  saveBtn: { backgroundColor: theme.colors.primary, paddingVertical: 18, alignItems: "center" },
+  saveBtnText: { color: theme.colors.primaryFg, fontWeight: "700", letterSpacing: 0.4, fontSize: 15 },
+});

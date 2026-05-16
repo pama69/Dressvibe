@@ -1,0 +1,124 @@
+import React, { useCallback, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Image,
+  RefreshControl,
+  ActivityIndicator,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter, useFocusEffect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { api } from "@/src/api/client";
+import { theme } from "@/src/theme";
+
+type GenItem = {
+  id: string;
+  title?: string;
+  thumbnail?: string | null;
+  image_count?: number;
+  status: string;
+  created_at: string;
+};
+
+export default function History() {
+  const router = useRouter();
+  const [items, setItems] = useState<GenItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.listGenerations();
+      setItems(list);
+    } catch (e) {
+      console.warn(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.header}>
+        <Text style={styles.eyebrow}>ARCHIVIO</Text>
+        <Text style={styles.title}>Le tue creazioni</Text>
+      </View>
+
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color={theme.colors.text} />
+        </View>
+      ) : items.length === 0 ? (
+        <View style={styles.empty}>
+          <Ionicons name="time-outline" size={42} color={theme.colors.textMuted} />
+          <Text style={styles.emptyTitle}>Nessuna generazione</Text>
+          <Text style={styles.emptySub}>Le immagini che generi appariranno qui.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(i) => i.id}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+          ItemSeparatorComponent={() => <View style={{ height: 14 }} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(); }}
+              tintColor={theme.colors.text}
+            />
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push(`/results/${item.id}`)}
+              style={styles.row}
+              testID={`history-item-${item.id}`}
+            >
+              {item.thumbnail ? (
+                <Image source={{ uri: `data:image/png;base64,${item.thumbnail}` }} style={styles.thumb} />
+              ) : (
+                <View style={[styles.thumb, styles.thumbEmpty]}>
+                  <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle} numberOfLines={1}>{item.title || "Generazione"}</Text>
+                <Text style={styles.rowMeta}>
+                  {item.image_count || 0} immagini · {item.status === "done" ? "Pronto" : item.status}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.colors.bg },
+  header: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24 },
+  eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
+  title: { color: theme.colors.text, fontSize: 30, fontWeight: "300", letterSpacing: -1, marginTop: 6 },
+  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 30 },
+  emptyTitle: { color: theme.colors.text, fontSize: 16 },
+  emptySub: { color: theme.colors.textSecondary, fontSize: 13, textAlign: "center" },
+  row: {
+    flexDirection: "row", alignItems: "center", gap: 14,
+    backgroundColor: theme.colors.surface, padding: 12,
+    borderWidth: 1, borderColor: theme.colors.border,
+  },
+  thumb: { width: 64, height: 80, backgroundColor: theme.colors.surfaceAlt },
+  thumbEmpty: { alignItems: "center", justifyContent: "center" },
+  rowTitle: { color: theme.colors.text, fontSize: 14, fontWeight: "500" },
+  rowMeta: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 4 },
+});
