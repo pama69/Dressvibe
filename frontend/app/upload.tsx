@@ -20,6 +20,37 @@ import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { CATEGORIES, SEASONS, GENDERS } from "@/src/constants/options";
 
+// Robust base64 extractor — handles native (asset.base64) and web (blob/data URI).
+async function assetToBase64(asset: ImagePicker.ImagePickerAsset): Promise<string | null> {
+  if (asset.base64 && asset.base64.length > 0) return asset.base64;
+  if (!asset.uri) return null;
+  try {
+    const res = await fetch(asset.uri);
+    const blob = await res.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        const comma = dataUrl.indexOf(",");
+        resolve(comma >= 0 ? dataUrl.slice(comma + 1) : null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn("assetToBase64 failed", e);
+    return null;
+  }
+}
+
+function notify(title: string, msg?: string) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.alert(msg ? `${title}\n\n${msg}` : title);
+  } else {
+    Alert.alert(title, msg);
+  }
+}
+
 export default function Upload() {
   const router = useRouter();
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -31,45 +62,80 @@ export default function Upload() {
   const [season, setSeason] = useState("");
   const [gender, setGender] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permesso negato", "Concedi l'accesso alla galleria per caricare un capo.");
-      return;
-    }
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      base64: true,
-      quality: 0.7,
-      allowsEditing: true,
-      aspect: [4, 5],
-    });
-    if (!res.canceled && res.assets[0]?.base64) {
-      setImageBase64(res.assets[0].base64);
+    try {
+      if (Platform.OS !== "web") {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== "granted") {
+          notify("Permesso negato", "Concedi l'accesso alla galleria per caricare un capo.");
+          return;
+        }
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        base64: true,
+        quality: 0.55,
+        allowsEditing: Platform.OS !== "web",
+        aspect: Platform.OS !== "web" ? [4, 5] : undefined,
+      });
+      if (res.canceled || !res.assets || res.assets.length === 0) return;
+      const b64 = await assetToBase64(res.assets[0]);
+      if (!b64) {
+        notify("Errore", "Impossibile leggere la foto. Prova un'altra immagine.");
+        return;
+      }
+      setImageBase64(b64);
+      setError(null);
+    } catch (e: any) {
+      console.warn("pickImage", e);
+      notify("Errore", e?.message || "Impossibile aprire la galleria");
     }
   };
 
   const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permesso negato", "Concedi l'accesso alla fotocamera per scattare una foto.");
-      return;
-    }
-    const res = await ImagePicker.launchCameraAsync({
-      base64: true,
-      quality: 0.7,
-      allowsEditing: true,
-      aspect: [4, 5],
-    });
-    if (!res.canceled && res.assets[0]?.base64) {
-      setImageBase64(res.assets[0].base64);
+    try {
+      if (Platform.OS === "web") {
+        // Same input on web — opens file picker.
+        await pickImage();
+        return;
+      }
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        notify("Permesso negato", "Concedi l'accesso alla fotocamera per scattare una foto.");
+        return;
+      }
+      const res = await ImagePicker.launchCameraAsync({
+        base64: true,
+        quality: 0.55,
+        allowsEditing: true,
+        aspect: [4, 5],
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const b64 = await assetToBase64(res.assets[0]);
+      if (b64) {
+        setImageBase64(b64);
+        setError(null);
+      }
+    } catch (e: any) {
+      console.warn("takePhoto", e);
+      notify("Errore", e?.message || "Impossibile aprire la fotocamera");
     }
   };
 
   const save = async () => {
-    if (!imageBase64) return Alert.alert("Foto richiesta", "Scegli o scatta una foto del capo.");
-    if (!name.trim()) return Alert.alert("Nome richiesto", "Inserisci il nome del capo.");
+    setError(null);
+    if (!imageBase64) {
+      setError("Scegli o scatta una foto del capo prima di salvare.");
+      notify("Foto richiesta", "Scegli o scatta una foto del capo.");
+      return;
+    }
+    if (!name.trim()) {
+      setError("Inserisci il nome del capo.");
+      notify("Nome richiesto", "Inserisci il nome del capo.");
+      return;
+    }
     setSaving(true);
     try {
       await api.createGarment({
@@ -84,7 +150,10 @@ export default function Upload() {
       });
       router.back();
     } catch (e: any) {
-      Alert.alert("Errore", e?.message || "Impossibile salvare");
+      const msg = e?.message || "Impossibile salvare";
+      console.warn("save error", e);
+      setError(msg);
+      notify("Errore", msg);
     } finally {
       setSaving(false);
     }
@@ -105,7 +174,6 @@ export default function Upload() {
         </View>
 
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
-          {/* Image */}
           {imageBase64 ? (
             <View style={s.preview}>
               <Image source={{ uri: `data:image/png;base64,${imageBase64}` }} style={s.previewImg} />
@@ -117,12 +185,14 @@ export default function Upload() {
             <View style={s.pickRow}>
               <TouchableOpacity style={s.pickBox} onPress={pickImage} testID="upload-from-library">
                 <Ionicons name="images-outline" size={26} color={theme.colors.text} />
-                <Text style={s.pickText}>Galleria</Text>
+                <Text style={s.pickText}>{Platform.OS === "web" ? "Scegli foto" : "Galleria"}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.pickBox} onPress={takePhoto} testID="upload-from-camera">
-                <Ionicons name="camera-outline" size={26} color={theme.colors.text} />
-                <Text style={s.pickText}>Scatta foto</Text>
-              </TouchableOpacity>
+              {Platform.OS !== "web" && (
+                <TouchableOpacity style={s.pickBox} onPress={takePhoto} testID="upload-from-camera">
+                  <Ionicons name="camera-outline" size={26} color={theme.colors.text} />
+                  <Text style={s.pickText}>Scatta foto</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -189,11 +259,24 @@ export default function Upload() {
             ))}
           </ScrollView>
 
+          {error ? (
+            <View style={s.errorBox} testID="upload-error">
+              <Ionicons name="alert-circle-outline" size={16} color={theme.colors.error} />
+              <Text style={s.errorText}>{error}</Text>
+            </View>
+          ) : null}
+
           <View style={{ height: 30 }} />
         </ScrollView>
 
         <View style={s.footer}>
-          <TouchableOpacity onPress={save} style={s.saveBtn} disabled={saving} testID="upload-save">
+          <TouchableOpacity
+            onPress={save}
+            style={[s.saveBtn, saving && { opacity: 0.6 }]}
+            disabled={saving}
+            testID="upload-save"
+            activeOpacity={0.85}
+          >
             {saving
               ? <ActivityIndicator color={theme.colors.primaryFg} />
               : <Text style={s.saveBtnText}>Salva nel guardaroba</Text>}
@@ -241,6 +324,12 @@ const s = StyleSheet.create({
   chipA: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   chipT: { color: theme.colors.text, fontSize: 12 },
   chipTA: { color: theme.colors.primaryFg, fontWeight: "600" },
+  errorBox: {
+    marginTop: 14, padding: 12, borderWidth: 1, borderColor: theme.colors.error,
+    backgroundColor: "rgba(239,68,68,0.08)",
+    flexDirection: "row", alignItems: "center", gap: 8,
+  },
+  errorText: { color: theme.colors.error, fontSize: 12, flex: 1 },
   footer: {
     padding: 20, borderTopWidth: 1, borderTopColor: theme.colors.border, backgroundColor: theme.colors.bg,
   },
