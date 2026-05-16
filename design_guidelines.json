@@ -1,0 +1,136 @@
+{
+  "project_name": "DressVibe",
+  "domain": "B2B Fashion & E-commerce AI Tool",
+  "theme_and_archetype": {
+    "theme": "Dark",
+    "archetype": "5 (Jewel & Luxury)",
+    "description": "Cinematic, moody, expensive feel. Designed for Italian small shop owners. The UI should resemble high-end editorial apps like SSENSE or FARFETCH: deep blacks, lots of negative space, elegant typography, and a distinct focus on the imagery. Accent colors are used exclusively for 'magical' AI actions."
+  },
+  "colors": {
+    "background": "#050505",
+    "surface": "#121212",
+    "surface_glass": "rgba(18, 18, 18, 0.7)",
+    "primary": "#FFFFFF",
+    "primary_foreground": "#000000",
+    "secondary": "#27272A",
+    "secondary_foreground": "#FAFAFA",
+    "text_primary": "#FAFAFA",
+    "text_secondary": "#A1A1AA",
+    "border": "rgba(255, 255, 255, 0.1)",
+    "accent_magic": "linear-gradient(135deg, #F59E0B 0%, #E11D48 50%, #9D4CDD 100%)",
+    "accent_magic_glow": "rgba(225, 29, 72, 0.4)",
+    "success": "#10B981",
+    "error": "#EF4444"
+  },
+  "typography": {
+    "heading_font": "Cormorant Garamond, serif",
+    "body_font": "Outfit, sans-serif",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-light tracking-tighter leading-tight",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-normal tracking-tight leading-snug",
+      "h3": "text-xl sm:text-2xl font-normal tracking-tight",
+      "body": "text-base leading-relaxed text-[#A1A1AA]",
+      "label": "text-xs tracking-[0.2em] uppercase text-[#A1A1AA]"
+    },
+    "pairing_strategy": "Radical contrast: Extremely elegant, thin serif for large editorial headings; sterile, geometric, clean sans-serif for UI elements, labels, and numbers."
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing Philosophy. Use 2-3x more spacing than typical apps. The 'White Space' (even though it's dark mode) must feel luxurious.",
+    "padding": {
+      "container": "p-6 md:p-12 lg:p-16",
+      "card": "p-6 sm:p-8"
+    },
+    "grid_system": "Bento Grid Protocol. Mode B (Control Room) adapted for imagery. Tight gaps (gap-4 or gap-6) but heavy internal padding.",
+    "border_radius": "rounded-none or max rounded-sm to maintain a sharp, editorial high-fashion aesthetic.",
+    "mobile_first": true
+  },
+  "components_strategy": {
+    "buttons": {
+      "primary": "Solid white background, black text, sharp corners (rounded-none), hover:bg-gray-200 transition-colors.",
+      "secondary": "Transparent background, 1px solid rgba(255,255,255,0.2), white text, hover:bg-white/5.",
+      "magic_button": "The ✨ 'Genera Outfit Realistico' button must use the 'accent_magic' gradient background, sharp corners, and a pulsating drop-shadow using 'accent_magic_glow'. Include haptic scale feedback (scale down on tap). Text should be bold and bright."
+    },
+    "cards_and_surfaces": {
+      "style": "Flat #121212 background, 1px subtle border (border-white/10), no heavy drop shadows in dark mode.",
+      "hover_state": "Slight lift (-translate-y-1), subtle increase in border opacity (border-white/30)."
+    },
+    "inputs_and_forms": {
+      "style": "Shadcn UI customized: bg-transparent, bottom-border only (or very subtle full border), text-white, focus:border-white focus:ring-0. Minimalist forms."
+    },
+    "navigation": {
+      "style": "Glassmorphism header (backdrop-blur-xl bg-[#050505]/70) with a 1px bottom border."
+    },
+    "icons": {
+      "library": "@phosphor-icons/react",
+      "style": "Thin or Light weight to match high-end fashion editorial vibes."
+    }
+  },
+  "motion_and_interactions": {
+    "general": "Smooth, deliberate transitions. No bouncy effects. Use Framer Motion for fade-ins and slide-ups.",
+    "loading_state": "When generating outfit, use a satisfying, immersive loading screen with particle effects, shimmering text ('Creazione della magia in corso...'), and a fluid progress indicator.",
+    "hover": "Subtle brightness increase or a 1.02x scale for images."
+  },
+  "key_screens": [
+    {
+      "name": "Onboarding / Login",
+      "description": "Dark luxury background, elegant typography, simple 'Accedi con Google' / Phone buttons. A high-fashion background image (dark_luxury_bg) blended into the dark UI."
+    },
+    {
+      "name": "Shop Dashboard (Galleria Capi)",
+      "description": "Grid of uploaded clothes. Minimalist UI. Large 'Carica Capo' primary button."
+    },
+    {
+      "name": "Magic Outfit Generator Form",
+      "description": "Step-by-step or chip-based selection for models (uomo/donna/età/corporatura), pose, and background. Visual chips with icons. The massive ✨ Genera Outfit Realistico button sits at the bottom, sticky."
+    },
+    {
+      "name": "Results Gallery",
+      "description": "4-8 image bento grid showcasing the generated fashion models. Sharp edges, high resolution focus."
+    },
+    {
+      "name": "Post-Generation Studio",
+      "description": "Edit screen for a single generated image. Bottom sheet or side panel with tools: Rimuovi Sfondo, Testo (Prezzo/Nome), Filtri Instagram."
+    }
+  ],
+  "image_urls": [
+    {
+      "category": "hero_background",
+      "url": "https://static.prod-images.emergentagent.com/jobs/c1b3d46b-a98d-4423-a9d4-2841a2073b32/images/ed6e2d9050a5c6379f9a25571187e3c6ec908017286a2484188d806b5f2598bc.png",
+      "description": "Abstract dark luxury fashion texture, deep black with subtle cinematic lighting."
+    },
+    {
+      "category": "magic_effect",
+      "url": "https://static.prod-images.emergentagent.com/jobs/c1b3d46b-a98d-4423-a9d4-2841a2073b32/images/33ab703b0e70fdfd1677d39ea98e5abb9630c2c54be49fc70ee4e3d4ff3c8e24.png",
+      "description": "Glowing iridescent magical aura for the magic button or loading states."
+    },
+    {
+      "category": "sample_clothing_1",
+      "url": "https://images.unsplash.com/photo-1621198059871-0d5f9b449233?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwyfHxmYXNoaW9uJTIwY2xvdGhpbmclMjBmbGF0JTIwbGF5fGVufDB8fHx8MTc3ODk1MDA3N3ww&ixlib=rb-4.1.0&q=85",
+      "description": "White knit sweater flat lay"
+    },
+    {
+      "category": "sample_clothing_2",
+      "url": "https://images.unsplash.com/photo-1617178388553-a9d022974a5c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNDR8MHwxfHNlYXJjaHwzfHxmYXNoaW9uJTIwY2xvdGhpbmclMjBmbGF0JTIwbGF5fGVufDB8fHx8MTc3ODk1MDA3N3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Blue denim jeans flat lay"
+    },
+    {
+      "category": "sample_model_generated_1",
+      "url": "https://images.unsplash.com/photo-1715541448446-3369e1cc0ee9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHw0fHxmYXNoaW9uJTIwbW9kZWwlMjBzdHVkaW8lMjBwaG90b2dyYXBoeXxlbnwwfHx8fDE3Nzg5NTAwNzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "High end studio fashion model"
+    },
+    {
+      "category": "sample_model_generated_2",
+      "url": "https://images.unsplash.com/photo-1509631179647-0177331693ae?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwzfHxmYXNoaW9uJTIwbW9kZWwlMjBzdHVkaW8lMjBwaG90b2dyYXBoeXxlbnwwfHx8fDE3Nzg5NTAwNzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "High end studio fashion model 2"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "Strictly use the Italian language (UI in italiano) across the entire application as requested.",
+    "Ensure Dark Mode is the default and only theme.",
+    "Use Framer Motion for the UI transitions and particularly the generation loading sequence.",
+    "Add 'data-testid' attributes to all interactive and key informational elements (e.g., data-testid='login-button', data-testid='genera-outfit-button').",
+    "Utilize standard Tailwind classes and Shadcn components, heavily customized to remove the 'default SaaS' look, favoring sharp edges and zero-to-minimal border radius.",
+    "Use the provided media URLs for all visual placeholders. Do not use generic placeholder services.",
+    "Keep standard inputs looking like fashion editorial lines (bottom border only where possible, or very subtle boxes)."
+  ]
+}
