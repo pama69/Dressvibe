@@ -102,26 +102,35 @@ export default function Studio() {
   };
 
   const downloadAndShare = async (target: "telegram" | "instagram" | "share") => {
-    if (!image) return;
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      console.log("[DressVibe] downloadAndShare CALLED. target=", target);
+    }
+    if (!image) {
+      if (Platform.OS === "web" && typeof window !== "undefined") window.alert("Nessuna immagine selezionata");
+      return;
+    }
 
     // Publish to the configured Telegram channel with a booking button
     if (target === "telegram") {
       try {
         setBusy(true);
         const captionText = caption?.trim() || genTitle || "Disponibile in negozio ✨";
+        console.log("[DressVibe] Calling api.telegramPublish, caption length:", captionText.length, "img len:", image.length);
         const res = await api.telegramPublish({
           image_base64: image,
           caption: captionText,
           gen_id: id,
           image_index: idx,
         });
-        const msg = `Foto pubblicata sul canale (id ${res.channel_message_id}).\n\nQuando un cliente preme "PRENOTA IL TUO CAPO ORA!" riceverai una notifica con i suoi dati.`;
+        console.log("[DressVibe] Publish OK:", res);
+        const msg = `Foto pubblicata sul canale (id ${res.channel_message_id}).\n\nQuando un cliente preme "PRENOTA IL TUO CAPO ORA!" riceverai una notifica.`;
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("Pubblicato su Telegram\n\n" + msg);
         } else {
           Alert.alert("Pubblicato su Telegram", msg);
         }
       } catch (e: any) {
+        console.error("[DressVibe] Publish error:", e);
         const errMsg = e?.message || "Impossibile pubblicare";
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("Errore Telegram\n\n" + errMsg);
