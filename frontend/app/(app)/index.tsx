@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { useAuth } from "@/src/contexts/AuthContext";
+import { confirm } from "@/src/utils/confirm";
 
 type Garment = {
   id: string;
@@ -72,6 +73,18 @@ export default function Galleria() {
   const onRefresh = () => {
     setRefreshing(true);
     load();
+  };
+
+  const handleDelete = async (g: Garment) => {
+    const ok = await confirm("Eliminare?", `"${g.name}" verrà rimosso dalla galleria.`);
+    if (!ok) return;
+    setItems((prev) => prev.filter((x) => x.id !== g.id));
+    try {
+      await api.deleteGarment(g.id);
+    } catch (e) {
+      console.warn("delete garment", e);
+      load(); // reload to restore on failure
+    }
   };
 
   return (
@@ -139,6 +152,15 @@ export default function Galleria() {
                 source={{ uri: `data:image/png;base64,${item.image_base64}` }}
                 style={styles.cardImg}
               />
+              <TouchableOpacity
+                onPress={() => handleDelete(item)}
+                style={styles.deleteBtn}
+                testID={`garment-delete-${item.id}`}
+                activeOpacity={0.7}
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={14} color={theme.colors.text} />
+              </TouchableOpacity>
               <View style={styles.cardOverlay}>
                 <Text style={styles.cardName} numberOfLines={1}>
                   {item.name}
@@ -221,6 +243,13 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   cardImg: { width: "100%", height: "100%" },
+  deleteBtn: {
+    position: "absolute", top: 6, right: 6,
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
+  },
   cardOverlay: {
     position: "absolute",
     bottom: 0,

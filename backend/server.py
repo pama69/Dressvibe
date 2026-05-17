@@ -429,6 +429,26 @@ async def delete_generation(gen_id: str, authorization: Optional[str] = Header(N
     return {"deleted": res.deleted_count}
 
 
+@api_router.delete("/generations/{gen_id}/images/{index}")
+async def delete_generation_image(gen_id: str, index: int, authorization: Optional[str] = Header(None)):
+    """Remove a single image (by zero-based index) from a generation's gallery."""
+    user = await get_current_user(authorization)
+    gen = await db.generations.find_one(
+        {"id": gen_id, "user_id": user["user_id"]}, {"_id": 0, "images": 1}
+    )
+    if not gen:
+        raise HTTPException(status_code=404, detail="Generazione non trovata")
+    images = gen.get("images") or []
+    if index < 0 or index >= len(images):
+        raise HTTPException(status_code=400, detail="Indice immagine non valido")
+    images.pop(index)
+    await db.generations.update_one(
+        {"id": gen_id, "user_id": user["user_id"]},
+        {"$set": {"images": images}},
+    )
+    return {"deleted": 1, "remaining": len(images)}
+
+
 # ---------- Studio (image edit) ----------
 @api_router.post("/studio/edit")
 async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] = Header(None)):

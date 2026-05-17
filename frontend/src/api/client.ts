@@ -69,6 +69,8 @@ export const api = {
   getGeneration: (id: string) => request<any>(`/generations/${id}`),
   deleteGeneration: (id: string) =>
     request<any>(`/generations/${id}`, { method: "DELETE" }),
+  deleteGenerationImage: (id: string, index: number) =>
+    request<any>(`/generations/${id}/images/${index}`, { method: "DELETE" }),
 
   // studio
   studioEdit: (image_base64: string, edit_prompt: string, gen_id?: string) =>

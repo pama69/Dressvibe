@@ -14,6 +14,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
+import { confirm } from "@/src/utils/confirm";
 
 type GenItem = {
   id: string;
@@ -43,6 +44,18 @@ export default function History() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const handleDelete = async (g: GenItem) => {
+    const ok = await confirm("Eliminare?", `"${g.title || "Generazione"}" e tutte le sue immagini saranno rimossi.`);
+    if (!ok) return;
+    setItems((prev) => prev.filter((x) => x.id !== g.id));
+    try {
+      await api.deleteGeneration(g.id);
+    } catch (e) {
+      console.warn(e);
+      load();
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -75,27 +88,36 @@ export default function History() {
             />
           }
           renderItem={({ item }) => (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => router.push(`/results/${item.id}`)}
-              style={styles.row}
-              testID={`history-item-${item.id}`}
-            >
-              {item.thumbnail ? (
-                <Image source={{ uri: `data:image/png;base64,${item.thumbnail}` }} style={styles.thumb} />
-              ) : (
-                <View style={[styles.thumb, styles.thumbEmpty]}>
-                  <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />
+            <View style={styles.row} testID={`history-item-${item.id}`}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => router.push(`/results/${item.id}`)}
+                style={styles.rowInner}
+              >
+                {item.thumbnail ? (
+                  <Image source={{ uri: `data:image/png;base64,${item.thumbnail}` }} style={styles.thumb} />
+                ) : (
+                  <View style={[styles.thumb, styles.thumbEmpty]}>
+                    <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>{item.title || "Generazione"}</Text>
+                  <Text style={styles.rowMeta}>
+                    {item.image_count || 0} immagini · {item.status === "done" ? "Pronto" : item.status}
+                  </Text>
                 </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowTitle} numberOfLines={1}>{item.title || "Generazione"}</Text>
-                <Text style={styles.rowMeta}>
-                  {item.image_count || 0} immagini · {item.status === "done" ? "Pronto" : item.status}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
-            </TouchableOpacity>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleDelete(item)}
+                style={styles.rowDelete}
+                testID={`history-delete-${item.id}`}
+                hitSlop={8}
+              >
+                <Ionicons name="trash-outline" size={16} color={theme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
           )}
         />
       )}
@@ -113,9 +135,16 @@ const styles = StyleSheet.create({
   emptyTitle: { color: theme.colors.text, fontSize: 16 },
   emptySub: { color: theme.colors.textSecondary, fontSize: 13, textAlign: "center" },
   row: {
-    flexDirection: "row", alignItems: "center", gap: 14,
-    backgroundColor: theme.colors.surface, padding: 12,
+    flexDirection: "row", alignItems: "stretch",
+    backgroundColor: theme.colors.surface,
     borderWidth: 1, borderColor: theme.colors.border,
+  },
+  rowInner: {
+    flex: 1, flexDirection: "row", alignItems: "center", gap: 14, padding: 12,
+  },
+  rowDelete: {
+    paddingHorizontal: 14, alignItems: "center", justifyContent: "center",
+    borderLeftWidth: 1, borderLeftColor: theme.colors.border,
   },
   thumb: { width: 64, height: 80, backgroundColor: theme.colors.surfaceAlt },
   thumbEmpty: { alignItems: "center", justifyContent: "center" },

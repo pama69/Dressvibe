@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
+import { confirm } from "@/src/utils/confirm";
 
 const GAP = 10;
 const CONTENT_PADDING = 24;
@@ -60,6 +61,21 @@ export default function Results() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const handleDeleteImage = async (index: number) => {
+    if (!gen) return;
+    const ok = await confirm("Eliminare immagine?", "Questa variazione sarà rimossa dalla galleria.");
+    if (!ok) return;
+    const prev = gen.images;
+    setGen({ ...gen, images: prev.filter((_, i) => i !== index) });
+    try {
+      await api.deleteGenerationImage(gen.id, index);
+    } catch (e) {
+      console.warn("delete image", e);
+      setGen({ ...gen, images: prev });
+      Alert.alert("Errore", "Impossibile eliminare l'immagine");
+    }
+  };
+
   return (
     <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
       <View style={s.header}>
@@ -95,17 +111,28 @@ export default function Results() {
             </Text>
           }
           renderItem={({ item, index }) => (
-            <TouchableOpacity
-              onPress={() => router.push({ pathname: "/studio/[id]", params: { id: gen.id, index: String(index) } })}
-              activeOpacity={0.85}
-              testID={`result-image-${index}`}
-            >
-              <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW, height: tileH }]} />
-              <View style={s.tileOverlay}>
-                <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
-                <Text style={s.tileText}>Apri Studio</Text>
-              </View>
-            </TouchableOpacity>
+            <View>
+              <TouchableOpacity
+                onPress={() => router.push({ pathname: "/studio/[id]", params: { id: gen.id, index: String(index) } })}
+                activeOpacity={0.85}
+                testID={`result-image-${index}`}
+              >
+                <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW, height: tileH }]} />
+                <View style={s.tileOverlay}>
+                  <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
+                  <Text style={s.tileText}>Apri Studio</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleDeleteImage(index)}
+                style={s.deleteBtn}
+                testID={`result-delete-${index}`}
+                activeOpacity={0.7}
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={14} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
           )}
         />
       )}
@@ -134,4 +161,11 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 4, paddingHorizontal: 8,
   },
   tileText: { color: theme.colors.text, fontSize: 10, letterSpacing: 1 },
+  deleteBtn: {
+    position: "absolute", top: 6, right: 6,
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
+  },
 });
