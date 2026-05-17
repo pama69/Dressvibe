@@ -289,10 +289,10 @@ export default function Studio() {
           <View style={s.section}>
             <Text style={s.sectionLabel}>Condividi</Text>
             <View style={s.shareRow}>
-              <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("telegram")} testID="share-telegram">
+              <TouchableOpacity style={[s.shareBtn, busy && { opacity: 0.6 }]} onPress={() => downloadAndShare("telegram")} testID="share-telegram" disabled={busy} activeOpacity={0.7}>
                 <Ionicons name="paper-plane-outline" size={20} color={theme.colors.text} />
-                <Text style={s.shareLabel}>Pubblica su Telegram</Text>
-                <Text style={s.shareSub}>con bottone "Prenota"</Text>
+                <Text style={s.shareLabel}>🚀 PUBBLICA TG</Text>
+                <Text style={s.shareSub}>con "Prenota"</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("instagram")} testID="share-instagram">
                 <Ionicons name="logo-instagram" size={20} color={theme.colors.text} />
