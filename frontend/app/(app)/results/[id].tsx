@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   Alert,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
@@ -16,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
+import VideoCard from "@/src/components/VideoCard";
 
 const GAP = 10;
 const CONTENT_PADDING = 24;
@@ -40,18 +42,25 @@ export default function Results() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [gen, setGen] = useState<Generation | null>(null);
+  const [videos, setVideos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const confirm = useConfirm();
   const { width: winW } = useWindowDimensions();
   const numColumns = columnsFor(winW);
   const tileW = Math.floor((winW - CONTENT_PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
   const tileH = Math.round(tileW * (16 / 9));
+  const videoTileW = Math.min(280, Math.floor(winW * 0.7));
+  const videoTileH = Math.round(videoTileW * (16 / 9));
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const g = await api.getGeneration(id);
+      const [g, vs] = await Promise.all([
+        api.getGeneration(id),
+        api.listGenerationVideos(id).catch(() => []),
+      ]);
       setGen(g);
+      setVideos(vs || []);
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Generazione non trovata");
       router.back();
@@ -61,6 +70,20 @@ export default function Results() {
   }, [id, router]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const handleDeleteVideo = async (videoId: string) => {
+    const ok = await confirm({
+      title: "Eliminare video?",
+      message: "Il video sarà rimosso definitivamente.",
+    });
+    if (!ok) return;
+    try {
+      await api.deleteVideo(videoId);
+      setVideos((prev) => prev.filter((v) => v.id !== videoId));
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile eliminare");
+    }
+  };
 
   const handleDeleteImage = async (index: number) => {
     if (!gen) return;
@@ -110,9 +133,31 @@ export default function Results() {
           contentContainerStyle={{ paddingHorizontal: CONTENT_PADDING, paddingTop: 12, paddingBottom: 40 }}
           columnWrapperStyle={numColumns > 1 ? { gap: GAP, marginBottom: GAP } : undefined}
           ListHeaderComponent={
-            <Text style={s.hint}>
-              {gen.images.length} variazioni · Tocca un'immagine per modificarla
-            </Text>
+            <View>
+              {videos.length > 0 ? (
+                <View style={s.videosSection}>
+                  <Text style={s.videosTitle}>🎬 Video generati ({videos.length})</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 12, paddingRight: 16 }}
+                  >
+                    {videos.map((v) => (
+                      <VideoCard
+                        key={v.id}
+                        url={v.video_url}
+                        width={videoTileW}
+                        height={videoTileH}
+                        onDelete={() => handleDeleteVideo(v.id)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+              <Text style={s.hint}>
+                {gen.images.length} variazioni · Tocca un'immagine per modificarla
+              </Text>
+            </View>
           }
           renderItem={({ item, index }) => (
             <View>
@@ -159,6 +204,8 @@ const s = StyleSheet.create({
   retry: { marginTop: 8, paddingVertical: 12, paddingHorizontal: 28, backgroundColor: theme.colors.primary },
   retryText: { color: theme.colors.primaryFg, fontWeight: "600" },
   hint: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1, marginBottom: 14 },
+  videosSection: { marginBottom: 22, gap: 10 },
+  videosTitle: { color: theme.colors.text, fontSize: 12, letterSpacing: 1.4, textTransform: "uppercase" },
   tile: { backgroundColor: theme.colors.surface },
   tileOverlay: {
     position: "absolute", bottom: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 6,

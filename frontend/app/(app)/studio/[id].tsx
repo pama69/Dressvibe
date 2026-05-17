@@ -10,18 +10,17 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  Share,
   KeyboardAvoidingView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import * as FileSystem from "expo-file-system/legacy";
-import * as Sharing from "expo-sharing";
 import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
+import VideoCard from "@/src/components/VideoCard";
+import { shareToInstagram, shareGeneric } from "@/src/utils/share";
 
 const QUICK_EDITS = [
   { label: "Rimuovi sfondo", prompt: "Remove the background completely and replace it with a clean white studio background." },
@@ -45,6 +44,18 @@ export default function Studio() {
   const [capBusy, setCapBusy] = useState(false);
   const [genTitle, setGenTitle] = useState("");
   const [videoProviders, setVideoProviders] = useState<any[]>([]);
+  const [videos, setVideos] = useState<any[]>([]);
+
+  const loadVideos = useCallback(async () => {
+    if (!id) return;
+    try {
+      const v = await api.listGenerationVideos(id);
+      setVideos(v || []);
+    } catch (e) {
+      // non-fatal
+      console.warn("loadVideos", e);
+    }
+  }, [id]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -63,6 +74,7 @@ export default function Studio() {
   }, [id, idx, router]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadVideos(); }, [loadVideos]);
 
   useEffect(() => {
     (async () => {
@@ -91,20 +103,34 @@ export default function Studio() {
     if (!image) return;
     setBusy(true);
     try {
-      await api.createVideo({
+      const res = await api.createVideo({
         image_base64: image,
         provider: providerId,
         duration_seconds: 5,
         gen_id: id,
         image_index: idx,
       });
-      const ok = "Video generato! Aprilo dalla Storia.";
-      if (Platform.OS === "web") window.alert(ok); else Alert.alert("OK", ok);
+      // Optimistically add the new video and refresh from server
+      if (res?.video_url) {
+        setVideos((prev) => [...prev, res]);
+      }
+      await loadVideos();
+      const msg = "Il tuo video è pronto qui sotto. Premi play per vederlo.";
+      if (Platform.OS === "web") window.alert("Video pronto\n\n" + msg); else Alert.alert("Video pronto", msg);
     } catch (e: any) {
       const msg = e?.message || "Errore generazione video";
-      if (Platform.OS === "web") window.alert(msg); else Alert.alert("Errore video", msg);
+      if (Platform.OS === "web") window.alert("Errore video\n\n" + msg); else Alert.alert("Errore video", msg);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleDeleteVideo = async (videoId: string) => {
+    try {
+      await api.deleteVideo(videoId);
+      setVideos((prev) => prev.filter((v) => v.id !== videoId));
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile eliminare");
     }
   };
 
@@ -133,9 +159,6 @@ export default function Studio() {
   };
 
   const downloadAndShare = async (target: "telegram" | "instagram" | "share") => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      console.log("[DressVibe] downloadAndShare CALLED. target=", target);
-    }
     if (!image) {
       if (Platform.OS === "web" && typeof window !== "undefined") window.alert("Nessuna immagine selezionata");
       return;
@@ -146,14 +169,12 @@ export default function Studio() {
       try {
         setBusy(true);
         const captionText = caption?.trim() || genTitle || "Disponibile in negozio ✨";
-        console.log("[DressVibe] Calling api.telegramPublish, caption length:", captionText.length, "img len:", image.length);
         const res = await api.telegramPublish({
           image_base64: image,
           caption: captionText,
           gen_id: id,
           image_index: idx,
         });
-        console.log("[DressVibe] Publish OK:", res);
         const msg = `Foto pubblicata sul canale (id ${res.channel_message_id}).\n\nQuando un cliente preme "PRENOTA IL TUO CAPO ORA!" riceverai una notifica.`;
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("Pubblicato su Telegram\n\n" + msg);
@@ -161,7 +182,6 @@ export default function Studio() {
           Alert.alert("Pubblicato su Telegram", msg);
         }
       } catch (e: any) {
-        console.error("[DressVibe] Publish error:", e);
         const errMsg = e?.message || "Impossibile pubblicare";
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("Errore Telegram\n\n" + errMsg);
@@ -175,33 +195,15 @@ export default function Studio() {
     }
 
     try {
-      if (Platform.OS === "web") {
-        const link = document.createElement("a");
-        link.href = `data:image/png;base64,${image}`;
-        link.download = `dressvibe_${id}_${idx}.png`;
-        link.click();
-        if (caption) await Clipboard.setStringAsync(caption);
-        Alert.alert(
-          "Immagine scaricata",
-          caption
-            ? "La caption è stata copiata. Incollala nella tua app preferita."
-            : "Pronto a condividere!"
-        );
-        return;
-      }
-      const path = `${FileSystem.cacheDirectory}dressvibe_${id}_${idx}.png`;
-      await FileSystem.writeAsStringAsync(path, image, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      if (caption) await Clipboard.setStringAsync(caption);
-
-      const ok = await Sharing.isAvailableAsync();
-      if (ok) {
-        await Sharing.shareAsync(path, {
-          dialogTitle: target === "instagram" ? "Pubblica su Instagram" : "Condividi outfit DressVibe",
-        });
+      const opts = {
+        imageBase64: image,
+        caption: caption?.trim() || undefined,
+        fileBaseName: `dressvibe_${id}_${idx}`,
+      };
+      if (target === "instagram") {
+        await shareToInstagram(opts);
       } else {
-        await Share.share({ url: path, message: caption || "Da DressVibe" });
+        await shareGeneric(opts);
       }
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile condividere");
@@ -320,7 +322,7 @@ export default function Studio() {
           <View style={s.section}>
             <Text style={s.sectionLabel}>🎬 Genera Video</Text>
             <Text style={s.videoHint}>
-              Crea una clip 9:16 con la modella che gira su se stessa, cammina, mostra l'outfit.
+              Crea una clip 9:16 da questa foto: la modella gira su se stessa, cammina, mostra l'outfit. ~60–120 secondi di attesa.
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }}>
               {videoProviders.map((p) => (
@@ -338,6 +340,28 @@ export default function Studio() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+
+            {busy && videos.length === 0 ? (
+              <View style={s.videoBusy} testID="video-busy">
+                <ActivityIndicator color={theme.colors.text} />
+                <Text style={s.videoBusyText}>Sto generando il video… può richiedere 1–3 minuti</Text>
+              </View>
+            ) : null}
+
+            {videos.length > 0 ? (
+              <View style={{ gap: 18, marginTop: 4 }} testID="video-list">
+                <Text style={s.videoListLabel}>I tuoi video ({videos.length})</Text>
+                {videos.map((v) => (
+                  <VideoCard
+                    key={v.id}
+                    url={v.video_url}
+                    width={300}
+                    height={Math.round(300 * (16 / 9))}
+                    onDelete={() => handleDeleteVideo(v.id)}
+                  />
+                ))}
+              </View>
+            ) : null}
           </View>
 
           {/* Share */}
@@ -420,6 +444,15 @@ const s = StyleSheet.create({
   },
   videoBtnName: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
   videoBtnSub: { color: theme.colors.textSecondary, fontSize: 10 },
+  videoBusy: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    padding: 14, borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  videoBusyText: { color: theme.colors.textSecondary, fontSize: 12, flex: 1 },
+  videoListLabel: {
+    color: theme.colors.text, fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase",
+  },
   editedBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
     marginHorizontal: 24, marginTop: 12, padding: 10,

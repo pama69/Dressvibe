@@ -34,6 +34,9 @@ TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
 PUBLIC_BASE_URL = os.environ.get('PUBLIC_BASE_URL', '')
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
+XAI_API_KEY = os.environ.get('XAI_API_KEY', '')
+XAI_API_BASE = "https://api.x.ai/v1"
+
 app = FastAPI(title="DressVibe API")
 api_router = APIRouter(prefix="/api")
 
@@ -605,7 +608,7 @@ async def create_video(payload: VideoGenerateRequest, authorization: Optional[st
     if not provider_id:
         raise HTTPException(
             status_code=503,
-            detail="Nessun provider video configurato. Aggiungi una chiave API (Google VEO, Kling o Sora) per abilitare la generazione video.",
+            detail="Nessun provider video configurato. Aggiungi una chiave API (Google VEO, Kling o xAI) per abilitare la generazione video.",
         )
     p = get_provider("video_gen", provider_id)
     if not p:
@@ -613,15 +616,107 @@ async def create_video(payload: VideoGenerateRequest, authorization: Optional[st
     if not p["enabled"]:
         raise HTTPException(
             status_code=503,
-            detail=f"Provider '{p['name']}' non configurato. Manca: {', '.join(p['missing_keys'])}. Forniscimi la chiave e lo attivo.",
+            detail=f"Provider '{p['name']}' non configurato. Manca: {', '.join(p['missing_keys'])}.",
         )
 
-    # Wire up actual provider call here when keys arrive. For now, return a
-    # structured 'not yet implemented' so the frontend can show the right UX.
+    # Build the fashion prompt
+    final_prompt = (payload.prompt or "").strip() or FASHION_VIDEO_PROMPT
+
+    if provider_id == "grok_video":
+        # 1. Store the reference image in MongoDB with a public token
+        token = uuid.uuid4().hex[:14]
+        await db.temp_images.insert_one({
+            "token": token,
+            "user_id": user["user_id"],
+            "image_base64": payload.image_base64,
+            "created_at": datetime.now(timezone.utc),
+            # auto-expires via TTL index
+        })
+        image_url = f"{PUBLIC_BASE_URL}/api/temp-image/{token}"
+
+        # 2. Call xAI Grok Video (image-to-video)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                start_resp = await http.post(
+                    f"{XAI_API_BASE}/videos/generations",
+                    headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": "grok-imagine-video",
+                        "prompt": final_prompt,
+                        "image": {"url": image_url},
+                        "duration": max(3, min(15, payload.duration_seconds)),
+                        "aspect_ratio": "9:16",
+                    },
+                )
+            if start_resp.status_code != 200:
+                logger.error(f"xAI start error {start_resp.status_code}: {start_resp.text}")
+                raise HTTPException(status_code=502, detail=f"xAI start error: {start_resp.text[:300]}")
+            start_data = start_resp.json()
+            request_id = start_data.get("request_id") or start_data.get("id")
+            if not request_id:
+                raise HTTPException(status_code=502, detail=f"xAI: no request_id in response: {start_data}")
+
+            # 3. Poll for completion
+            video_url = None
+            for _ in range(60):  # up to ~3 minutes (60 * 3s)
+                await asyncio.sleep(3)
+                async with httpx.AsyncClient(timeout=20.0) as http:
+                    poll = await http.get(
+                        f"{XAI_API_BASE}/videos/{request_id}",
+                        headers={"Authorization": f"Bearer {XAI_API_KEY}"},
+                    )
+                if poll.status_code != 200:
+                    continue
+                pd = poll.json()
+                status = (pd.get("status") or "").lower()
+                if status in ("succeeded", "completed", "done"):
+                    video_url = pd.get("url") or pd.get("video_url") or (pd.get("video") or {}).get("url")
+                    break
+                if status in ("failed", "error", "cancelled"):
+                    raise HTTPException(status_code=502, detail=f"xAI generation failed: {pd}")
+            if not video_url:
+                raise HTTPException(status_code=504, detail="Timeout: video non pronto entro 3 minuti")
+        finally:
+            # Cleanup temp image regardless
+            try:
+                await db.temp_images.delete_one({"token": token})
+            except Exception:
+                pass
+
+        # 4. Persist the video doc
+        video_id = f"vid_{uuid.uuid4().hex[:12]}"
+        doc = {
+            "id": video_id,
+            "user_id": user["user_id"],
+            "provider": provider_id,
+            "gen_id": payload.gen_id,
+            "image_index": payload.image_index,
+            "video_url": video_url,
+            "duration_seconds": payload.duration_seconds,
+            "prompt": final_prompt,
+            "created_at": datetime.now(timezone.utc),
+        }
+        await db.videos.insert_one(doc.copy())
+        doc.pop("_id", None)
+        return doc
+
     raise HTTPException(
         status_code=501,
         detail=f"Implementazione provider '{p['name']}' in arrivo. Forniscimi la chiave API e completo l'integrazione.",
     )
+
+
+@api_router.get("/temp-image/{token}")
+async def serve_temp_image(token: str):
+    """Serve a temporarily stored base64 image as binary so external AI providers
+    (e.g., xAI Grok Video) can fetch it as image_url. Public on purpose — token
+    is single-use & random."""
+    from fastapi.responses import Response
+    doc = await db.temp_images.find_one({"token": token}, {"_id": 0, "image_base64": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    data = base64.b64decode(doc["image_base64"])
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 @api_router.get("/videos")
@@ -631,6 +726,24 @@ async def list_videos(authorization: Optional[str] = Header(None)):
         {"user_id": user["user_id"]}, {"_id": 0, "video_data": 0}
     ).sort("created_at", -1).to_list(200)
     return items
+
+
+@api_router.get("/generations/{gen_id}/videos")
+async def list_generation_videos(gen_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    items = await db.videos.find(
+        {"user_id": user["user_id"], "gen_id": gen_id}, {"_id": 0}
+    ).sort("created_at", 1).to_list(200)
+    return items
+
+
+@api_router.delete("/videos/{video_id}")
+async def delete_video(video_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    res = await db.videos.delete_one({"id": video_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Video non trovato")
+    return {"ok": True}
 
 
 # =================== Telegram ===================
@@ -832,6 +945,9 @@ async def startup_db():
     await db.virtual_clients.create_index("user_id")
     await db.virtual_clients.create_index("id", unique=True)
     await db.tg_publications.create_index("token", unique=True)
+    await db.temp_images.create_index("created_at", expireAfterSeconds=900)  # 15 min TTL
+    await db.videos.create_index("user_id")
+    await db.videos.create_index("id", unique=True)
     logger.info("DressVibe API started")
 
     # Register Telegram webhook (best-effort)

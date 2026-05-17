@@ -80,11 +80,17 @@ def list_providers() -> Dict[str, List[dict]]:
         ],
         "video_gen": [
             _provider(
+                id="grok_video",
+                name="Grok Video (xAI)",
+                description="Image-to-video, 9:16, movimenti fluidi naturali. Default consigliato per moda.",
+                env_keys=["XAI_API_KEY"],
+                badge="Consigliato moda",
+            ),
+            _provider(
                 id="google_veo",
                 name="Google VEO",
                 description="8s clip cinematografiche di alta qualità.",
                 env_keys=["GOOGLE_VEO_API_KEY"],
-                badge="Consigliato moda",
             ),
             _provider(
                 id="kling",

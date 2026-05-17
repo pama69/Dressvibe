@@ -98,6 +98,11 @@ export const api = {
     image_base64: string; prompt?: string; duration_seconds?: number;
     provider?: string; gen_id?: string; image_index?: number;
   }) => request<any>("/videos", { method: "POST", body }),
+  listVideos: () => request<any[]>("/videos"),
+  listGenerationVideos: (genId: string) =>
+    request<any[]>(`/generations/${genId}/videos`),
+  deleteVideo: (videoId: string) =>
+    request<any>(`/videos/${videoId}`, { method: "DELETE" }),
 
   // caption
   caption: (body: any) =>
