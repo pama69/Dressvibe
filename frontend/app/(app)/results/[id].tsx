@@ -149,6 +149,12 @@ export default function Results() {
                         width={videoTileW}
                         height={videoTileH}
                         onDelete={() => handleDeleteVideo(v.id)}
+                        onOpenStudio={() =>
+                          router.push({
+                            pathname: "/studio/[id]",
+                            params: { id: gen.id, index: String(v.image_index ?? 0) },
+                          })
+                        }
                       />
                     ))}
                   </ScrollView>

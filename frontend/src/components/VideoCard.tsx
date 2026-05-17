@@ -13,10 +13,11 @@ type Props = {
   onShare?: () => void;
   onPublishTelegram?: () => void;
   publishingTelegram?: boolean;
+  onOpenStudio?: () => void;
   showActions?: boolean;
 };
 
-export default function VideoCard({ url, width, height, onDelete, onShare, onPublishTelegram, publishingTelegram, showActions = true }: Props) {
+export default function VideoCard({ url, width, height, onDelete, onShare, onPublishTelegram, publishingTelegram, onOpenStudio, showActions = true }: Props) {
   const player = useVideoPlayer(url, (p) => {
     p.loop = true;
     p.muted = true;
@@ -56,6 +57,16 @@ export default function VideoCard({ url, width, height, onDelete, onShare, onPub
       </View>
       {showActions ? (
         <View style={s.actions}>
+          {onOpenStudio ? (
+            <TouchableOpacity
+              onPress={onOpenStudio}
+              style={[s.actionBtn, s.studioBtn]}
+              testID="video-open-studio"
+            >
+              <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
+              <Text style={s.actionText}>Apri Studio</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity onPress={handleOpen} style={s.actionBtn} testID="video-open">
             <Ionicons name="open-outline" size={14} color={theme.colors.text} />
             <Text style={s.actionText}>Apri</Text>
@@ -111,6 +122,10 @@ const s = StyleSheet.create({
   tgBtn: {
     borderColor: "#2AABEE",
     backgroundColor: "rgba(42,171,238,0.15)",
+  },
+  studioBtn: {
+    borderColor: theme.colors.magic2,
+    backgroundColor: "rgba(225,29,72,0.12)",
   },
   danger: { borderColor: theme.colors.error },
 });
