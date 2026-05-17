@@ -81,9 +81,10 @@ memory/test_credentials.md
 # Mobile development
 android-sdk/-e 
 # Environment and credential files
-.env
-.env.*
-*.env
+# NOTE: .env files are intentionally tracked — Emergent rewrites them at deploy time.
+# .env
+# .env.*
+# *.env
 credentials.json
 *.pem
 *.key
