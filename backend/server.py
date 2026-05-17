@@ -14,6 +14,7 @@ import httpx
 import base64
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from providers import list_providers, get_provider, default_provider
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -89,6 +90,7 @@ class GenerationCreate(BaseModel):
     shoes: str = "comoda_fashion"  # alta_elegante/comoda_fashion/scarpa_bassa
     num_variations: int = 4
     title: Optional[str] = None
+    provider: Optional[str] = None  # image_gen provider id; None = default
 
 
 class Generation(BaseModel):
@@ -106,6 +108,17 @@ class StudioEditRequest(BaseModel):
     image_base64: str
     edit_prompt: str  # what to do (change background to beach, add price text, etc.)
     gen_id: Optional[str] = None  # if provided, append the edited image to that generation's gallery
+    provider: Optional[str] = None  # image_edit provider id; None = default
+
+
+class VideoGenerateRequest(BaseModel):
+    """Generate a fashion video clip from a base reference image."""
+    image_base64: str
+    prompt: Optional[str] = None  # extra instructions; default fashion prompt is applied
+    duration_seconds: int = 5  # 3-8
+    provider: Optional[str] = None  # required video_gen provider id
+    gen_id: Optional[str] = None
+    image_index: Optional[int] = None
 
 
 class VirtualClientCreate(BaseModel):
@@ -566,8 +579,61 @@ async def stats(authorization: Optional[str] = Header(None)):
     }
 
 
+# =================== Providers (multi-AI) ===================
+@api_router.get("/providers")
+async def providers(authorization: Optional[str] = Header(None)):
+    await get_current_user(authorization)
+    return list_providers()
+
+
+# =================== Video generation ===================
+FASHION_VIDEO_PROMPT = (
+    "Fashion editorial video of the same person from the reference photo, "
+    "wearing the same exact outfit. They perform natural fluid movements: "
+    "a slow 360-degree turn showing the outfit from every angle, then a confident "
+    "walk toward the camera with subtle smile and hand-on-hip pose. "
+    "Cinematic camera, soft natural lighting, vertical 9:16 aspect ratio, "
+    "full body always visible from head to feet, no morphing, photorealistic, "
+    "no extra fingers, anatomically correct."
+)
+
+
+@api_router.post("/videos")
+async def create_video(payload: VideoGenerateRequest, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    provider_id = payload.provider or default_provider("video_gen")
+    if not provider_id:
+        raise HTTPException(
+            status_code=503,
+            detail="Nessun provider video configurato. Aggiungi una chiave API (Google VEO, Kling o Sora) per abilitare la generazione video.",
+        )
+    p = get_provider("video_gen", provider_id)
+    if not p:
+        raise HTTPException(status_code=400, detail=f"Provider video '{provider_id}' sconosciuto")
+    if not p["enabled"]:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Provider '{p['name']}' non configurato. Manca: {', '.join(p['missing_keys'])}. Forniscimi la chiave e lo attivo.",
+        )
+
+    # Wire up actual provider call here when keys arrive. For now, return a
+    # structured 'not yet implemented' so the frontend can show the right UX.
+    raise HTTPException(
+        status_code=501,
+        detail=f"Implementazione provider '{p['name']}' in arrivo. Forniscimi la chiave API e completo l'integrazione.",
+    )
+
+
+@api_router.get("/videos")
+async def list_videos(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    items = await db.videos.find(
+        {"user_id": user["user_id"]}, {"_id": 0, "video_data": 0}
+    ).sort("created_at", -1).to_list(200)
+    return items
+
+
 # =================== Telegram ===================
-class TelegramPublishRequest(BaseModel):
     image_base64: str
     caption: Optional[str] = None
     gen_id: Optional[str] = None
@@ -584,6 +650,14 @@ async def tg_api(method: str, payload: dict, files: Optional[dict] = None):
         return resp.status_code, resp.json()
     except Exception:
         return resp.status_code, {"raw": resp.text}
+
+class TelegramPublishRequest(BaseModel):
+    image_base64: str
+    caption: Optional[str] = None
+    gen_id: Optional[str] = None
+    image_index: Optional[int] = None
+
+
 
 
 @api_router.post("/telegram/publish")

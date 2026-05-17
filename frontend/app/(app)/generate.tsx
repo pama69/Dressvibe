@@ -81,11 +81,17 @@ export default function Generate() {
   const [bg, setBg] = useState("white_studio");
   const [shoes, setShoes] = useState("comoda_fashion");
   const [variations, setVariations] = useState(4);
+  const [providers, setProviders] = useState<any[]>([]);
+  const [aiProvider, setAiProvider] = useState<string>("gemini_nano_banana");
 
   const load = useCallback(async () => {
     try {
       const list = await api.listGarments();
       setGarments(list);
+      try {
+        const pv = await api.listProviders();
+        setProviders(pv.image_gen || []);
+      } catch {}
     } catch (e) {
       console.warn(e);
     }
@@ -113,6 +119,7 @@ export default function Generate() {
       background: bg,
       shoes,
       num_variations: variations,
+      provider: aiProvider,
     });
     router.push("/generating");
   };
@@ -201,6 +208,39 @@ export default function Generate() {
           </View>
         </View>
 
+        {/* Step 5 — AI provider */}
+        {providers.length > 0 && (
+          <View style={styles.step}>
+            <Text style={styles.stepLabel}>5 — Provider AI</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 12 }}>
+              {providers.map((p) => {
+                const active = aiProvider === p.id;
+                const disabled = !p.enabled;
+                return (
+                  <TouchableOpacity
+                    key={p.id}
+                    onPress={() => !disabled && setAiProvider(p.id)}
+                    disabled={disabled}
+                    style={[
+                      styles.providerChip,
+                      active && styles.providerChipActive,
+                      disabled && styles.providerChipDisabled,
+                    ]}
+                    testID={`provider-${p.id}`}
+                  >
+                    <Text style={[styles.providerName, active && styles.providerNameActive]}>
+                      {p.name}
+                    </Text>
+                    <Text style={styles.providerDesc}>
+                      {disabled ? `🔒 ${p.missing_keys?.join(', ')}` : p.description}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
         <View style={{ height: 120 }} />
       </ScrollView>
 
@@ -256,6 +296,15 @@ const styles = StyleSheet.create({
   varBtnActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   varText: { color: theme.colors.text, fontSize: 16, fontWeight: "500" },
   varTextActive: { color: theme.colors.primaryFg },
+  providerChip: {
+    padding: 14, borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface, minWidth: 200, gap: 6,
+  },
+  providerChipActive: { borderColor: theme.colors.text, borderWidth: 2 },
+  providerChipDisabled: { opacity: 0.45 },
+  providerName: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
+  providerNameActive: { color: theme.colors.text },
+  providerDesc: { color: theme.colors.textSecondary, fontSize: 10, lineHeight: 14 },
   ctaWrap: {
     position: "absolute", left: 0, right: 0, bottom: 0,
     padding: 20, backgroundColor: theme.colors.bg,

@@ -9,6 +9,7 @@ type GenParams = {
   background: string;
   shoes: string;
   num_variations: number;
+  provider?: string;
 };
 
 let _params: GenParams | null = null;

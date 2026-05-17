@@ -86,6 +86,19 @@ export const api = {
   deleteClient: (id: string) =>
     request<any>(`/clients/${id}`, { method: "DELETE" }),
 
+  // providers
+  listProviders: () =>
+    request<Record<string, Array<{
+      id: string; name: string; description: string; enabled: boolean;
+      badge: string | null; missing_keys?: string[];
+    }>>>("/providers"),
+
+  // videos
+  createVideo: (body: {
+    image_base64: string; prompt?: string; duration_seconds?: number;
+    provider?: string; gen_id?: string; image_index?: number;
+  }) => request<any>("/videos", { method: "POST", body }),
+
   // caption
   caption: (body: any) =>
     request<{ caption: string }>("/caption", { method: "POST", body }),

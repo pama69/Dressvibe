@@ -44,6 +44,7 @@ export default function Studio() {
   const [caption, setCaption] = useState("");
   const [capBusy, setCapBusy] = useState(false);
   const [genTitle, setGenTitle] = useState("");
+  const [videoProviders, setVideoProviders] = useState<any[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -63,6 +64,15 @@ export default function Studio() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const pv = await api.listProviders();
+        setVideoProviders(pv.video_gen || []);
+      } catch {}
+    })();
+  }, []);
+
   const applyEdit = async (prompt: string) => {
     if (!image) return;
     setBusy(true);
@@ -72,6 +82,27 @@ export default function Studio() {
       setEdited(true);
     } catch (e: any) {
       Alert.alert("Modifica non riuscita", e?.message || "Riprova");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleGenerateVideo = async (providerId: string) => {
+    if (!image) return;
+    setBusy(true);
+    try {
+      await api.createVideo({
+        image_base64: image,
+        provider: providerId,
+        duration_seconds: 5,
+        gen_id: id,
+        image_index: idx,
+      });
+      const ok = "Video generato! Aprilo dalla Storia.";
+      if (Platform.OS === "web") window.alert(ok); else Alert.alert("OK", ok);
+    } catch (e: any) {
+      const msg = e?.message || "Errore generazione video";
+      if (Platform.OS === "web") window.alert(msg); else Alert.alert("Errore video", msg);
     } finally {
       setBusy(false);
     }
@@ -285,6 +316,30 @@ export default function Studio() {
             ) : null}
           </View>
 
+          {/* Genera Video */}
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>🎬 Genera Video</Text>
+            <Text style={s.videoHint}>
+              Crea una clip 9:16 con la modella che gira su se stessa, cammina, mostra l'outfit.
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }}>
+              {videoProviders.map((p) => (
+                <TouchableOpacity
+                  key={p.id}
+                  onPress={() => handleGenerateVideo(p.id)}
+                  disabled={!p.enabled || busy}
+                  style={[s.videoBtn, !p.enabled && { opacity: 0.45 }]}
+                  testID={`video-${p.id}`}
+                >
+                  <Text style={s.videoBtnName}>{p.name}</Text>
+                  <Text style={s.videoBtnSub}>
+                    {p.enabled ? "✨ Pronto" : `🔒 ${p.missing_keys?.join(", ")}`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+
           {/* Share */}
           <View style={s.section}>
             <Text style={s.sectionLabel}>Condividi</Text>
@@ -358,6 +413,13 @@ const s = StyleSheet.create({
   },
   shareLabel: { color: theme.colors.text, fontSize: 11, letterSpacing: 0.6, textAlign: "center" },
   shareSub: { color: theme.colors.textMuted, fontSize: 9, textAlign: "center" },
+  videoHint: { color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16, marginBottom: 4 },
+  videoBtn: {
+    paddingVertical: 14, paddingHorizontal: 18, borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface, minWidth: 160, gap: 4,
+  },
+  videoBtnName: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
+  videoBtnSub: { color: theme.colors.textSecondary, fontSize: 10 },
   editedBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
     marginHorizontal: 24, marginTop: 12, padding: 10,
@@ -366,3 +428,4 @@ const s = StyleSheet.create({
   },
   editedText: { color: theme.colors.success, fontSize: 12, flex: 1 },
 });
+
