@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, LogBox } from "react-native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -8,6 +8,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { AuthProvider } from "@/src/contexts/AuthContext";
 import { ConfirmProvider } from "@/src/contexts/ConfirmContext";
 import { theme } from "@/src/theme";
+
+// Suppress non-fatal warnings that clutter the dev overlay on Expo Go.
+LogBox.ignoreLogs([
+  "Font file for ionicons is empty",
+  "ExpoFontLoader.loadAsync",
+  "shadow*",
+  "Require cycle:",
+]);
 
 export default function RootLayout() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
