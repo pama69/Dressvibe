@@ -96,21 +96,18 @@ export default function Upload() {
 
   const takePhoto = async () => {
     try {
-      if (Platform.OS === "web") {
-        // Same input on web — opens file picker.
-        await pickImage();
-        return;
-      }
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") {
-        notify("Permesso negato", "Concedi l'accesso alla fotocamera per scattare una foto.");
-        return;
+      if (Platform.OS !== "web") {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== "granted") {
+          notify("Permesso negato", "Concedi l'accesso alla fotocamera per scattare una foto.");
+          return;
+        }
       }
       const res = await ImagePicker.launchCameraAsync({
         base64: true,
         quality: 0.55,
-        allowsEditing: true,
-        aspect: [4, 5],
+        allowsEditing: Platform.OS !== "web",
+        aspect: Platform.OS !== "web" ? [4, 5] : undefined,
       });
       if (res.canceled || !res.assets?.[0]) return;
       const b64 = await assetToBase64(res.assets[0]);
@@ -187,12 +184,10 @@ export default function Upload() {
                 <Ionicons name="images-outline" size={26} color={theme.colors.text} />
                 <Text style={s.pickText}>{Platform.OS === "web" ? "Scegli foto" : "Galleria"}</Text>
               </TouchableOpacity>
-              {Platform.OS !== "web" && (
-                <TouchableOpacity style={s.pickBox} onPress={takePhoto} testID="upload-from-camera">
-                  <Ionicons name="camera-outline" size={26} color={theme.colors.text} />
-                  <Text style={s.pickText}>Scatta foto</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity style={s.pickBox} onPress={takePhoto} testID="upload-from-camera">
+                <Ionicons name="camera-outline" size={26} color={theme.colors.text} />
+                <Text style={s.pickText}>Scatta foto</Text>
+              </TouchableOpacity>
             </View>
           )}
 
