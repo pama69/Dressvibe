@@ -2,7 +2,8 @@ import { Tabs, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { theme } from "@/src/theme";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, Platform } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Tab icon factory (module-level — prevents component remount on each render).
 const tabIcon = (name: keyof typeof Ionicons.glyphMap) =>
@@ -12,6 +13,7 @@ const tabIcon = (name: keyof typeof Ionicons.glyphMap) =>
 
 export default function AppTabs() {
   const { user, loading } = useAuth();
+  const insets = useSafeAreaInsets();
 
   if (loading) {
     return (
@@ -21,6 +23,11 @@ export default function AppTabs() {
     );
   }
   if (!user) return <Redirect href="/login" />;
+
+  // Push the tab bar above the system gesture / nav bar.
+  // On Android (no inset reported) keep a sensible minimum.
+  const safeBottom = Math.max(insets.bottom, Platform.OS === "android" ? 12 : 0);
+  const tabBarHeight = 60 + safeBottom;
 
   return (
     <Tabs
@@ -32,9 +39,9 @@ export default function AppTabs() {
           backgroundColor: theme.colors.bg,
           borderTopColor: theme.colors.border,
           borderTopWidth: 1,
-          height: 72,
+          height: tabBarHeight,
           paddingTop: 8,
-          paddingBottom: 16,
+          paddingBottom: safeBottom + 8,
         },
         tabBarLabelStyle: {
           fontSize: 10,
