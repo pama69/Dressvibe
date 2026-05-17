@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
-  Dimensions,
+  useWindowDimensions,
   Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -16,10 +16,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 
-const { width } = Dimensions.get("window");
-const COL = 2;
-const GAP = 8;
-const TILE = (width - 24 * 2 - GAP) / COL;
+const GAP = 10;
+const CONTENT_PADDING = 24;
+
+function columnsFor(width: number): number {
+  if (width >= 1400) return 6;
+  if (width >= 1100) return 5;
+  if (width >= 820) return 4;
+  if (width >= 560) return 3;
+  return 2;
+}
 
 type Generation = {
   id: string;
@@ -34,6 +40,10 @@ export default function Results() {
   const router = useRouter();
   const [gen, setGen] = useState<Generation | null>(null);
   const [loading, setLoading] = useState(true);
+  const { width: winW } = useWindowDimensions();
+  const numColumns = columnsFor(winW);
+  const tileW = Math.floor((winW - CONTENT_PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
+  const tileH = Math.round(tileW * (16 / 9));
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -74,10 +84,11 @@ export default function Results() {
       ) : (
         <FlatList
           data={gen.images}
+          key={`cols-${numColumns}`}
           keyExtractor={(_img, i) => `${i}`}
-          numColumns={COL}
-          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 12, paddingBottom: 40 }}
-          columnWrapperStyle={{ gap: GAP, marginBottom: GAP }}
+          numColumns={numColumns}
+          contentContainerStyle={{ paddingHorizontal: CONTENT_PADDING, paddingTop: 12, paddingBottom: 40 }}
+          columnWrapperStyle={numColumns > 1 ? { gap: GAP, marginBottom: GAP } : undefined}
           ListHeaderComponent={
             <Text style={s.hint}>
               {gen.images.length} variazioni · Tocca un'immagine per modificarla
@@ -89,7 +100,7 @@ export default function Results() {
               activeOpacity={0.85}
               testID={`result-image-${index}`}
             >
-              <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: TILE, height: TILE * (16 / 9) }]} />
+              <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW, height: tileH }]} />
               <View style={s.tileOverlay}>
                 <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
                 <Text style={s.tileText}>Apri Studio</Text>

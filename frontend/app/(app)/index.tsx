@@ -8,6 +8,7 @@ import {
   Image,
   RefreshControl,
   ActivityIndicator,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -24,12 +25,27 @@ type Garment = {
   price?: number | null;
 };
 
+const PADDING = 24;
+const GAP = 12;
+
+function colsFor(width: number): number {
+  if (width >= 1400) return 7;
+  if (width >= 1100) return 6;
+  if (width >= 820) return 5;
+  if (width >= 560) return 3;
+  return 2;
+}
+
 export default function Galleria() {
   const router = useRouter();
   const { user } = useAuth();
   const [items, setItems] = useState<Garment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const { width: winW } = useWindowDimensions();
+  const numColumns = colsFor(winW);
+  const tileW = Math.floor((winW - PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
+  const tileH = Math.round(tileW / 0.78);
 
   const load = useCallback(async () => {
     try {
@@ -104,11 +120,12 @@ export default function Galleria() {
       ) : (
         <FlatList
           data={items}
+          key={`cols-${numColumns}`}
           keyExtractor={(i) => i.id}
-          numColumns={2}
+          numColumns={numColumns}
           contentContainerStyle={styles.list}
-          columnWrapperStyle={{ gap: 12 }}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          columnWrapperStyle={numColumns > 1 ? { gap: GAP } : undefined}
+          ItemSeparatorComponent={() => <View style={{ height: GAP }} />}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -117,7 +134,7 @@ export default function Galleria() {
             />
           }
           renderItem={({ item }) => (
-            <View style={styles.card} testID={`garment-card-${item.id}`}>
+            <View style={[styles.card, { width: tileW, height: tileH }]} testID={`garment-card-${item.id}`}>
               <Image
                 source={{ uri: `data:image/png;base64,${item.image_base64}` }}
                 style={styles.cardImg}
@@ -196,10 +213,8 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary,
   },
   emptyBtnText: { color: theme.colors.primaryFg, fontWeight: "600", letterSpacing: 0.4 },
-  list: { paddingHorizontal: 24, paddingBottom: 96 },
+  list: { paddingHorizontal: PADDING, paddingBottom: 96 },
   card: {
-    flex: 1,
-    aspectRatio: 0.78,
     backgroundColor: theme.colors.surface,
     borderWidth: 1,
     borderColor: theme.colors.border,

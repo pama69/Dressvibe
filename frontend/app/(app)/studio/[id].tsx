@@ -285,7 +285,10 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: theme.colors.border,
   },
   headerTitle: { color: theme.colors.text, fontSize: 14, letterSpacing: 2, textTransform: "uppercase" },
-  imageWrap: { marginHorizontal: 24, marginTop: 16, aspectRatio: 9 / 16, backgroundColor: theme.colors.surface, position: "relative" },
+  imageWrap: {
+    marginTop: 16, aspectRatio: 9 / 16, backgroundColor: theme.colors.surface, position: "relative",
+    alignSelf: "center", width: "100%", maxWidth: 380,
+  },
   imagePh: { flex: 1, alignItems: "center", justifyContent: "center" },
   image: { width: "100%", height: "100%" },
   busyOverlay: {
