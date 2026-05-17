@@ -640,6 +640,22 @@ async def telegram_webhook(secret: str, request: Request):
     if not TELEGRAM_WEBHOOK_SECRET or secret != TELEGRAM_WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
     update = await request.json()
+    # Diagnostic logging: capture forwarded messages (to discover real channel IDs)
+    try:
+        msg = update.get("message") or update.get("channel_post") or {}
+        if msg:
+            await db.tg_updates_log.insert_one({
+                "raw": update,
+                "received_at": datetime.now(timezone.utc),
+            })
+            fwd = msg.get("forward_from_chat") or msg.get("forward_origin", {}).get("chat")
+            if fwd:
+                logger.info(f"[TG-DIAG] forwarded from chat id={fwd.get('id')} title={fwd.get('title')} type={fwd.get('type')}")
+            elif msg.get("chat"):
+                logger.info(f"[TG-DIAG] direct message from chat id={msg['chat'].get('id')} type={msg['chat'].get('type')} title={msg['chat'].get('title')}")
+    except Exception as e:
+        logger.warning(f"diag log failed: {e}")
+
     cq = update.get("callback_query")
     if cq:
         data = cq.get("data", "")
