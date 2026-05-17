@@ -103,6 +103,37 @@ export default function Studio() {
 
   const downloadAndShare = async (target: "telegram" | "instagram" | "share") => {
     if (!image) return;
+
+    // Publish to the configured Telegram channel with a booking button
+    if (target === "telegram") {
+      try {
+        setBusy(true);
+        const captionText = caption?.trim() || genTitle || "Disponibile in negozio ✨";
+        const res = await api.telegramPublish({
+          image_base64: image,
+          caption: captionText,
+          gen_id: id,
+          image_index: idx,
+        });
+        const msg = `Foto pubblicata sul canale (id ${res.channel_message_id}).\n\nQuando un cliente preme "PRENOTA IL TUO CAPO ORA!" riceverai una notifica con i suoi dati.`;
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert("Pubblicato su Telegram\n\n" + msg);
+        } else {
+          Alert.alert("Pubblicato su Telegram", msg);
+        }
+      } catch (e: any) {
+        const errMsg = e?.message || "Impossibile pubblicare";
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert("Errore Telegram\n\n" + errMsg);
+        } else {
+          Alert.alert("Errore Telegram", errMsg);
+        }
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     try {
       if (Platform.OS === "web") {
         const link = document.createElement("a");
@@ -124,21 +155,13 @@ export default function Studio() {
       });
       if (caption) await Clipboard.setStringAsync(caption);
 
-      if (target === "share") {
-        const ok = await Sharing.isAvailableAsync();
-        if (ok) {
-          await Sharing.shareAsync(path, { dialogTitle: "Condividi outfit DressVibe" });
-        } else {
-          await Share.share({ url: path, message: caption || "Da DressVibe" });
-        }
+      const ok = await Sharing.isAvailableAsync();
+      if (ok) {
+        await Sharing.shareAsync(path, {
+          dialogTitle: target === "instagram" ? "Pubblica su Instagram" : "Condividi outfit DressVibe",
+        });
       } else {
-        // Telegram & Instagram → invoke share sheet (user picks the app)
-        const ok = await Sharing.isAvailableAsync();
-        if (ok) {
-          await Sharing.shareAsync(path, { dialogTitle: target === "telegram" ? "Invia su Telegram" : "Pubblica su Instagram" });
-        } else {
-          await Share.share({ url: path, message: caption || "Da DressVibe" });
-        }
+        await Share.share({ url: path, message: caption || "Da DressVibe" });
       }
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile condividere");
