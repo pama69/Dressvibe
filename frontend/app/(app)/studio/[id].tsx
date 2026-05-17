@@ -259,7 +259,8 @@ export default function Studio() {
             <View style={s.shareRow}>
               <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("telegram")} testID="share-telegram">
                 <Ionicons name="paper-plane-outline" size={20} color={theme.colors.text} />
-                <Text style={s.shareLabel}>Telegram</Text>
+                <Text style={s.shareLabel}>Pubblica su Telegram</Text>
+                <Text style={s.shareSub}>con bottone "Prenota"</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("instagram")} testID="share-instagram">
                 <Ionicons name="logo-instagram" size={20} color={theme.colors.text} />
@@ -323,7 +324,8 @@ const s = StyleSheet.create({
     flex: 1, alignItems: "center", paddingVertical: 18, gap: 6,
     borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
   },
-  shareLabel: { color: theme.colors.text, fontSize: 11, letterSpacing: 0.6 },
+  shareLabel: { color: theme.colors.text, fontSize: 11, letterSpacing: 0.6, textAlign: "center" },
+  shareSub: { color: theme.colors.textMuted, fontSize: 9, textAlign: "center" },
   editedBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
     marginHorizontal: 24, marginTop: 12, padding: 10,

@@ -26,6 +26,13 @@ db = client[os.environ['DB_NAME']]
 EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
 EMERGENT_AUTH_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '')
+TELEGRAM_ADMIN_CHAT_ID = os.environ.get('TELEGRAM_ADMIN_CHAT_ID', '')
+TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
+PUBLIC_BASE_URL = os.environ.get('PUBLIC_BASE_URL', '')
+TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
 app = FastAPI(title="DressVibe API")
 api_router = APIRouter(prefix="/api")
 
@@ -559,6 +566,156 @@ async def stats(authorization: Optional[str] = Header(None)):
     }
 
 
+# =================== Telegram ===================
+class TelegramPublishRequest(BaseModel):
+    image_base64: str
+    caption: Optional[str] = None
+    gen_id: Optional[str] = None
+    image_index: Optional[int] = None
+
+
+async def tg_api(method: str, payload: dict, files: Optional[dict] = None):
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        if files:
+            resp = await http.post(f"{TELEGRAM_API}/{method}", data=payload, files=files)
+        else:
+            resp = await http.post(f"{TELEGRAM_API}/{method}", json=payload)
+    try:
+        return resp.status_code, resp.json()
+    except Exception:
+        return resp.status_code, {"raw": resp.text}
+
+
+@api_router.post("/telegram/publish")
+async def telegram_publish(payload: TelegramPublishRequest, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        raise HTTPException(status_code=503, detail="Telegram non configurato")
+
+    token = uuid.uuid4().hex[:14]
+    caption = (payload.caption or "").strip() or "Disponibile in negozio ✨"
+    if len(caption) > 1000:
+        caption = caption[:1000] + "…"
+
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "PRENOTA IL TUO CAPO ORA!", "callback_data": f"book:{token}"}
+        ]]
+    }
+
+    photo_bytes = base64.b64decode(payload.image_base64)
+    files = {"photo": ("outfit.png", photo_bytes, "image/png")}
+    data = {
+        "chat_id": TELEGRAM_CHANNEL_ID,
+        "caption": caption,
+        "reply_markup": __import__("json").dumps(keyboard),
+    }
+    status, body = await tg_api("sendPhoto", data, files=files)
+    if status != 200 or not body.get("ok"):
+        logger.error(f"Telegram sendPhoto error {status}: {body}")
+        raise HTTPException(status_code=502, detail=f"Telegram error: {body.get('description', 'sendPhoto failed')}")
+
+    result = body["result"]
+    message_id = result["message_id"]
+    file_id = None
+    if result.get("photo"):
+        file_id = result["photo"][-1]["file_id"]
+
+    await db.tg_publications.insert_one({
+        "token": token,
+        "user_id": user["user_id"],
+        "gen_id": payload.gen_id,
+        "image_index": payload.image_index,
+        "channel_id": TELEGRAM_CHANNEL_ID,
+        "channel_message_id": message_id,
+        "caption": caption,
+        "file_id": file_id,
+        "created_at": datetime.now(timezone.utc),
+    })
+    return {"ok": True, "channel_message_id": message_id, "token": token}
+
+
+@api_router.post("/telegram/webhook/{secret}")
+async def telegram_webhook(secret: str, request: Request):
+    if not TELEGRAM_WEBHOOK_SECRET or secret != TELEGRAM_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
+    update = await request.json()
+    cq = update.get("callback_query")
+    if cq:
+        data = cq.get("data", "")
+        from_user = cq.get("from", {}) or {}
+        user_id_tg = from_user.get("id")
+        username = from_user.get("username")
+        first = from_user.get("first_name", "")
+        last = from_user.get("last_name", "")
+        full_name = (first + " " + last).strip() or "Cliente"
+        handle = f"@{username}" if username else (f"id:{user_id_tg}" if user_id_tg else "anonimo")
+
+        if data.startswith("book:"):
+            token = data.split(":", 1)[1]
+            pub = await db.tg_publications.find_one({"token": token}, {"_id": 0})
+
+            # 1. Acknowledge the tap (always shows a Telegram-native toast)
+            await tg_api("answerCallbackQuery", {
+                "callback_query_id": cq["id"],
+                "text": "✓ Prenotazione inviata! Sarai contattata al più presto.",
+                "show_alert": True,
+            })
+
+            # 2. Try to DM the user a private confirmation
+            if user_id_tg:
+                await tg_api("sendMessage", {
+                    "chat_id": user_id_tg,
+                    "text": "Grazie, sarai contattata al più presto per la conferma 💛",
+                })
+
+            # 3. Notify the admin
+            if TELEGRAM_ADMIN_CHAT_ID:
+                now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+                admin_text = (
+                    f"🔔 *Nuova prenotazione*\n"
+                    f"👤 Cliente: {full_name} ({handle})\n"
+                    f"🕒 Orario: {now}\n"
+                )
+                if pub and pub.get("caption"):
+                    admin_text += f"📝 Capo: {pub['caption'][:200]}\n"
+                # Forward the original photo to admin, fallback to text-only
+                if pub and pub.get("file_id"):
+                    await tg_api("sendPhoto", {
+                        "chat_id": TELEGRAM_ADMIN_CHAT_ID,
+                        "photo": pub["file_id"],
+                        "caption": admin_text,
+                        "parse_mode": "Markdown",
+                    })
+                else:
+                    await tg_api("sendMessage", {
+                        "chat_id": TELEGRAM_ADMIN_CHAT_ID,
+                        "text": admin_text,
+                        "parse_mode": "Markdown",
+                    })
+
+            # 4. Log the booking
+            await db.tg_bookings.insert_one({
+                "token": token,
+                "tg_user_id": user_id_tg,
+                "tg_username": username,
+                "tg_name": full_name,
+                "created_at": datetime.now(timezone.utc),
+            })
+        else:
+            await tg_api("answerCallbackQuery", {"callback_query_id": cq["id"]})
+    return {"ok": True}
+
+
+@api_router.get("/telegram/status")
+async def telegram_status(authorization: Optional[str] = Header(None)):
+    await get_current_user(authorization)
+    return {
+        "configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID),
+        "channel_id": TELEGRAM_CHANNEL_ID if TELEGRAM_BOT_TOKEN else None,
+    }
+
+
 # =================== App init ===================
 app.include_router(api_router)
 
@@ -584,7 +741,24 @@ async def startup_db():
     await db.generations.create_index("id", unique=True)
     await db.virtual_clients.create_index("user_id")
     await db.virtual_clients.create_index("id", unique=True)
+    await db.tg_publications.create_index("token", unique=True)
     logger.info("DressVibe API started")
+
+    # Register Telegram webhook (best-effort)
+    if TELEGRAM_BOT_TOKEN and PUBLIC_BASE_URL and TELEGRAM_WEBHOOK_SECRET:
+        try:
+            webhook_url = f"{PUBLIC_BASE_URL}/api/telegram/webhook/{TELEGRAM_WEBHOOK_SECRET}"
+            async with httpx.AsyncClient(timeout=10.0) as http:
+                resp = await http.post(
+                    f"{TELEGRAM_API}/setWebhook",
+                    json={
+                        "url": webhook_url,
+                        "allowed_updates": ["callback_query", "message"],
+                    },
+                )
+            logger.info(f"Telegram setWebhook: {resp.status_code} {resp.text[:200]}")
+        except Exception as e:
+            logger.warning(f"Telegram setWebhook failed: {e}")
 
 
 @app.on_event("shutdown")

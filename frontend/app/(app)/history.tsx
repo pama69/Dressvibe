@@ -14,7 +14,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
-import { confirm } from "@/src/utils/confirm";
+import { useConfirm } from "@/src/contexts/ConfirmContext";
 
 type GenItem = {
   id: string;
@@ -27,6 +27,7 @@ type GenItem = {
 
 export default function History() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [items, setItems] = useState<GenItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,7 +47,10 @@ export default function History() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const handleDelete = async (g: GenItem) => {
-    const ok = await confirm("Eliminare?", `"${g.title || "Generazione"}" e tutte le sue immagini saranno rimossi.`);
+    const ok = await confirm({
+      title: "Eliminare la generazione?",
+      message: `"${g.title || "Generazione"}" e tutte le sue immagini saranno rimossi.`,
+    });
     if (!ok) return;
     setItems((prev) => prev.filter((x) => x.id !== g.id));
     try {

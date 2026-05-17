@@ -15,7 +15,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
-import { confirm } from "@/src/utils/confirm";
+import { useConfirm } from "@/src/contexts/ConfirmContext";
 
 const GAP = 10;
 const CONTENT_PADDING = 24;
@@ -41,6 +41,7 @@ export default function Results() {
   const router = useRouter();
   const [gen, setGen] = useState<Generation | null>(null);
   const [loading, setLoading] = useState(true);
+  const confirm = useConfirm();
   const { width: winW } = useWindowDimensions();
   const numColumns = columnsFor(winW);
   const tileW = Math.floor((winW - CONTENT_PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
@@ -63,7 +64,10 @@ export default function Results() {
 
   const handleDeleteImage = async (index: number) => {
     if (!gen) return;
-    const ok = await confirm("Eliminare immagine?", "Questa variazione sarà rimossa dalla galleria.");
+    const ok = await confirm({
+      title: "Eliminare immagine?",
+      message: "Questa variazione sarà rimossa dalla galleria.",
+    });
     if (!ok) return;
     const prev = gen.images;
     setGen({ ...gen, images: prev.filter((_, i) => i !== index) });

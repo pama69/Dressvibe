@@ -16,7 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { useAuth } from "@/src/contexts/AuthContext";
-import { confirm } from "@/src/utils/confirm";
+import { useConfirm } from "@/src/contexts/ConfirmContext";
 
 type Garment = {
   id: string;
@@ -40,6 +40,7 @@ function colsFor(width: number): number {
 export default function Galleria() {
   const router = useRouter();
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [items, setItems] = useState<Garment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,14 +77,17 @@ export default function Galleria() {
   };
 
   const handleDelete = async (g: Garment) => {
-    const ok = await confirm("Eliminare?", `"${g.name}" verrà rimosso dalla galleria.`);
+    const ok = await confirm({
+      title: "Eliminare il capo?",
+      message: `"${g.name}" sarà rimosso dalla galleria.`,
+    });
     if (!ok) return;
     setItems((prev) => prev.filter((x) => x.id !== g.id));
     try {
       await api.deleteGarment(g.id);
     } catch (e) {
       console.warn("delete garment", e);
-      load(); // reload to restore on failure
+      load();
     }
   };
 

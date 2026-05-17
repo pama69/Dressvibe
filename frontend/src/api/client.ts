@@ -90,6 +90,20 @@ export const api = {
   caption: (body: any) =>
     request<{ caption: string }>("/caption", { method: "POST", body }),
 
+  // telegram
+  telegramPublish: (body: {
+    image_base64: string;
+    caption?: string;
+    gen_id?: string;
+    image_index?: number;
+  }) =>
+    request<{ ok: boolean; channel_message_id: number; token: string }>(
+      "/telegram/publish",
+      { method: "POST", body }
+    ),
+  telegramStatus: () =>
+    request<{ configured: boolean; channel_id: string | null }>("/telegram/status"),
+
   // stats
   stats: () => request<any>("/stats"),
 };
