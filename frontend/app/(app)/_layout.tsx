@@ -4,6 +4,12 @@ import { useAuth } from "@/src/contexts/AuthContext";
 import { theme } from "@/src/theme";
 import { View, ActivityIndicator } from "react-native";
 
+// Tab icon factory (module-level — prevents component remount on each render).
+const tabIcon = (name: keyof typeof Ionicons.glyphMap) =>
+  function TabIcon({ color }: { color: string }) {
+    return <Ionicons name={name} size={20} color={color} />;
+  };
+
 export default function AppTabs() {
   const { user, loading } = useAuth();
 
@@ -39,32 +45,25 @@ export default function AppTabs() {
     >
       <Tabs.Screen
         name="index"
-        options={{
-          title: "Galleria",
-          tabBarIcon: ({ color }) => <Ionicons name="grid-outline" size={20} color={color} />,
-        }}
+        options={{ title: "Galleria", tabBarIcon: tabIcon("grid-outline") }}
       />
       <Tabs.Screen
         name="generate"
-        options={{
-          title: "Genera",
-          tabBarIcon: ({ color }) => <Ionicons name="sparkles-outline" size={20} color={color} />,
-        }}
+        options={{ title: "Genera", tabBarIcon: tabIcon("sparkles-outline") }}
       />
       <Tabs.Screen
         name="history"
-        options={{
-          title: "Storia",
-          tabBarIcon: ({ color }) => <Ionicons name="time-outline" size={20} color={color} />,
-        }}
+        options={{ title: "Storia", tabBarIcon: tabIcon("time-outline") }}
       />
       <Tabs.Screen
         name="profile"
-        options={{
-          title: "Profilo",
-          tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={20} color={color} />,
-        }}
+        options={{ title: "Profilo", tabBarIcon: tabIcon("person-outline") }}
       />
+      {/* Hidden routes — accessible via push but not shown in tab bar */}
+      <Tabs.Screen name="upload" options={{ href: null }} />
+      <Tabs.Screen name="generating" options={{ href: null }} />
+      <Tabs.Screen name="results/[id]" options={{ href: null }} />
+      <Tabs.Screen name="studio/[id]" options={{ href: null }} />
     </Tabs>
   );
 }

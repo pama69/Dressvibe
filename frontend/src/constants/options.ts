@@ -44,6 +44,12 @@ export const BACKGROUNDS: Option[] = [
   { value: "lifestyle_home", label: "Casa lifestyle" },
 ];
 
+export const SHOES: Option[] = [
+  { value: "alta_elegante", label: "Alta elegante" },
+  { value: "comoda_fashion", label: "Comoda fashion" },
+  { value: "scarpa_bassa", label: "Scarpa bassa" },
+];
+
 export const CATEGORIES: Option[] = [
   { value: "t-shirt", label: "T-shirt" },
   { value: "camicia", label: "Camicia" },
@@ -66,4 +72,4 @@ export const SEASONS: Option[] = [
   { value: "inverno", label: "Inverno" },
 ];
 
-export const VARIATIONS = [4, 6, 8];
+export const VARIATIONS = [1, 2, 4, 6, 8];

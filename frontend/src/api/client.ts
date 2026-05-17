@@ -71,10 +71,10 @@ export const api = {
     request<any>(`/generations/${id}`, { method: "DELETE" }),
 
   // studio
-  studioEdit: (image_base64: string, edit_prompt: string) =>
+  studioEdit: (image_base64: string, edit_prompt: string, gen_id?: string) =>
     request<{ image_base64: string }>("/studio/edit", {
       method: "POST",
-      body: { image_base64, edit_prompt },
+      body: { image_base64, edit_prompt, gen_id },
     }),
 
   // clients

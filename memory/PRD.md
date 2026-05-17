@@ -1,5 +1,13 @@
 # DressVibe — PRD
 
+## Recent Iteration (v0.2)
+- **9:16 output** — all generated and edited images target Instagram Stories / Telegram vertical aspect.
+- **Full body** — every generated photo shows the model from head to feet, including shoes and the floor.
+- **Shoe selection** — three styles selectable in the generator: *Alta elegante*, *Comoda fashion*, *Scarpa bassa*.
+- **Variations 1 / 2 / 4 / 6 / 8** — single-shot generation now possible.
+- **Edits stay in the same gallery** — when the user edits an image in Studio, the new version is appended to the same generation's image array (visible in `/results/[id]`).
+- **Always-visible bottom menu** — `/upload`, `/generating`, `/results/[id]`, `/studio/[id]` were moved into the `(app)` Tabs group with `href: null` so the four-tab navigation bar (Galleria, Genera, Storia, Profilo) stays visible on every screen.
+
 ## Vision
 DressVibe is a premium mobile app for small/medium Italian clothing stores that
 lets shop owners upload photos of their garments and instantly generate

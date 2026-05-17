@@ -89,7 +89,7 @@ export default function Results() {
               activeOpacity={0.85}
               testID={`result-image-${index}`}
             >
-              <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: TILE, height: TILE * 1.25 }]} />
+              <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: TILE, height: TILE * (16 / 9) }]} />
               <View style={s.tileOverlay}>
                 <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
                 <Text style={s.tileText}>Apri Studio</Text>

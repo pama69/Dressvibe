@@ -7,6 +7,7 @@ type GenParams = {
   model_ethnicity: string;
   pose: string;
   background: string;
+  shoes: string;
   num_variations: number;
 };
 

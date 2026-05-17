@@ -79,6 +79,7 @@ class GenerationCreate(BaseModel):
     model_ethnicity: str  # caucasica/africana/asiatica/latina/mediorientale
     pose: str  # casual_standing/dynamic_walking/sitting_elegant/street_style/mirror_selfie
     background: str  # white_studio/city_street/beach/inside_shop/lifestyle_home
+    shoes: str = "comoda_fashion"  # alta_elegante/comoda_fashion/scarpa_bassa
     num_variations: int = 4
     title: Optional[str] = None
 
@@ -97,6 +98,7 @@ class Generation(BaseModel):
 class StudioEditRequest(BaseModel):
     image_base64: str
     edit_prompt: str  # what to do (change background to beach, add price text, etc.)
+    gen_id: Optional[str] = None  # if provided, append the edited image to that generation's gallery
 
 
 class VirtualClientCreate(BaseModel):
@@ -287,6 +289,11 @@ BACKGROUND_IT = {
     "inside_shop": "inside a chic clothing boutique with warm lighting",
     "lifestyle_home": "warm lifestyle home interior with natural window light",
 }
+SHOES_IT = {
+    "alta_elegante": "elegant high-heeled shoes that match the outfit",
+    "comoda_fashion": "comfortable fashionable sneakers or trendy flat shoes that match the outfit",
+    "scarpa_bassa": "minimal low-cut flat shoes (ballerinas, loafers or low boots) that match the outfit",
+}
 
 
 def build_outfit_prompt(p: GenerationCreate, variation_idx: int) -> str:
@@ -296,15 +303,22 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int) -> str:
     eth = ETHNICITY_IT.get(p.model_ethnicity, p.model_ethnicity)
     pose = POSE_IT.get(p.pose, p.pose)
     bg = BACKGROUND_IT.get(p.background, p.background)
+    shoes = SHOES_IT.get(p.shoes, p.shoes)
 
     return (
         f"Create a hyper-realistic, high-end fashion editorial photograph of {gender}, "
-        f"{age}, with {eth}, {body}. The model is wearing EXACTLY the clothing items shown in the reference images, "
+        f"{age}, with {eth}, {body}. "
+        f"FULL BODY SHOT from head to feet, the entire figure must be visible including the shoes and the floor under them. "
+        f"The model is wearing EXACTLY the clothing items shown in the reference images, "
         f"preserving every detail: color, pattern, texture, cut, logo, prints. "
+        f"Footwear: {shoes}. "
         f"Pose: {pose}. Setting: {bg}. "
-        f"Shot with a 50mm lens, shallow depth of field, soft natural lighting, magazine-quality, "
-        f"sharp focus on the clothing, photorealistic skin tones, no plastic skin, no extra fingers. "
-        f"Vertical 4:5 portrait composition. Variation seed {variation_idx}."
+        f"Shot with a 35mm lens, soft natural lighting, magazine-quality, "
+        f"sharp focus on the entire outfit, photorealistic skin tones, no plastic skin, no extra fingers, "
+        f"correct anatomy with both feet on the ground. "
+        f"STRICT vertical 9:16 aspect ratio (portrait, taller than wide, perfect for Instagram Stories and Telegram). "
+        f"The composition must fit the model fully inside the 9:16 frame with comfortable margins. "
+        f"Variation seed {variation_idx}."
     )
 
 
@@ -421,13 +435,20 @@ async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] =
     user = await get_current_user(authorization)
     session_id = f"studio_{user['user_id']}_{uuid.uuid4().hex[:6]}"
     prompt = (
-        f"Edit the provided photograph as requested while keeping the model and outfit identical. "
+        f"Edit the provided photograph as requested while keeping the model, outfit, and overall composition identical. "
+        f"Preserve the full-body framing (head to feet) and the 9:16 vertical aspect ratio. "
         f"Request: {payload.edit_prompt}. "
         f"Keep photorealistic quality, high-end fashion photography aesthetic."
     )
     result = await generate_single_image(prompt, [payload.image_base64], session_id)
     if not result:
         raise HTTPException(status_code=502, detail="Modifica non riuscita, riprova")
+    # If linked to a generation, append the edited image to that generation's gallery
+    if payload.gen_id:
+        await db.generations.update_one(
+            {"id": payload.gen_id, "user_id": user["user_id"]},
+            {"$push": {"images": result}},
+        )
     return {"image_base64": result}
 
 

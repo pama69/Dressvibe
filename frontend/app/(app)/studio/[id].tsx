@@ -39,6 +39,7 @@ export default function Studio() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [edited, setEdited] = useState(false);
   const [editPrompt, setEditPrompt] = useState("");
   const [caption, setCaption] = useState("");
   const [capBusy, setCapBusy] = useState(false);
@@ -66,8 +67,9 @@ export default function Studio() {
     if (!image) return;
     setBusy(true);
     try {
-      const res = await api.studioEdit(image, prompt);
+      const res = await api.studioEdit(image, prompt, id);
       setImage(res.image_base64);
+      setEdited(true);
     } catch (e: any) {
       Alert.alert("Modifica non riuscita", e?.message || "Riprova");
     } finally {
@@ -155,6 +157,15 @@ export default function Studio() {
             <Ionicons name="refresh-outline" size={20} color={theme.colors.text} />
           </TouchableOpacity>
         </View>
+
+        {edited ? (
+          <View style={s.editedBanner} testID="studio-edited-banner">
+            <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
+            <Text style={s.editedText}>
+              Modifica salvata nella galleria di questa generazione
+            </Text>
+          </View>
+        ) : null}
 
         <ScrollView contentContainerStyle={{ paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
           <View style={s.imageWrap}>
@@ -274,7 +285,7 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: theme.colors.border,
   },
   headerTitle: { color: theme.colors.text, fontSize: 14, letterSpacing: 2, textTransform: "uppercase" },
-  imageWrap: { marginHorizontal: 24, marginTop: 16, aspectRatio: 4 / 5, backgroundColor: theme.colors.surface, position: "relative" },
+  imageWrap: { marginHorizontal: 24, marginTop: 16, aspectRatio: 9 / 16, backgroundColor: theme.colors.surface, position: "relative" },
   imagePh: { flex: 1, alignItems: "center", justifyContent: "center" },
   image: { width: "100%", height: "100%" },
   busyOverlay: {
@@ -310,4 +321,11 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
   },
   shareLabel: { color: theme.colors.text, fontSize: 11, letterSpacing: 0.6 },
+  editedBanner: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: 24, marginTop: 12, padding: 10,
+    borderWidth: 1, borderColor: theme.colors.success,
+    backgroundColor: "rgba(16,185,129,0.08)",
+  },
+  editedText: { color: theme.colors.success, fontSize: 12, flex: 1 },
 });

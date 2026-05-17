@@ -22,6 +22,7 @@ import {
   ETHNICITIES,
   POSES,
   BACKGROUNDS,
+  SHOES,
   VARIATIONS,
   Option,
 } from "@/src/constants/options";
@@ -78,6 +79,7 @@ export default function Generate() {
   const [eth, setEth] = useState("caucasica");
   const [pose, setPose] = useState("casual_standing");
   const [bg, setBg] = useState("white_studio");
+  const [shoes, setShoes] = useState("comoda_fashion");
   const [variations, setVariations] = useState(4);
 
   const load = useCallback(async () => {
@@ -109,6 +111,7 @@ export default function Generate() {
       model_ethnicity: eth,
       pose,
       background: bg,
+      shoes,
       num_variations: variations,
     });
     router.push("/generating");
@@ -175,6 +178,7 @@ export default function Generate() {
           <Text style={styles.stepLabel}>3 — Scena</Text>
           <ChipRow label="Posa" options={POSES} value={pose} onChange={setPose} testIDPrefix="pose" />
           <ChipRow label="Sfondo" options={BACKGROUNDS} value={bg} onChange={setBg} testIDPrefix="bg" />
+          <ChipRow label="Scarpe" options={SHOES} value={shoes} onChange={setShoes} testIDPrefix="shoes" />
         </View>
 
         {/* Step 4 — Variations */}
