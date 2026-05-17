@@ -765,7 +765,9 @@ async def tg_api(method: str, payload: dict, files: Optional[dict] = None):
         return resp.status_code, {"raw": resp.text}
 
 class TelegramPublishRequest(BaseModel):
-    image_base64: str
+    image_base64: Optional[str] = None
+    video_url: Optional[str] = None
+    media_type: Optional[str] = "photo"  # "photo" | "video"
     caption: Optional[str] = None
     gen_id: Optional[str] = None
     image_index: Optional[int] = None
@@ -779,6 +781,14 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
         raise HTTPException(status_code=503, detail="Telegram non configurato")
 
+    media_type = (payload.media_type or "photo").lower()
+    if media_type == "video":
+        if not payload.video_url:
+            raise HTTPException(status_code=400, detail="video_url richiesto per pubblicare un video")
+    else:
+        if not payload.image_base64:
+            raise HTTPException(status_code=400, detail="image_base64 richiesto per pubblicare una foto")
+
     token = uuid.uuid4().hex[:14]
     caption = (payload.caption or "").strip() or "Disponibile in negozio ✨"
     if len(caption) > 1000:
@@ -790,36 +800,79 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
         ]]
     }
 
-    photo_bytes = base64.b64decode(payload.image_base64)
-    files = {"photo": ("outfit.png", photo_bytes, "image/png")}
-    data = {
-        "chat_id": TELEGRAM_CHANNEL_ID,
-        "caption": caption,
-        "reply_markup": __import__("json").dumps(keyboard),
-    }
-    status, body = await tg_api("sendPhoto", data, files=files)
-    if status != 200 or not body.get("ok"):
-        logger.error(f"Telegram sendPhoto error {status}: {body}")
-        raise HTTPException(status_code=502, detail=f"Telegram error: {body.get('description', 'sendPhoto failed')}")
+    import json as _json
+    file_id: Optional[str] = None
 
-    result = body["result"]
-    message_id = result["message_id"]
-    file_id = None
-    if result.get("photo"):
-        file_id = result["photo"][-1]["file_id"]
+    if media_type == "video":
+        # Try URL-mode first. Telegram itself downloads from the URL.
+        data = {
+            "chat_id": TELEGRAM_CHANNEL_ID,
+            "video": payload.video_url,
+            "caption": caption,
+            "reply_markup": _json.dumps(keyboard),
+            "supports_streaming": True,
+        }
+        status, body = await tg_api("sendVideo", data)
+        if status != 200 or not body.get("ok"):
+            # Fallback: download the video and upload as multipart.
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as http:
+                    vr = await http.get(payload.video_url)
+                if vr.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"Impossibile scaricare il video sorgente ({vr.status_code})")
+                files = {"video": ("clip.mp4", vr.content, "video/mp4")}
+                up_data = {
+                    "chat_id": TELEGRAM_CHANNEL_ID,
+                    "caption": caption,
+                    "reply_markup": _json.dumps(keyboard),
+                    "supports_streaming": "true",
+                }
+                status, body = await tg_api("sendVideo", up_data, files=files)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Telegram sendVideo fallback failed: {e}")
+                raise HTTPException(status_code=502, detail=f"Telegram error: {body.get('description', 'sendVideo failed')}")
+
+            if status != 200 or not body.get("ok"):
+                logger.error(f"Telegram sendVideo error {status}: {body}")
+                raise HTTPException(status_code=502, detail=f"Telegram error: {body.get('description', 'sendVideo failed')}")
+
+        result = body["result"]
+        message_id = result["message_id"]
+        if result.get("video"):
+            file_id = result["video"].get("file_id")
+    else:
+        photo_bytes = base64.b64decode(payload.image_base64)
+        files = {"photo": ("outfit.png", photo_bytes, "image/png")}
+        data = {
+            "chat_id": TELEGRAM_CHANNEL_ID,
+            "caption": caption,
+            "reply_markup": _json.dumps(keyboard),
+        }
+        status, body = await tg_api("sendPhoto", data, files=files)
+        if status != 200 or not body.get("ok"):
+            logger.error(f"Telegram sendPhoto error {status}: {body}")
+            raise HTTPException(status_code=502, detail=f"Telegram error: {body.get('description', 'sendPhoto failed')}")
+
+        result = body["result"]
+        message_id = result["message_id"]
+        if result.get("photo"):
+            file_id = result["photo"][-1]["file_id"]
 
     await db.tg_publications.insert_one({
         "token": token,
         "user_id": user["user_id"],
         "gen_id": payload.gen_id,
         "image_index": payload.image_index,
+        "media_type": media_type,
         "channel_id": TELEGRAM_CHANNEL_ID,
         "channel_message_id": message_id,
         "caption": caption,
         "file_id": file_id,
         "created_at": datetime.now(timezone.utc),
     })
-    return {"ok": True, "channel_message_id": message_id, "token": token}
+    return {"ok": True, "channel_message_id": message_id, "token": token, "media_type": media_type}
 
 
 @api_router.post("/telegram/webhook/{secret}")

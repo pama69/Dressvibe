@@ -45,6 +45,8 @@ export default function Studio() {
   const [genTitle, setGenTitle] = useState("");
   const [videoProviders, setVideoProviders] = useState<any[]>([]);
   const [videos, setVideos] = useState<any[]>([]);
+  const [tgDescription, setTgDescription] = useState("");
+  const [publishingTgVideoId, setPublishingTgVideoId] = useState<string | null>(null);
 
   const loadVideos = useCallback(async () => {
     if (!id) return;
@@ -134,6 +136,31 @@ export default function Studio() {
     }
   };
 
+  const handlePublishVideoTelegram = async (video: any) => {
+    if (!video?.video_url) return;
+    setPublishingTgVideoId(video.id);
+    try {
+      const captionText =
+        tgDescription.trim() ||
+        caption?.trim() ||
+        "Disponibile in negozio ✨";
+      const res = await api.telegramPublish({
+        video_url: video.video_url,
+        media_type: "video",
+        caption: captionText,
+        gen_id: id,
+        image_index: idx,
+      });
+      const msg = `Video pubblicato sul canale (id ${res.channel_message_id}).\nQuando un cliente preme "PRENOTA IL TUO CAPO ORA!" riceverai una notifica.`;
+      if (Platform.OS === "web") window.alert("Pubblicato su Telegram\n\n" + msg); else Alert.alert("Pubblicato su Telegram", msg);
+    } catch (e: any) {
+      const m = e?.message || "Impossibile pubblicare il video";
+      if (Platform.OS === "web") window.alert("Errore Telegram\n\n" + m); else Alert.alert("Errore Telegram", m);
+    } finally {
+      setPublishingTgVideoId(null);
+    }
+  };
+
   const resetImage = () => { if (originalImage) setImage(originalImage); };
 
   const generateCaption = async () => {
@@ -168,9 +195,13 @@ export default function Studio() {
     if (target === "telegram") {
       try {
         setBusy(true);
-        const captionText = caption?.trim() || genTitle || "Disponibile in negozio ✨";
+        const captionText =
+          tgDescription.trim() ||
+          caption?.trim() ||
+          "Disponibile in negozio ✨";
         const res = await api.telegramPublish({
           image_base64: image,
+          media_type: "photo",
           caption: captionText,
           gen_id: id,
           image_index: idx,
@@ -358,10 +389,31 @@ export default function Studio() {
                     width={300}
                     height={Math.round(300 * (16 / 9))}
                     onDelete={() => handleDeleteVideo(v.id)}
+                    onPublishTelegram={() => handlePublishVideoTelegram(v)}
+                    publishingTelegram={publishingTgVideoId === v.id}
                   />
                 ))}
               </View>
             ) : null}
+          </View>
+
+          {/* Descrizione del post */}
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>📝 Descrizione del post Telegram</Text>
+            <Text style={s.tgHint}>
+              Questo testo apparirà sotto la foto/video pubblicata sul canale. Se vuoto, useremo la caption Instagram o un testo di default.
+            </Text>
+            <TextInput
+              value={tgDescription}
+              onChangeText={setTgDescription}
+              multiline
+              placeholder="es. Nuovo arrivo — Maglione Cashmere · €189 · Tg S/M/L · Disponibile in negozio o spedizione gratuita"
+              placeholderTextColor={theme.colors.textMuted}
+              style={[s.input, { minHeight: 90, textAlignVertical: "top" }]}
+              testID="tg-description-input"
+              maxLength={1000}
+            />
+            <Text style={s.tgCounter}>{tgDescription.length}/1000</Text>
           </View>
 
           {/* Share */}

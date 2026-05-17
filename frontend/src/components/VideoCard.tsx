@@ -11,10 +11,12 @@ type Props = {
   height: number;
   onDelete?: () => void;
   onShare?: () => void;
+  onPublishTelegram?: () => void;
+  publishingTelegram?: boolean;
   showActions?: boolean;
 };
 
-export default function VideoCard({ url, width, height, onDelete, onShare, showActions = true }: Props) {
+export default function VideoCard({ url, width, height, onDelete, onShare, onPublishTelegram, publishingTelegram, showActions = true }: Props) {
   const player = useVideoPlayer(url, (p) => {
     p.loop = true;
     p.muted = true;
@@ -62,6 +64,17 @@ export default function VideoCard({ url, width, height, onDelete, onShare, showA
             <Ionicons name="link-outline" size={14} color={theme.colors.text} />
             <Text style={s.actionText}>Copia link</Text>
           </TouchableOpacity>
+          {onPublishTelegram ? (
+            <TouchableOpacity
+              onPress={onPublishTelegram}
+              disabled={publishingTelegram}
+              style={[s.actionBtn, s.tgBtn, publishingTelegram && { opacity: 0.5 }]}
+              testID="video-publish-tg"
+            >
+              <Ionicons name="paper-plane" size={14} color={theme.colors.text} />
+              <Text style={s.actionText}>{publishingTelegram ? "Invio…" : "🚀 Pubblica TG"}</Text>
+            </TouchableOpacity>
+          ) : null}
           {onShare ? (
             <TouchableOpacity onPress={onShare} style={s.actionBtn} testID="video-share">
               <Ionicons name="share-social-outline" size={14} color={theme.colors.text} />
@@ -95,5 +108,9 @@ const s = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   actionText: { color: theme.colors.text, fontSize: 11 },
+  tgBtn: {
+    borderColor: "#2AABEE",
+    backgroundColor: "rgba(42,171,238,0.15)",
+  },
   danger: { borderColor: theme.colors.error },
 });

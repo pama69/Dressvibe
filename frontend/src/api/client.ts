@@ -110,12 +110,14 @@ export const api = {
 
   // telegram
   telegramPublish: (body: {
-    image_base64: string;
+    image_base64?: string;
+    video_url?: string;
+    media_type?: "photo" | "video";
     caption?: string;
     gen_id?: string;
     image_index?: number;
   }) =>
-    request<{ ok: boolean; channel_message_id: number; token: string }>(
+    request<{ ok: boolean; channel_message_id: number; token: string; media_type: string }>(
       "/telegram/publish",
       { method: "POST", body }
     ),

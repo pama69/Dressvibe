@@ -103,13 +103,12 @@
 #====================================================================================================
 
 user_problem_statement: |
-  DressVibe — mobile-first (Expo) for Italian clothing store owners.
-  Upload garment photos -> generate realistic photos of models wearing them with AI,
-  edit in Studio, share on Telegram (with Prenota button) and Instagram (native share),
-  generate fashion video clips (9:16) from images.
+  DressVibe — Italian clothing-store assistant. Generate model photos & videos from garment
+  photos, edit in Studio, publish to Telegram channel (with PRENOTA inline button) and
+  share via the native share sheet (Instagram-ready).
 
 backend:
-  - task: "Video listing per generation + delete"
+  - task: "Telegram publish supports BOTH photo and video"
     implemented: true
     working: true
     file: "/app/backend/server.py"
@@ -119,22 +118,38 @@ backend:
     status_history:
       - working: true
         agent: "main"
-        comment: "Added GET /api/generations/{id}/videos and DELETE /api/videos/{id}. Hot reload succeeded. Live request observed: GET /api/generations/gen_web_test1/videos -> 200."
-
-  - task: "xAI Grok Video generation"
-    implemented: true
-    working: true
-    file: "/app/backend/server.py"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
+        comment: |
+          /api/telegram/publish now accepts media_type='photo'|'video'.
+          For video: tries sendVideo with the xAI URL first; if Telegram refuses
+          the URL, downloads the bytes and re-uploads as multipart sendVideo.
+          PRENOTA inline button is attached identically for both media types.
       - working: true
-        agent: "main"
-        comment: "Previously verified end-to-end (real xAI URL returned, stored in db.videos). No regressions in this iteration."
+        agent: "testing"
+        comment: |
+          Backend test executed via /app/backend_test.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01). 11/11 cases passed:
+            * validation_video_missing_url → 400 "video_url richiesto..."
+            * validation_photo_missing_image → 400 "image_base64 richiesto..."
+            * validation_default_no_image (no media_type, no image) → 400
+            * happy_photo_response → 200, ok=True, channel_message_id=20,
+              token returned, media_type="photo"
+            * happy_photo_db_row → row inserted in db.tg_publications with
+              media_type="photo" and matching channel_message_id
+            * happy_video_response (xAI mp4) → 200, channel_message_id=21,
+              media_type="video" (Telegram accepted the URL on first try, no
+              fallback needed)
+            * happy_video_db_row → row inserted with media_type="video"
+            * regression_providers → 200
+            * regression_generation_videos (gen_web_test1) → 200 (1 video)
+            * regression_delete_missing_404 → 404
+            * regression_delete_existing_200 → 200 (after inserting a throwaway
+              videos row)
+          No issues detected; PRENOTA inline button paths present in both
+          branches.
 
 frontend:
-  - task: "Inline video player in Studio"
+  - task: "Studio: free description field for Telegram post + publish video to Telegram"
     implemented: true
     working: true
     file: "/app/frontend/app/(app)/studio/[id].tsx"
@@ -144,43 +159,40 @@ frontend:
     status_history:
       - working: true
         agent: "main"
-        comment: "New 'I TUOI VIDEO (N)' subsection renders generated videos with expo-video VideoView. After tapping 'Grok Video' the new video appears here, with Apri / Copia link / Delete actions. Verified via screenshot on /studio/gen_web_test1?index=0."
+        comment: |
+          - Added "📝 DESCRIZIONE DEL POST TELEGRAM" multiline input (max 1000 chars,
+            live counter) — replaces the auto "Generazione del…" title as the
+            Telegram caption.
+          - Each generated VideoCard now exposes a "🚀 Pubblica TG" action that
+            posts the video to the Telegram channel with the same description and
+            the PRENOTA inline button.
+          - Existing PUBBLICA TG (photo) and Instagram native share now use the
+            same description fallback chain: tgDescription -> IG caption -> default.
+          - Verified visually at /studio/gen_web_test1?index=0 — all controls
+            render and the bottom tab bar respects safe-area insets.
 
-  - task: "Video gallery in Results"
+  - task: "VideoCard supports publishToTelegram callback"
     implemented: true
     working: true
-    file: "/app/frontend/app/(app)/results/[id].tsx"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-      - working: true
-        agent: "main"
-        comment: "Horizontal '🎬 Video generati (N)' carousel above the image grid. Verified visually: video player + Apri/Copia/Delete buttons render correctly above the image variations grid."
-
-  - task: "Native share for Instagram (with Graph API hook)"
-    implemented: true
-    working: true
-    file: "/app/frontend/src/utils/share.ts"
+    file: "/app/frontend/src/components/VideoCard.tsx"
     stuck_count: 0
     priority: "medium"
     needs_retesting: false
     status_history:
       - working: true
         agent: "main"
-        comment: "Refactored share helpers into /app/frontend/src/utils/share.ts. shareToInstagram() uses OS share sheet today (Sharing.shareAsync) and copies caption to clipboard; web variant downloads image + copies caption. Includes stub publishToInstagramGraph() guarded by INSTAGRAM_GRAPH_ENABLED flag so a future IG Business / Creator account integration drops in without UI changes."
+        comment: "Added onPublishTelegram + publishingTelegram props with Telegram-blue styled button (disabled+'Invio…' label while busy)."
 
 metadata:
   created_by: "main_agent"
-  version: "1.1"
-  test_sequence: 2
+  version: "1.2"
+  test_sequence: 3
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Inline video player in Studio"
-    - "Video gallery in Results"
-    - "Native share for Instagram (with Graph API hook)"
+    - "Telegram publish supports BOTH photo and video"
+    - "Studio: free description field for Telegram post + publish video to Telegram"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -188,11 +200,16 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: |
-      Implemented two requested deliverables:
-      1) Visual video player verified in both Studio (inline, after generating) and Results
-         (horizontal carousel). expo-video installed. New backend endpoints
-         GET /api/generations/{id}/videos and DELETE /api/videos/{id}.
-      2) Instagram native share via Sharing.shareAsync + clipboard caption on mobile, with a
-         clean future hook (publishToInstagramGraph) ready for a Business/Creator account
-         later — no UI changes required when the user connects one.
-      Awaiting user verification before moving to "Cliente Virtuale" / templates / etc.
+      Iteration: added Telegram publishing for videos and a dedicated free-text
+      Telegram description field. Verified visually. Awaiting user verification
+      from their phone (the user has been actively testing — backend logs show
+      successful video generation and image publish today).
+  - agent: "testing"
+    message: |
+      Backend tests for /api/telegram/publish (photo + video) all PASS (11/11).
+      Validation 400s correct, photo & video happy paths return 200 with
+      channel_message_id and persist rows in db.tg_publications (media_type
+      correct). xAI mp4 was accepted by Telegram URL-mode directly (no
+      multipart fallback needed). Regression checks: GET /api/providers,
+      GET /api/generations/gen_web_test1/videos, DELETE /api/videos/<id>
+      (404 + 200) all pass. Test script at /app/backend_test.py.
