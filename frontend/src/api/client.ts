@@ -93,6 +93,21 @@ export const api = {
   deleteBackground: (id: string) =>
     request<any>(`/backgrounds/${id}`, { method: "DELETE" }),
 
+  // instagram caption
+  generateInstagramCaption: (body: {
+    gen_id?: string;
+    image_index?: number;
+    media_type: "photo" | "video";
+    style?: "elegante" | "friendly" | "minimal" | "trendy";
+    shop_name?: string;
+    city?: string;
+    extra_hint?: string;
+  }) =>
+    request<{ caption: string; hashtags: string[]; hook: string; style: string; fallback?: boolean }>(
+      "/instagram/caption",
+      { method: "POST", body }
+    ),
+
   // providers
   listProviders: () =>
     request<Record<string, Array<{

@@ -20,6 +20,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import VideoCard from "@/src/components/VideoCard";
+import InstagramShareSheet from "@/src/components/InstagramShareSheet";
 import { shareToInstagram, shareGeneric } from "@/src/utils/share";
 
 const QUICK_EDITS = [
@@ -47,6 +48,7 @@ export default function Studio() {
   const [videos, setVideos] = useState<any[]>([]);
   const [tgDescription, setTgDescription] = useState("");
   const [publishingTgVideoId, setPublishingTgVideoId] = useState<string | null>(null);
+  const [igSheet, setIgSheet] = useState<{ image?: string; video?: string } | null>(null);
 
   const loadVideos = useCallback(async () => {
     if (!id) return;
@@ -391,6 +393,7 @@ export default function Studio() {
                     onDelete={() => handleDeleteVideo(v.id)}
                     onPublishTelegram={() => handlePublishVideoTelegram(v)}
                     publishingTelegram={publishingTgVideoId === v.id}
+                    onShare={() => setIgSheet({ video: v.video_url })}
                   />
                 ))}
               </View>
@@ -425,7 +428,7 @@ export default function Studio() {
                 <Text style={s.shareLabel}>🚀 PUBBLICA TG</Text>
                 <Text style={s.shareSub}>con "Prenota"</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("instagram")} testID="share-instagram">
+              <TouchableOpacity style={s.shareBtn} onPress={() => image && setIgSheet({ image })} testID="share-instagram">
                 <Ionicons name="logo-instagram" size={20} color={theme.colors.text} />
                 <Text style={s.shareLabel}>Instagram</Text>
               </TouchableOpacity>
@@ -437,6 +440,14 @@ export default function Studio() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <InstagramShareSheet
+        visible={!!igSheet}
+        onClose={() => setIgSheet(null)}
+        imageBase64={igSheet?.image}
+        videoUrl={igSheet?.video}
+        genId={id}
+        imageIndex={idx}
+      />
     </SafeAreaView>
   );
 }

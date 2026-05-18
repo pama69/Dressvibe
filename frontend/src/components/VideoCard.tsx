@@ -87,9 +87,9 @@ export default function VideoCard({ url, width, height, onDelete, onShare, onPub
             </TouchableOpacity>
           ) : null}
           {onShare ? (
-            <TouchableOpacity onPress={onShare} style={s.actionBtn} testID="video-share">
-              <Ionicons name="share-social-outline" size={14} color={theme.colors.text} />
-              <Text style={s.actionText}>Condividi</Text>
+            <TouchableOpacity onPress={onShare} style={[s.actionBtn, s.igBtn]} testID="video-share">
+              <Ionicons name="logo-instagram" size={14} color={theme.colors.text} />
+              <Text style={s.actionText}>Instagram</Text>
             </TouchableOpacity>
           ) : null}
           {onDelete ? (
@@ -122,6 +122,10 @@ const s = StyleSheet.create({
   tgBtn: {
     borderColor: "#2AABEE",
     backgroundColor: "rgba(42,171,238,0.15)",
+  },
+  igBtn: {
+    borderColor: "#dd2a7b",
+    backgroundColor: "rgba(221,42,123,0.12)",
   },
   studioBtn: {
     borderColor: theme.colors.magic2,

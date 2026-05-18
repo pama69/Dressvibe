@@ -665,6 +665,149 @@ FASHION_VIDEO_PROMPT = (
 )
 
 
+# ---------- Instagram Caption (AI) ----------
+class InstagramCaptionRequest(BaseModel):
+    gen_id: Optional[str] = None
+    image_index: Optional[int] = None
+    media_type: str = "photo"  # "photo" | "video"
+    style: str = "elegante"  # elegante | friendly | minimal | trendy
+    shop_name: Optional[str] = "Frammenti"
+    city: Optional[str] = "Pescara"
+    extra_hint: Optional[str] = None  # e.g. "saldi -30%" or "nuova collezione"
+
+
+STYLE_DIRECTIVES = {
+    "elegante": (
+        "Tono: caldo, evocativo, sartoriale, da boutique di ricerca. "
+        "Frasi corte, italiano forbito ma accessibile. Niente marketing aggressivo. "
+        "Emoji rari (max 2) e pertinenti."
+    ),
+    "friendly": (
+        "Tono: amichevole, parlato, come se la commessa raccontasse il capo a una cliente fidata. "
+        "Italiano colloquiale, qualche emoji caldo (3-4)."
+    ),
+    "minimal": (
+        "Tono: minimal, essenziale, due righe brevi. Italiano asciutto. Zero emoji o uno solo."
+    ),
+    "trendy": (
+        "Tono: trendy / Gen-Z italiana, vibe Instagram editoriale. "
+        "Emoji giusti (4-5), può usare termini in inglese se naturali (vibe, mood, slay, outfit del giorno)."
+    ),
+}
+
+
+@api_router.post("/instagram/caption")
+async def generate_instagram_caption(payload: InstagramCaptionRequest, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+
+    # Try to enrich context from the generation if provided
+    ctx_parts: List[str] = []
+    if payload.gen_id:
+        gen = await db.generations.find_one(
+            {"id": payload.gen_id, "user_id": user["user_id"]},
+            {"_id": 0, "params": 1, "garment_ids": 1, "title": 1},
+        )
+        if gen:
+            params = gen.get("params") or {}
+            for k in ("model_gender", "model_age", "model_body", "model_ethnicity", "pose", "background", "shoes"):
+                v = params.get(k)
+                if v:
+                    ctx_parts.append(f"{k}={v}")
+            if gen.get("garment_ids"):
+                grms = await db.garments.find(
+                    {"id": {"$in": gen["garment_ids"]}, "user_id": user["user_id"]},
+                    {"_id": 0, "name": 1, "category": 1, "color": 1, "season": 1},
+                ).to_list(10)
+                for g in grms:
+                    bits = [g.get("name"), g.get("category"), g.get("color"), g.get("season")]
+                    ctx_parts.append("capo=" + " ".join([b for b in bits if b]))
+
+    shop = (payload.shop_name or "Frammenti").strip()
+    city = (payload.city or "Pescara").strip()
+    style = (payload.style or "elegante").lower()
+    style_directive = STYLE_DIRECTIVES.get(style, STYLE_DIRECTIVES["elegante"])
+    media = "Reel video 9:16" if payload.media_type == "video" else "foto outfit"
+    extra = f"\nNota extra: {payload.extra_hint.strip()}" if (payload.extra_hint and payload.extra_hint.strip()) else ""
+    ctx_line = " · ".join(ctx_parts) if ctx_parts else "(nessun dettaglio aggiuntivo)"
+
+    system_msg = (
+        "Sei un copywriter italiano specializzato in moda e boutique indipendenti. "
+        "Scrivi caption per Instagram pensate per piccole boutique italiane (negozi fisici), non e-commerce di massa. "
+        "Devi sempre rispondere SOLO in italiano e SOLO in JSON valido, nessun testo intorno."
+    )
+
+    user_prompt = (
+        f"Boutique: {shop} — {city}, Italia.\n"
+        f"Contenuto da pubblicare: {media}.\n"
+        f"Contesto del look: {ctx_line}.{extra}\n\n"
+        f"Stile della caption: {style_directive}\n\n"
+        "Costruisci una caption pronta da incollare su Instagram con questa struttura:\n"
+        "  1. Riga 1 — hook breve ed evocativo (max 60 caratteri)\n"
+        "  2. 1-2 frasi che descrivono mood/capo (italiano scorrevole, non da venditore)\n"
+        "  3. CTA naturale (esempi: 'Disponibile da Frammenti, in via [vuoto].',"
+        "     'Passa in boutique a Pescara o scrivici in DM 💬', 'Prenota la prova in negozio')\n"
+        "  4. Riga vuota\n"
+        f"  5. 18 hashtag italiani pertinenti: mix di brand ({shop}), categoria del capo, "
+        f"     città ({city} / Abruzzo), stagione, mood, e 2-3 hashtag boutique italiani famosi "
+        "     (es. #boutiqueitaliana #modaitaliana #shoplocal #madeinitaly). Niente hashtag in inglese generici "
+        "     (#fashion #ootd ok ma massimo 4). Tutti su una riga separati da spazio.\n\n"
+        "Ritorna SOLO JSON con questa forma esatta:\n"
+        "{\n"
+        '  "caption": "testo completo pronto da incollare (incluso il blocco hashtag in fondo)",\n'
+        '  "hashtags": ["lista", "di", "hashtag", "senza", "cancelletto"],\n'
+        '  "hook": "riga 1"\n'
+        "}\n"
+        "Non aggiungere markdown, niente ```json, niente spiegazioni."
+    )
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"ig_caption_{user['user_id']}_{uuid.uuid4().hex[:6]}",
+            system_message=system_msg,
+        ).with_model("gemini", "gemini-2.5-flash")
+        msg = UserMessage(text=user_prompt)
+        reply = await chat.send_message(msg)
+        text = (reply or "").strip()
+        # Strip eventual markdown fences just in case
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+        import json as _json
+        try:
+            data = _json.loads(text)
+        except Exception:
+            # Last-resort: try to extract first {...}
+            start = text.find("{")
+            end = text.rfind("}")
+            if start >= 0 and end > start:
+                data = _json.loads(text[start:end + 1])
+            else:
+                raise
+        caption = (data.get("caption") or "").strip()
+        hashtags = data.get("hashtags") or []
+        hook = (data.get("hook") or "").strip()
+        if not caption:
+            raise ValueError("empty caption")
+        return {"caption": caption, "hashtags": hashtags, "hook": hook, "style": style}
+    except Exception as e:
+        logger.exception(f"Instagram caption generation failed: {e}")
+        # Fallback static caption so the UI never blocks
+        fallback = (
+            f"Nuovo arrivo da {shop} ✨\n"
+            f"Un capo pensato per chi cerca dettagli che fanno la differenza.\n"
+            f"Passa in boutique a {city} o scrivici in DM 💬\n\n"
+            f"#{shop.lower()} #{shop.lower()}{city.lower()} #boutique{city.lower()} "
+            "#boutiqueitaliana #modaitaliana #shoplocal #madeinitaly #abruzzo "
+            "#ootditalia #stileitaliano #fashionitalia #lookdelgiorno #stilesartoriale "
+            "#nuovoarrivo #nuovacollezione #moda #fashion #outfit #fashionstyle"
+        )
+        return {"caption": fallback, "hashtags": [], "hook": "Nuovo arrivo", "style": style, "fallback": True}
+
+
+
+
 @api_router.post("/videos")
 async def create_video(payload: VideoGenerateRequest, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
