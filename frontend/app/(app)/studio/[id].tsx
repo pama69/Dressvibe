@@ -151,7 +151,7 @@ export default function Studio() {
         gen_id: id,
         image_index: idx,
       });
-      const msg = `Video pubblicato sul canale (id ${res.channel_message_id}).\nQuando un cliente preme "PRENOTA IL TUO CAPO ORA!" riceverai una notifica.`;
+      const msg = `Video pubblicato sul canale (id ${res.channel_message_id}).\nQuando un cliente preme "RICHIEDI INFO" riceverai una notifica.`;
       if (Platform.OS === "web") window.alert("Pubblicato su Telegram\n\n" + msg); else Alert.alert("Pubblicato su Telegram", msg);
     } catch (e: any) {
       const m = e?.message || "Impossibile pubblicare il video";
@@ -206,7 +206,7 @@ export default function Studio() {
           gen_id: id,
           image_index: idx,
         });
-        const msg = `Foto pubblicata sul canale (id ${res.channel_message_id}).\n\nQuando un cliente preme "PRENOTA IL TUO CAPO ORA!" riceverai una notifica.`;
+        const msg = `Foto pubblicata sul canale (id ${res.channel_message_id}).\n\nQuando un cliente preme "RICHIEDI INFO" riceverai una notifica.`;
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("Pubblicato su Telegram\n\n" + msg);
         } else {

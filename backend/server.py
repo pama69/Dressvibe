@@ -860,7 +860,7 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
 
     keyboard = {
         "inline_keyboard": [[
-            {"text": "PRENOTA IL TUO CAPO ORA!", "callback_data": f"book:{token}"}
+            {"text": "RICHIEDI INFO", "callback_data": f"book:{token}"}
         ]]
     }
 
@@ -986,14 +986,14 @@ async def telegram_webhook(secret: str, request: Request):
             if user_id_tg:
                 await tg_api("sendMessage", {
                     "chat_id": user_id_tg,
-                    "text": "Grazie, sarai contattata al più presto per la conferma 💛",
+                    "text": "Grazie per l'interesse! Sarai ricontattata a breve!",
                 })
 
             # 3. Notify the admin
             if TELEGRAM_ADMIN_CHAT_ID:
                 now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
                 admin_text = (
-                    f"🔔 *Nuova prenotazione*\n"
+                    f"🔔 *Nuova richiesta info*\n"
                     f"👤 Cliente: {full_name} ({handle})\n"
                     f"🕒 Orario: {now}\n"
                 )
