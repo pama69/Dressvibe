@@ -86,6 +86,13 @@ export const api = {
   deleteClient: (id: string) =>
     request<any>(`/clients/${id}`, { method: "DELETE" }),
 
+  // custom backgrounds
+  listBackgrounds: () => request<any[]>("/backgrounds"),
+  createBackground: (b: { name: string; image_base64: string; description?: string }) =>
+    request<any>("/backgrounds", { method: "POST", body: b }),
+  deleteBackground: (id: string) =>
+    request<any>(`/backgrounds/${id}`, { method: "DELETE" }),
+
   // providers
   listProviders: () =>
     request<Record<string, Array<{

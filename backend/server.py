@@ -82,6 +82,12 @@ class Garment(BaseModel):
     created_at: datetime
 
 
+class BackgroundCreate(BaseModel):
+    name: str
+    image_base64: str  # without prefix
+    description: Optional[str] = None  # short, e.g. "boutique vetrina sera"
+
+
 class GenerationCreate(BaseModel):
     garment_ids: List[str]
     model_gender: str  # uomo/donna/ragazzo/ragazza
@@ -94,6 +100,7 @@ class GenerationCreate(BaseModel):
     num_variations: int = 4
     title: Optional[str] = None
     provider: Optional[str] = None  # image_gen provider id; None = default
+    custom_background_id: Optional[str] = None  # if set, overrides `background`
 
 
 class Generation(BaseModel):
@@ -274,6 +281,43 @@ async def delete_garment(garment_id: str, authorization: Optional[str] = Header(
     return {"deleted": res.deleted_count}
 
 
+# ---------- Custom Backgrounds ----------
+@api_router.post("/backgrounds")
+async def create_background(payload: BackgroundCreate, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    name = (payload.name or "").strip() or "Sfondo personalizzato"
+    bg_id = f"bg_{uuid.uuid4().hex[:12]}"
+    doc = {
+        "id": bg_id,
+        "user_id": user["user_id"],
+        "name": name[:80],
+        "description": (payload.description or "").strip()[:160] or None,
+        "image_base64": payload.image_base64,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.backgrounds.insert_one(doc.copy())
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/backgrounds")
+async def list_backgrounds(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    items = await db.backgrounds.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    return items
+
+
+@api_router.delete("/backgrounds/{bg_id}")
+async def delete_background(bg_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    res = await db.backgrounds.delete_one({"id": bg_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Sfondo non trovato")
+    return {"ok": True}
+
+
 # ---------- Generation prompt building ----------
 GENDER_IT = {
     "uomo": "an adult male model",
@@ -319,7 +363,7 @@ SHOES_IT = {
 }
 
 
-def build_outfit_prompt(p: GenerationCreate, variation_idx: int) -> str:
+def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label: Optional[str] = None) -> str:
     gender = GENDER_IT.get(p.model_gender, p.model_gender)
     age = AGE_IT.get(p.model_age, p.model_age)
     body = BODY_IT.get(p.model_body, p.model_body)
@@ -328,6 +372,15 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int) -> str:
     bg = BACKGROUND_IT.get(p.background, p.background)
     shoes = SHOES_IT.get(p.shoes, p.shoes)
 
+    if custom_bg_label:
+        background_instruction = (
+            f"The LAST reference image is the EXACT background/scene to use ({custom_bg_label}). "
+            f"Place the model inside that exact scene preserving its lighting, colors, perspective and mood. "
+            f"Do NOT use the model from that reference, only the environment."
+        )
+    else:
+        background_instruction = f"Setting: {bg}."
+
     return (
         f"Create a hyper-realistic, high-end fashion editorial photograph of {gender}, "
         f"{age}, with {eth}, {body}. "
@@ -335,7 +388,7 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int) -> str:
         f"The model is wearing EXACTLY the clothing items shown in the reference images, "
         f"preserving every detail: color, pattern, texture, cut, logo, prints. "
         f"Footwear: {shoes}. "
-        f"Pose: {pose}. Setting: {bg}. "
+        f"Pose: {pose}. {background_instruction} "
         f"Shot with a 35mm lens, soft natural lighting, magazine-quality, "
         f"sharp focus on the entire outfit, photorealistic skin tones, no plastic skin, no extra fingers, "
         f"correct anatomy with both feet on the ground. "
@@ -382,6 +435,17 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
         raise HTTPException(status_code=404, detail="Capi non trovati")
     refs = [g["image_base64"] for g in garments]
 
+    # Custom background: append its image as the LAST reference and pass label to prompt.
+    custom_bg_label: Optional[str] = None
+    if payload.custom_background_id:
+        bg = await db.backgrounds.find_one(
+            {"id": payload.custom_background_id, "user_id": user["user_id"]},
+            {"_id": 0},
+        )
+        if bg and bg.get("image_base64"):
+            refs.append(bg["image_base64"])
+            custom_bg_label = bg.get("description") or bg.get("name") or "custom background"
+
     gen_id = f"gen_{uuid.uuid4().hex[:12]}"
     gen_doc = {
         "id": gen_id,
@@ -398,7 +462,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     # Run variations in parallel (limit to keep latency reasonable)
     tasks = [
         generate_single_image(
-            build_outfit_prompt(payload, i),
+            build_outfit_prompt(payload, i, custom_bg_label),
             refs,
             f"{gen_id}_{i}",
         )

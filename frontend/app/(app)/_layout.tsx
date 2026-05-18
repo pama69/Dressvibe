@@ -68,6 +68,7 @@ export default function AppTabs() {
       />
       {/* Hidden routes — accessible via push but not shown in tab bar */}
       <Tabs.Screen name="upload" options={{ href: null }} />
+      <Tabs.Screen name="backgrounds" options={{ href: null }} />
       <Tabs.Screen name="generating" options={{ href: null }} />
       <Tabs.Screen name="results/[id]" options={{ href: null }} />
       <Tabs.Screen name="studio/[id]" options={{ href: null }} />

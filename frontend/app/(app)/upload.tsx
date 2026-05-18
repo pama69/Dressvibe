@@ -167,7 +167,14 @@ export default function Upload() {
             <Ionicons name="close" size={24} color={theme.colors.text} />
           </TouchableOpacity>
           <Text style={s.headerTitle}>Nuovo capo</Text>
-          <View style={{ width: 24 }} />
+          <TouchableOpacity
+            onPress={() => router.push("/backgrounds")}
+            style={s.bgLink}
+            testID="upload-open-backgrounds"
+          >
+            <Ionicons name="image-outline" size={14} color={theme.colors.text} />
+            <Text style={s.bgLinkText}>SFONDI</Text>
+          </TouchableOpacity>
         </View>
 
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
@@ -290,6 +297,14 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: theme.colors.border,
   },
   headerTitle: { color: theme.colors.text, fontSize: 14, letterSpacing: 2, textTransform: "uppercase" },
+  bgLink: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingVertical: 6, paddingHorizontal: 10,
+    borderWidth: 1, borderColor: theme.colors.border,
+  },
+  bgLinkText: {
+    color: theme.colors.text, fontSize: 10, letterSpacing: 1.4, fontWeight: "600",
+  },
   scroll: { padding: 24, gap: 6 },
   pickRow: { flexDirection: "row", gap: 12, marginBottom: 6 },
   pickBox: {

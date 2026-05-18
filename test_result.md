@@ -183,16 +183,82 @@ frontend:
         agent: "main"
         comment: "Added onPublishTelegram + publishingTelegram props with Telegram-blue styled button (disabled+'Invio…' label while busy)."
 
+  - task: "Custom Backgrounds endpoints (CRUD)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Tested via /app/backend_test_backgrounds.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01).
+            * GET /api/backgrounds → 200, returns 2 pre-seeded items
+              (bg_demo01_a "Vetrina natalizia", bg_demo01_b "Borgo medievale")
+              each with non-empty image_base64, sorted desc by created_at ✅
+            * POST /api/backgrounds {name:"Test BG", image_base64:<1x1 PNG>,
+              description} → 200, returned id starts with "bg_", user_id is
+              user_demo01, image_base64 echoed back ✅
+            * GET /api/backgrounds → new item present (count went 2→3) ✅
+            * DELETE /api/backgrounds/{id} → 200 {"ok":true}, item removed
+              from subsequent GET; second DELETE on the same id → 404
+              {"detail":"Sfondo non trovato"} ✅
+            * Validation: POST /api/backgrounds with body {name:"Bad BG"}
+              (no image_base64) → 422 with pydantic "missing" detail on
+              body.image_base64 ✅
+
+  - task: "POST /api/generations accepts custom_background_id"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Integration with /api/generations verified.
+            * Valid custom_background_id (freshly created with a tiny valid
+              1x1 PNG) + garment_ids=[g_test_demo01], num_variations=1
+              → 200 in ~10s, status="done", images[0] is a base64 string
+              (Gemini gemini-3.1-flash-image-preview), and
+              params.custom_background_id is preserved in the gen_doc ✅
+            * Nonexistent custom_background_id="nonexistent" + same garment
+              → 200 in ~18s, status="done", images[0] non-empty, and
+              params.custom_background_id="nonexistent" preserved. The bg
+              lookup yields no extra ref and the standard background flow
+              kicks in — no error, exactly as required ✅
+            * Pre-seeded backgrounds bg_demo01_a and bg_demo01_b in the
+              database happen to contain CORRUPT/TRUNCATED PNG bytes
+              (exactly 225000 / 150000 bytes, PIL reports "Truncated File
+              Read"). When fed to Gemini as the LAST reference image, the
+              upstream returns:
+                  GeminiException 400: "Unable to process input image"
+              and the generation completes with status="failed", images=[]
+              — but params.custom_background_id is still preserved.
+              This is a SEED-DATA issue (the two demo .png blobs are
+              truncated), NOT a server.py bug. Verified by uploading a
+              valid PNG via POST /api/backgrounds and re-running the same
+              request: status=done, 1 image returned, params preserved.
+          Net: the custom_background_id wiring in create_generation
+          (lookup + ref append + label propagation + params persistence)
+          is correct and working end-to-end.
+
 metadata:
   created_by: "main_agent"
-  version: "1.2"
-  test_sequence: 3
+  version: "1.3"
+  test_sequence: 4
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Telegram publish supports BOTH photo and video"
-    - "Studio: free description field for Telegram post + publish video to Telegram"
+    - "Custom Backgrounds endpoints (CRUD)"
+    - "POST /api/generations accepts custom_background_id"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -213,3 +279,25 @@ agent_communication:
       multipart fallback needed). Regression checks: GET /api/providers,
       GET /api/generations/gen_web_test1/videos, DELETE /api/videos/<id>
       (404 + 200) all pass. Test script at /app/backend_test.py.
+  - agent: "testing"
+    message: |
+      Custom Backgrounds suite (/app/backend_test_backgrounds.py): 8/9 PASS
+      on first run, 9/9 PASS after substituting a freshly-uploaded valid PNG
+      for case 5a. All 6 review-request cases verified:
+        1) GET /api/backgrounds — 2 pre-seeded items, sorted desc, image_b64 present ✅
+        2) POST /api/backgrounds — 200, id starts with "bg_" ✅
+        3) GET shows new item ✅
+        4) DELETE 200 then 404 on re-delete ✅
+        5a) /api/generations with custom_background_id="bg_demo01_a" returned
+            200 but gen.status="failed" because the SEED PNG for bg_demo01_a
+            (and bg_demo01_b) is a truncated/corrupt PNG that Gemini rejects
+            with "Unable to process input image". params.custom_background_id
+            IS preserved. Confirmed integration is correct by repeating the
+            test with a freshly-created valid background (status="done",
+            images[0] non-empty, params preserved). Action item for main:
+            re-seed bg_demo01_a / bg_demo01_b with non-truncated PNGs (or
+            JPEGs) so the demo flow actually returns generated images. ✅ (code)
+        5b) custom_background_id="nonexistent" → 200, status="done",
+            images[0] non-empty, params preserved — no error ✅
+        6) POST /api/backgrounds without image_base64 → 422 ✅
+      Telegram/video/studio paths were intentionally NOT retested (out of scope).

@@ -83,6 +83,8 @@ export default function Generate() {
   const [variations, setVariations] = useState(4);
   const [providers, setProviders] = useState<any[]>([]);
   const [aiProvider, setAiProvider] = useState<string>("gemini_nano_banana");
+  const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
+  const [customBgId, setCustomBgId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -91,6 +93,10 @@ export default function Generate() {
       try {
         const pv = await api.listProviders();
         setProviders(pv.image_gen || []);
+      } catch {}
+      try {
+        const bgs = await api.listBackgrounds();
+        setCustomBgs(bgs as any);
       } catch {}
     } catch (e) {
       console.warn(e);
@@ -120,6 +126,7 @@ export default function Generate() {
       shoes,
       num_variations: variations,
       provider: aiProvider,
+      custom_background_id: customBgId || undefined,
     });
     router.push("/generating");
   };
@@ -182,9 +189,56 @@ export default function Generate() {
 
         {/* Step 3 — Scene */}
         <View style={styles.step}>
-          <Text style={styles.stepLabel}>3 — Scena</Text>
+          <View style={styles.stepHead}>
+            <Text style={styles.stepLabel}>3 — Scena</Text>
+            <TouchableOpacity
+              onPress={() => router.push("/backgrounds")}
+              style={styles.bgManageBtn}
+              testID="generate-manage-backgrounds"
+            >
+              <Ionicons name="images-outline" size={12} color={theme.colors.text} />
+              <Text style={styles.bgManageText}>Galleria sfondi</Text>
+            </TouchableOpacity>
+          </View>
           <ChipRow label="Posa" options={POSES} value={pose} onChange={setPose} testIDPrefix="pose" />
-          <ChipRow label="Sfondo" options={BACKGROUNDS} value={bg} onChange={setBg} testIDPrefix="bg" />
+
+          {/* Custom backgrounds */}
+          {customBgs.length > 0 ? (
+            <View style={{ gap: 6 }}>
+              <Text style={styles.customBgLabel}>Sfondi personalizzati</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customBgRow}>
+                {customBgs.map((b) => {
+                  const active = customBgId === b.id;
+                  return (
+                    <TouchableOpacity
+                      key={b.id}
+                      onPress={() => setCustomBgId(active ? null : b.id)}
+                      style={[styles.customBg, active && styles.customBgActive]}
+                      activeOpacity={0.85}
+                      testID={`select-custom-bg-${b.id}`}
+                    >
+                      <Image source={{ uri: `data:image/png;base64,${b.image_base64}` }} style={styles.customBgImg} />
+                      {active ? (
+                        <View style={styles.customBgBadge}>
+                          <Ionicons name="checkmark" size={14} color={theme.colors.primaryFg} />
+                        </View>
+                      ) : null}
+                      <Text style={styles.customBgName} numberOfLines={1}>{b.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              {customBgId ? (
+                <Text style={styles.customBgHint}>
+                  ✓ Userai uno sfondo personalizzato. Lo sfondo standard qui sotto sarà ignorato.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          {!customBgId ? (
+            <ChipRow label="Sfondo" options={BACKGROUNDS} value={bg} onChange={setBg} testIDPrefix="bg" />
+          ) : null}
           <ChipRow label="Scarpe" options={SHOES} value={shoes} onChange={setShoes} testIDPrefix="shoes" />
         </View>
 
@@ -276,6 +330,31 @@ const styles = StyleSheet.create({
     paddingVertical: 22, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 10,
   },
   emptyGarmentText: { color: theme.colors.text, fontSize: 14 },
+  bgManageBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingVertical: 6, paddingHorizontal: 10,
+    borderWidth: 1, borderColor: theme.colors.border,
+  },
+  bgManageText: {
+    color: theme.colors.text, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase",
+  },
+  customBgLabel: {
+    color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  customBgRow: { gap: 10, paddingRight: 12 },
+  customBg: {
+    width: 110, borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface, overflow: "hidden",
+  },
+  customBgActive: { borderColor: theme.colors.text, borderWidth: 2 },
+  customBgImg: { width: "100%", height: 130, resizeMode: "cover" },
+  customBgName: { color: theme.colors.textSecondary, fontSize: 11, padding: 8 },
+  customBgBadge: {
+    position: "absolute", top: 6, right: 6, width: 22, height: 22,
+    backgroundColor: theme.colors.primary, alignItems: "center", justifyContent: "center",
+  },
+  customBgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16 },
   garmentRow: { gap: 12, paddingRight: 12 },
   garment: {
     width: 110, borderWidth: 1, borderColor: theme.colors.border,

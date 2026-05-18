@@ -10,6 +10,7 @@ type GenParams = {
   shoes: string;
   num_variations: number;
   provider?: string;
+  custom_background_id?: string;
 };
 
 let _params: GenParams | null = null;
