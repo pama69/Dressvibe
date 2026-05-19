@@ -478,7 +478,7 @@ async def _gemini_direct_generate_image(
 
     last_err: Optional[Exception] = None
     for model_name in GEMINI_IMAGE_MODEL_CHAIN or [GEMINI_IMAGE_MODEL]:
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 img = await loop.run_in_executor(None, _try_one, model_name)
                 if img:
@@ -491,10 +491,17 @@ async def _gemini_direct_generate_image(
             except Exception as e:
                 last_err = e
                 msg = str(e)
-                # Only retry on transient 503/UNAVAILABLE
-                if "503" in msg or "UNAVAILABLE" in msg or "overload" in msg.lower() or "high demand" in msg.lower():
-                    backoff = 1.5 * (attempt + 1)
-                    logger.warning(f"[Gemini-direct] {model_name} 503 (try {attempt + 1}/3), retry in {backoff}s")
+                # Retry on transient errors: 503, 429 rate limit, overload, etc.
+                transient = (
+                    "503" in msg or "UNAVAILABLE" in msg
+                    or "429" in msg or "RESOURCE_EXHAUSTED" in msg or "rate" in msg.lower()
+                    or "overload" in msg.lower() or "high demand" in msg.lower()
+                )
+                if transient:
+                    # Exponential-ish backoff with a touch of jitter
+                    import random as _rnd
+                    backoff = (2 ** attempt) + _rnd.uniform(0, 1.5)
+                    logger.warning(f"[Gemini-direct] {model_name} transient (try {attempt + 1}/4): {msg[:120]}; retry in {backoff:.1f}s")
                     await asyncio.sleep(backoff)
                     continue
                 # Hard error → break out and try next model
@@ -574,15 +581,19 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     }
     await db.generations.insert_one(gen_doc.copy())
 
-    # Run variations in parallel (limit to keep latency reasonable)
-    tasks = [
-        generate_single_image(
-            build_outfit_prompt(payload, i, custom_bg_label),
-            refs,
-            f"{gen_id}_{i}",
-        )
-        for i in range(num)
-    ]
+    # Run variations with limited concurrency to avoid hammering Gemini's
+    # rate limit (free tier ~10 req/min). 2 in parallel is a sweet spot.
+    sem = asyncio.Semaphore(2)
+
+    async def _bounded(i: int):
+        async with sem:
+            return await generate_single_image(
+                build_outfit_prompt(payload, i, custom_bg_label),
+                refs,
+                f"{gen_id}_{i}",
+            )
+
+    tasks = [_bounded(i) for i in range(num)]
     results = await asyncio.gather(*tasks)
     images = [img for img in results if img]
 

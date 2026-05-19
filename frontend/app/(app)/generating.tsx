@@ -48,14 +48,30 @@ export default function Generating() {
       try {
         const res = await api.createGeneration(params);
         genStore.clear();
-        if (res?.id) {
+        if (res?.id && res?.images && res.images.length > 0) {
           router.replace(`/results/${res.id}`);
         } else {
-          router.replace("/(app)/history");
+          // All variations failed (most often Gemini rate limit on 2nd consecutive gen)
+          const errMsg =
+            "Le immagini non sono state generate.\n\nCausa più probabile: troppe richieste consecutive (Gemini limita il free tier a 10 al minuto).\n\nAspetta ~1 minuto e riprova.";
+          if (typeof window !== "undefined" && window.alert) {
+            window.alert("Generazione fallita\n\n" + errMsg);
+          } else {
+            // RN Alert is imported lazily to keep web bundle slim
+            const { Alert } = require("react-native");
+            Alert.alert("Generazione fallita", errMsg);
+          }
+          router.replace("/(app)/generate");
         }
-      } catch (e) {
-        console.warn("Gen error", e);
-        router.replace("/(app)/history");
+      } catch (e: any) {
+        const msg = e?.message || "Errore di rete";
+        if (typeof window !== "undefined" && window.alert) {
+          window.alert("Errore generazione\n\n" + msg);
+        } else {
+          const { Alert } = require("react-native");
+          Alert.alert("Errore generazione", msg);
+        }
+        router.replace("/(app)/generate");
       } finally {
         clearInterval(interval);
       }
