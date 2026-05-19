@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Animated, Easing, Image, TouchableOpacity } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
@@ -30,22 +30,19 @@ export default function Generating() {
   const [step, setStep] = useState(0);
   const [error, setError] = useState<ErrorState | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  // Latest accepted gen params (persisted across focus changes for "Retry")
   const paramsRef = useRef<any>(null);
+  // Prevents concurrent generation calls (e.g. focus fires twice quickly)
+  const inFlightRef = useRef(false);
   const rotate = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
 
-  const startGeneration = async () => {
+  const runGeneration = useCallback(async (params: any) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setError(null);
-    const params = paramsRef.current || genStore.get();
-    if (!params) {
-      router.replace("/(app)");
-      return;
-    }
-    paramsRef.current = params;
-
     try {
       const res = await api.createGeneration(params);
-      genStore.clear();
       if (res?.id && res?.images && res.images.length > 0) {
         router.replace(`/results/${res.id}`);
       } else {
@@ -75,7 +72,7 @@ export default function Generating() {
         setError({
           title: "Il server è lento",
           message:
-            "Gemini sta impiegando troppo tempo a rispondere. Probabilmente è sovraccarico. Riprova tra qualche secondo.",
+            "L'AI sta impiegando troppo tempo a rispondere. Probabilmente è sovraccarica. Riprova tra qualche secondo.",
           cooldown: 10,
         });
         setSecondsLeft(10);
@@ -87,9 +84,12 @@ export default function Generating() {
         });
         setSecondsLeft(5);
       }
+    } finally {
+      inFlightRef.current = false;
     }
-  };
+  }, [router]);
 
+  // Step ticker + intro animations — run ONCE per mount
   useEffect(() => {
     Animated.loop(
       Animated.timing(rotate, { toValue: 1, duration: 6000, easing: Easing.linear, useNativeDriver: true })
@@ -105,11 +105,30 @@ export default function Generating() {
       setStep((s) => (s + 1) % STEPS.length);
     }, 2400);
 
-    startGeneration();
-
     return () => clearInterval(stepInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Run the generation EVERY TIME this screen becomes focused with fresh
+  // params in the store. Using useFocusEffect is critical because expo-router
+  // may keep the screen mounted across navigations — useEffect([]) alone
+  // would only fire once per app session.
+  useFocusEffect(
+    useCallback(() => {
+      const fresh = genStore.get();
+      if (fresh) {
+        // Consume params immediately so a second focus won't double-fire.
+        genStore.clear();
+        paramsRef.current = fresh;
+        runGeneration(fresh);
+        return;
+      }
+      // No new params and no previous → bail back to home.
+      if (!paramsRef.current && !inFlightRef.current) {
+        router.replace("/(app)");
+      }
+    }, [runGeneration, router])
+  );
 
   // Countdown timer while error is shown
   useEffect(() => {
@@ -123,8 +142,12 @@ export default function Generating() {
   const rotateDeg = rotate.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
 
+  const handleRetry = () => {
+    if (paramsRef.current) runGeneration(paramsRef.current);
+  };
+
   if (error) {
-    const canRetry = secondsLeft === 0;
+    const canRetry = secondsLeft === 0 && !!paramsRef.current;
     return (
       <View style={s.c}>
         <LinearGradient colors={["#050505", "#0b0b0b", "#050505"]} style={StyleSheet.absoluteFill} />
@@ -135,16 +158,14 @@ export default function Generating() {
           <Text style={s.errTitle}>{error.title}</Text>
           <Text style={s.errMsg}>{error.message}</Text>
 
-          {!canRetry ? (
-            <Text style={s.countdown}>
-              Riprova fra {secondsLeft}s…
-            </Text>
+          {secondsLeft > 0 ? (
+            <Text style={s.countdown}>Riprova fra {secondsLeft}s…</Text>
           ) : null}
 
           <View style={s.actions}>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => canRetry && startGeneration()}
+              onPress={handleRetry}
               disabled={!canRetry}
               style={[s.retryBtn, !canRetry && s.retryBtnDisabled]}
               testID="retry-generation"
@@ -164,7 +185,11 @@ export default function Generating() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => router.replace("/(app)/generate")}
+              onPress={() => {
+                paramsRef.current = null;
+                setError(null);
+                router.replace("/(app)/generate");
+              }}
               style={s.cancelBtn}
               testID="cancel-generation"
             >
