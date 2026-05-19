@@ -18,9 +18,9 @@ export async function clearToken(): Promise<void> {
 
 async function request<T>(
   path: string,
-  options: { method?: string; body?: any; auth?: boolean } = {}
+  options: { method?: string; body?: any; auth?: boolean; timeoutMs?: number } = {}
 ): Promise<T> {
-  const { method = "GET", body, auth = true } = options;
+  const { method = "GET", body, auth = true, timeoutMs = 30000 } = options;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -28,18 +28,37 @@ async function request<T>(
     const token = await getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    clearTimeout(timer);
+    if (e?.name === "AbortError") {
+      const err: any = new Error(
+        "Richiesta troppo lenta — il server sta impiegando troppo tempo. Riprova tra qualche secondo."
+      );
+      err.code = "TIMEOUT";
+      throw err;
+    }
+    throw e;
+  }
+  clearTimeout(timer);
   if (!res.ok) {
     const txt = await res.text();
     let detail = txt;
     try {
       detail = JSON.parse(txt).detail || txt;
     } catch {}
-    throw new Error(detail || `Request failed: ${res.status}`);
+    const err: any = new Error(detail || `Request failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -64,7 +83,7 @@ export const api = {
 
   // generations
   createGeneration: (g: any) =>
-    request<any>("/generations", { method: "POST", body: g }),
+    request<any>("/generations", { method: "POST", body: g, timeoutMs: 90000 }),
   listGenerations: () => request<any[]>("/generations"),
   getGeneration: (id: string) => request<any>(`/generations/${id}`),
   deleteGeneration: (id: string) =>
@@ -77,6 +96,7 @@ export const api = {
     request<{ image_base64: string }>("/studio/edit", {
       method: "POST",
       body: { image_base64, edit_prompt, gen_id },
+      timeoutMs: 90000,
     }),
 
   // clients
@@ -119,7 +139,7 @@ export const api = {
   createVideo: (body: {
     image_base64: string; prompt?: string; duration_seconds?: number;
     provider?: string; gen_id?: string; image_index?: number;
-  }) => request<any>("/videos", { method: "POST", body }),
+  }) => request<any>("/videos", { method: "POST", body, timeoutMs: 180000 }),
   listVideos: () => request<any[]>("/videos"),
   listGenerationVideos: (genId: string) =>
     request<any[]>(`/generations/${genId}/videos`),

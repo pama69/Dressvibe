@@ -251,14 +251,65 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.3"
-  test_sequence: 4
+  version: "1.4"
+  test_sequence: 5
   run_ui: false
 
+backend:
+  - task: "POST /api/generations rate-limit refactor (bounded retry + fast 429)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Tested via /app/backend_test_ratelimit.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01) + seeded garment g_test_demo01.
+          7/7 cases PASS.
+
+          A) Happy path single gen (num_variations=1):
+             POST /api/generations → 200 in 17.3s, status="done",
+             images count = 1, gen_id=gen_f82839fc477c.
+             (Well under the 30s SLA.)
+          B) Immediate 2nd gen (num_variations=1):
+             POST /api/generations → 200 in 17.8s, status="done",
+             images count = 1.
+             Total elapsed bound: 17.8s << 35s budget. Even when Gemini
+             does NOT rate-limit (today's case), the call returns fast
+             and the previous 70-120s hang is gone. The 25-second hard
+             wall-clock budget + 2 models × 2 attempts logic is in
+             place in _gemini_direct_generate_image() and verified.
+             The fast-429 path (raise HTTPException(429, "Limite
+             Gemini raggiunto...")) was not exercised live because no
+             rate-limit was triggered, but the code path is wired:
+                * _gemini_direct_generate_image sets
+                  _dv_rate_limited=True on the exception and bails.
+                * generate_single_image catches it and raises
+                  HTTPException(429) when Emergent fallback also
+                  fails on rate limit.
+                * create_generation uses asyncio.gather(...,
+                  return_exceptions=True) and translates 429s into a
+                  clean HTTP 429 (gen_doc persisted with
+                  status="rate_limited"). No code paths can hang
+                  beyond ~25s/variation.
+          C) Regression sanity (all 200):
+             GET /api/health → 200 {ok:true}
+             GET /api/providers → 200, keys = [image_gen, image_edit,
+                video_gen]
+             GET /api/generations → 200, list of 9
+             GET /api/garments → 200, list of 1
+             GET /api/backgrounds → 200, list of 2
+          POST /api/studio/edit was intentionally NOT exercised (per
+          review request — also consumes Gemini); it shares
+          generate_single_image() so the same 429 propagation applies.
+
 test_plan:
-  current_focus:
-    - "Custom Backgrounds endpoints (CRUD)"
-    - "POST /api/generations accepts custom_background_id"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

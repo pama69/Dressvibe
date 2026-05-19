@@ -477,49 +477,92 @@ async def _gemini_direct_generate_image(
             raise exc
 
     last_err: Optional[Exception] = None
-    for model_name in GEMINI_IMAGE_MODEL_CHAIN or [GEMINI_IMAGE_MODEL]:
-        for attempt in range(4):
+    # Track if the LAST seen error was specifically a rate-limit (429) — this is
+    # account-wide on Gemini's free tier so retrying immediately on other models
+    # rarely helps. We fail fast with a clear marker on the exception message
+    # so the caller can surface a friendly 429 to the user.
+    rate_limited = False
+    # Limit total wall-clock time we're willing to spend here: 25s for a single
+    # image keeps the user's perceived wait reasonable.
+    import time as _time
+    started = _time.monotonic()
+    HARD_BUDGET_SECONDS = 25.0
+
+    for model_idx, model_name in enumerate(GEMINI_IMAGE_MODEL_CHAIN or [GEMINI_IMAGE_MODEL]):
+        # Only try a max of 2 models — beyond that the latency gets unreasonable
+        # and rate limits are usually account-wide anyway.
+        if model_idx >= 2:
+            break
+        # Each model gets up to 2 attempts (1 retry) with short backoff.
+        for attempt in range(2):
+            if _time.monotonic() - started > HARD_BUDGET_SECONDS:
+                logger.warning(f"[Gemini-direct] budget exceeded ({HARD_BUDGET_SECONDS}s), aborting")
+                break
             try:
                 img = await loop.run_in_executor(None, _try_one, model_name)
                 if img:
-                    if attempt > 0 or model_name != (GEMINI_IMAGE_MODEL_CHAIN[0] if GEMINI_IMAGE_MODEL_CHAIN else GEMINI_IMAGE_MODEL):
+                    if attempt > 0 or model_idx > 0:
                         logger.info(f"[Gemini-direct] image OK via {model_name} (attempt {attempt + 1})")
                     return img
-                # No image returned, try next model immediately
-                logger.warning(f"[Gemini-direct] {model_name} returned no image, trying next")
+                logger.warning(f"[Gemini-direct] {model_name} returned no image, trying next model")
                 break
             except Exception as e:
                 last_err = e
                 msg = str(e)
-                # Retry on transient errors: 503, 429 rate limit, overload, etc.
-                transient = (
+                is_rate_limit = (
+                    "429" in msg or "RESOURCE_EXHAUSTED" in msg
+                    or "quota" in msg.lower() or "rate limit" in msg.lower()
+                )
+                is_transient = (
                     "503" in msg or "UNAVAILABLE" in msg
-                    or "429" in msg or "RESOURCE_EXHAUSTED" in msg or "rate" in msg.lower()
                     or "overload" in msg.lower() or "high demand" in msg.lower()
                 )
-                if transient:
-                    # Exponential-ish backoff with a touch of jitter
+                if is_rate_limit:
+                    rate_limited = True
+                    # Account-wide limit → switching models rarely helps. Bail fast.
+                    logger.warning(f"[Gemini-direct] {model_name} RATE LIMIT (429): {msg[:160]}")
+                    break  # go to next model (one more try, then give up)
+                if is_transient and attempt == 0:
+                    # Short backoff for 503-style overload, only 1 retry.
                     import random as _rnd
-                    backoff = (2 ** attempt) + _rnd.uniform(0, 1.5)
-                    logger.warning(f"[Gemini-direct] {model_name} transient (try {attempt + 1}/4): {msg[:120]}; retry in {backoff:.1f}s")
+                    backoff = 1.5 + _rnd.uniform(0, 1.0)
+                    logger.warning(f"[Gemini-direct] {model_name} transient (try 1/2): {msg[:120]}; retry in {backoff:.1f}s")
                     await asyncio.sleep(backoff)
                     continue
-                # Hard error → break out and try next model
-                logger.warning(f"[Gemini-direct] {model_name} hard error, skipping: {msg[:200]}")
+                # Hard error or out of retries → next model
+                logger.warning(f"[Gemini-direct] {model_name} error, skipping: {msg[:200]}")
                 break
 
     if last_err:
         logger.error(f"[Gemini-direct] all models failed, last: {str(last_err)[:300]}")
+    # Signal rate-limit via a sentinel exception attached attribute so the caller
+    # can choose to surface HTTP 429 instead of a generic failure.
+    if rate_limited and last_err is not None:
+        try:
+            setattr(last_err, "_dv_rate_limited", True)
+        except Exception:
+            pass
+        raise last_err
     return None
 
 
 async def generate_single_image(prompt: str, reference_images_b64: List[str], session_id: str) -> Optional[str]:
+    """Generate a single image. Raises HTTPException(429) if hard-rate-limited."""
+    rate_limit_hit = False
     # Prefer the shop-owner's personal Gemini key when configured.
     if _gemini_client:
-        img = await _gemini_direct_generate_image(prompt, reference_images_b64)
-        if img:
-            return img
-        logger.warning("[Gemini-direct] returned no image, falling back to Emergent gateway")
+        try:
+            img = await _gemini_direct_generate_image(prompt, reference_images_b64)
+            if img:
+                return img
+        except Exception as e:
+            if getattr(e, "_dv_rate_limited", False):
+                rate_limit_hit = True
+                logger.warning("[Gemini-direct] hit rate limit, will try Emergent fallback once")
+            else:
+                logger.warning(f"[Gemini-direct] failed (non-rate-limit): {str(e)[:200]}")
+        if not rate_limit_hit:
+            logger.warning("[Gemini-direct] returned no image, falling back to Emergent gateway")
 
     try:
         chat = LlmChat(
@@ -535,10 +578,22 @@ async def generate_single_image(prompt: str, reference_images_b64: List[str], se
         _text, images = await chat.send_message_multimodal_response(msg)
         if images and len(images) > 0:
             return images[0]["data"]
-        return None
     except Exception as e:
-        logger.exception(f"Image generation failed: {e}")
-        return None
+        emsg = str(e)
+        # Emergent budget exhausted? Don't waste retries.
+        if "Budget has been exceeded" in emsg or "budget" in emsg.lower():
+            logger.warning(f"Emergent budget exhausted: {emsg[:150]}")
+        else:
+            logger.exception(f"Image generation failed via Emergent: {e}")
+
+    # If we got here AFTER a rate-limit on the personal key, raise 429 so the
+    # frontend can show a friendly "wait ~30s" message instead of a generic fail.
+    if rate_limit_hit:
+        raise HTTPException(
+            status_code=429,
+            detail="Limite Gemini raggiunto. Aspetta ~30-60 secondi e riprova.",
+        )
+    return None
 
 
 # ---------- Generations ----------
@@ -582,7 +637,9 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     await db.generations.insert_one(gen_doc.copy())
 
     # Run variations with limited concurrency to avoid hammering Gemini's
-    # rate limit (free tier ~10 req/min). 2 in parallel is a sweet spot.
+    # rate limit (free tier ~5 req/min for image models). 2 in parallel is a
+    # sweet spot. We collect exceptions instead of letting them tear down the
+    # whole gather so we can surface a clean 429 to the client.
     sem = asyncio.Semaphore(2)
 
     async def _bounded(i: int):
@@ -594,14 +651,36 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
             )
 
     tasks = [_bounded(i) for i in range(num)]
-    results = await asyncio.gather(*tasks)
-    images = [img for img in results if img]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    images: list = []
+    rate_limit_hit = False
+    other_error: Optional[str] = None
+    for r in results:
+        if isinstance(r, HTTPException):
+            if r.status_code == 429:
+                rate_limit_hit = True
+            else:
+                other_error = str(r.detail)
+        elif isinstance(r, Exception):
+            other_error = str(r)[:160]
+        elif r:
+            images.append(r)
 
-    status = "done" if images else "failed"
+    status = "done" if images else ("rate_limited" if rate_limit_hit else "failed")
     await db.generations.update_one(
         {"id": gen_id},
         {"$set": {"images": images, "status": status}},
     )
+
+    # If we got nothing back AND we hit a rate limit, raise 429 so the frontend
+    # can show a clear "wait a minute" message instead of an infinite spinner.
+    if not images and rate_limit_hit:
+        raise HTTPException(
+            status_code=429,
+            detail="Limite Gemini raggiunto. Aspetta ~30-60 secondi e riprova.",
+        )
+    if not images and other_error:
+        raise HTTPException(status_code=502, detail=f"Generazione fallita: {other_error}")
 
     gen_doc["images"] = images
     gen_doc["status"] = status

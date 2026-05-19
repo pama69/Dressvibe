@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, Animated, Easing, Image } from "react-native";
+import { View, Text, StyleSheet, Animated, Easing, Image, TouchableOpacity } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,11 +18,77 @@ const STEPS = [
   "Quasi pronto…",
 ];
 
+type ErrorState = {
+  title: string;
+  message: string;
+  // 0 = no countdown; otherwise seconds before retry is available
+  cooldown: number;
+};
+
 export default function Generating() {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  const [error, setError] = useState<ErrorState | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const paramsRef = useRef<any>(null);
   const rotate = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+
+  const startGeneration = async () => {
+    setError(null);
+    const params = paramsRef.current || genStore.get();
+    if (!params) {
+      router.replace("/(app)");
+      return;
+    }
+    paramsRef.current = params;
+
+    try {
+      const res = await api.createGeneration(params);
+      genStore.clear();
+      if (res?.id && res?.images && res.images.length > 0) {
+        router.replace(`/results/${res.id}`);
+      } else {
+        setError({
+          title: "Nessuna immagine generata",
+          message:
+            "I modelli AI non hanno restituito nessuna immagine. Riprova tra qualche secondo.",
+          cooldown: 15,
+        });
+        setSecondsLeft(15);
+      }
+    } catch (e: any) {
+      const status = e?.status;
+      const code = e?.code;
+      const msg = e?.message || "Errore di rete";
+
+      if (status === 429) {
+        setError({
+          title: "Limite Gemini raggiunto",
+          message:
+            "Hai raggiunto il limite del free tier Gemini (circa 5 immagini al minuto). " +
+            "Aspetta ~30-60 secondi e riprova — la generazione partirà subito.",
+          cooldown: 45,
+        });
+        setSecondsLeft(45);
+      } else if (code === "TIMEOUT") {
+        setError({
+          title: "Il server è lento",
+          message:
+            "Gemini sta impiegando troppo tempo a rispondere. Probabilmente è sovraccarico. Riprova tra qualche secondo.",
+          cooldown: 10,
+        });
+        setSecondsLeft(10);
+      } else {
+        setError({
+          title: "Errore di generazione",
+          message: msg,
+          cooldown: 5,
+        });
+        setSecondsLeft(5);
+      }
+    }
+  };
 
   useEffect(() => {
     Animated.loop(
@@ -35,53 +101,80 @@ export default function Generating() {
       ])
     ).start();
 
-    const interval = setInterval(() => {
+    const stepInterval = setInterval(() => {
       setStep((s) => (s + 1) % STEPS.length);
     }, 2400);
 
-    (async () => {
-      const params = genStore.get();
-      if (!params) {
-        router.replace("/(app)");
-        return;
-      }
-      try {
-        const res = await api.createGeneration(params);
-        genStore.clear();
-        if (res?.id && res?.images && res.images.length > 0) {
-          router.replace(`/results/${res.id}`);
-        } else {
-          // All variations failed (most often Gemini rate limit on 2nd consecutive gen)
-          const errMsg =
-            "Le immagini non sono state generate.\n\nCausa più probabile: troppe richieste consecutive (Gemini limita il free tier a 10 al minuto).\n\nAspetta ~1 minuto e riprova.";
-          if (typeof window !== "undefined" && window.alert) {
-            window.alert("Generazione fallita\n\n" + errMsg);
-          } else {
-            // RN Alert is imported lazily to keep web bundle slim
-            const { Alert } = require("react-native");
-            Alert.alert("Generazione fallita", errMsg);
-          }
-          router.replace("/(app)/generate");
-        }
-      } catch (e: any) {
-        const msg = e?.message || "Errore di rete";
-        if (typeof window !== "undefined" && window.alert) {
-          window.alert("Errore generazione\n\n" + msg);
-        } else {
-          const { Alert } = require("react-native");
-          Alert.alert("Errore generazione", msg);
-        }
-        router.replace("/(app)/generate");
-      } finally {
-        clearInterval(interval);
-      }
-    })();
+    startGeneration();
 
-    return () => clearInterval(interval);
-  }, [router, rotate, pulse]);
+    return () => clearInterval(stepInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Countdown timer while error is shown
+  useEffect(() => {
+    if (!error || secondsLeft <= 0) return;
+    const t = setInterval(() => {
+      setSecondsLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [error, secondsLeft]);
 
   const rotateDeg = rotate.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
   const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+
+  if (error) {
+    const canRetry = secondsLeft === 0;
+    return (
+      <View style={s.c}>
+        <LinearGradient colors={["#050505", "#0b0b0b", "#050505"]} style={StyleSheet.absoluteFill} />
+        <View style={s.center}>
+          <View style={s.errorIcon}>
+            <Ionicons name="time-outline" size={36} color={theme.colors.text} />
+          </View>
+          <Text style={s.errTitle}>{error.title}</Text>
+          <Text style={s.errMsg}>{error.message}</Text>
+
+          {!canRetry ? (
+            <Text style={s.countdown}>
+              Riprova fra {secondsLeft}s…
+            </Text>
+          ) : null}
+
+          <View style={s.actions}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => canRetry && startGeneration()}
+              disabled={!canRetry}
+              style={[s.retryBtn, !canRetry && s.retryBtnDisabled]}
+              testID="retry-generation"
+            >
+              {canRetry ? (
+                <LinearGradient
+                  colors={MAGIC_GRADIENT}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={StyleSheet.absoluteFill}
+                />
+              ) : null}
+              <Ionicons name="refresh" size={16} color={canRetry ? "#fff" : theme.colors.textSecondary} />
+              <Text style={[s.retryText, !canRetry && s.retryTextDisabled]}>
+                {canRetry ? "Riprova ora" : `Attendere ${secondsLeft}s`}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.replace("/(app)/generate")}
+              style={s.cancelBtn}
+              testID="cancel-generation"
+            >
+              <Text style={s.cancelText}>Torna indietro</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={s.c}>
@@ -130,4 +223,36 @@ const s = StyleSheet.create({
   },
   bar: { width: "100%", height: 2, backgroundColor: theme.colors.text },
   tip: { color: theme.colors.textMuted, fontSize: 11, letterSpacing: 1 },
+
+  // Error UI
+  errorIcon: {
+    width: 76, height: 76, borderRadius: 38,
+    borderWidth: 1, borderColor: theme.colors.border,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: theme.colors.surface,
+  },
+  errTitle: {
+    color: theme.colors.text, fontSize: 22, fontWeight: "600",
+    textAlign: "center", letterSpacing: -0.4,
+  },
+  errMsg: {
+    color: theme.colors.textSecondary, fontSize: 14, lineHeight: 20,
+    textAlign: "center", maxWidth: 320,
+  },
+  countdown: {
+    color: theme.colors.textMuted, fontSize: 12, letterSpacing: 1,
+  },
+  actions: { width: "100%", gap: 12, marginTop: 8, maxWidth: 320 },
+  retryBtn: {
+    paddingVertical: 16, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 10, overflow: "hidden", borderWidth: 1, borderColor: theme.colors.border,
+  },
+  retryBtnDisabled: { opacity: 0.6 },
+  retryText: { color: "#fff", fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
+  retryTextDisabled: { color: theme.colors.textSecondary },
+  cancelBtn: { paddingVertical: 12, alignItems: "center", justifyContent: "center" },
+  cancelText: {
+    color: theme.colors.textSecondary, fontSize: 12, letterSpacing: 1.5,
+    textTransform: "uppercase",
+  },
 });
