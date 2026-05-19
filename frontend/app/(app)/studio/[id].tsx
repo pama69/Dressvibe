@@ -105,7 +105,7 @@ export default function Studio() {
 
   const handleGenerateVideo = async (providerId: string) => {
     if (!image) return;
-    setBusy(true);
+    setVideoBusy(true);
     try {
       const res = await api.createVideo({
         image_base64: image,
@@ -125,7 +125,7 @@ export default function Studio() {
       const msg = e?.message || "Errore generazione video";
       if (Platform.OS === "web") window.alert("Errore video\n\n" + msg); else Alert.alert("Errore video", msg);
     } finally {
-      setBusy(false);
+      setVideoBusy(false);
     }
   };
 
@@ -362,8 +362,8 @@ export default function Studio() {
                 <TouchableOpacity
                   key={p.id}
                   onPress={() => handleGenerateVideo(p.id)}
-                  disabled={!p.enabled || busy}
-                  style={[s.videoBtn, !p.enabled && { opacity: 0.45 }]}
+                  disabled={!p.enabled || videoBusy}
+                  style={[s.videoBtn, (!p.enabled || videoBusy) && { opacity: 0.45 }]}
                   testID={`video-${p.id}`}
                 >
                   <Text style={s.videoBtnName}>{p.name}</Text>
@@ -374,7 +374,7 @@ export default function Studio() {
               ))}
             </ScrollView>
 
-            {busy && videos.length === 0 ? (
+            {videoBusy ? (
               <View style={s.videoBusy} testID="video-busy">
                 <ActivityIndicator color={theme.colors.text} />
                 <Text style={s.videoBusyText}>Sto generando il video… può richiedere 1–3 minuti</Text>
@@ -524,5 +524,8 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(16,185,129,0.08)",
   },
   editedText: { color: theme.colors.success, fontSize: 12, flex: 1 },
+});
+
+s, fontSize: 12, flex: 1 },
 });
 

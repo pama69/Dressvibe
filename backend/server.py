@@ -928,8 +928,23 @@ async def generate_instagram_caption(payload: InstagramCaptionRequest, authoriza
 
 
 @api_router.post("/videos")
-async def create_video(payload: VideoGenerateRequest, authorization: Optional[str] = Header(None)):
+async def create_video(payload: VideoGenerateRequest, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    # Always derive the public base URL from the *incoming* request — this
+    # makes Grok Video work both in preview and in the deployed environment
+    # (where PUBLIC_BASE_URL in .env is still the preview URL).
+    fwd_host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(",")[0].strip()
+    fwd_proto = request.headers.get("x-forwarded-proto")
+    if not fwd_proto:
+        # If the request hits us behind the k8s ingress the scheme arrives
+        # as http on the internal side, but the external URL is https. Default
+        # to https for anything that isn't localhost so xAI accepts the URL.
+        fwd_proto = "http" if fwd_host.startswith("localhost") or fwd_host.startswith("127.") else "https"
+    public_base = f"{fwd_proto}://{fwd_host}" if fwd_host else PUBLIC_BASE_URL
     provider_id = payload.provider or default_provider("video_gen")
     if not provider_id:
         raise HTTPException(
@@ -958,7 +973,7 @@ async def create_video(payload: VideoGenerateRequest, authorization: Optional[st
             "created_at": datetime.now(timezone.utc),
             # auto-expires via TTL index
         })
-        image_url = f"{PUBLIC_BASE_URL}/api/temp-image/{token}"
+        image_url = f"{public_base}/api/temp-image/{token}"
 
         # 2. Call xAI Grok Video (image-to-video)
         try:
