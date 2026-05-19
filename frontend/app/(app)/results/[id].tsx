@@ -145,7 +145,8 @@ export default function Results() {
                     {videos.map((v) => (
                       <VideoCard
                         key={v.id}
-                        url={v.video_url}
+                        url={v.playback_url || v.video_url}
+                        expired={!v.archived}
                         width={videoTileW}
                         height={videoTileH}
                         onDelete={() => handleDeleteVideo(v.id)}

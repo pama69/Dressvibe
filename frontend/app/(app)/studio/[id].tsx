@@ -387,13 +387,14 @@ export default function Studio() {
                 {videos.map((v) => (
                   <VideoCard
                     key={v.id}
-                    url={v.video_url}
+                    url={v.playback_url || v.video_url}
+                    expired={!v.archived}
                     width={300}
                     height={Math.round(300 * (16 / 9))}
                     onDelete={() => handleDeleteVideo(v.id)}
                     onPublishTelegram={() => handlePublishVideoTelegram(v)}
                     publishingTelegram={publishingTgVideoId === v.id}
-                    onShare={() => setIgSheet({ video: v.video_url })}
+                    onShare={() => setIgSheet({ video: v.playback_url || v.video_url })}
                   />
                 ))}
               </View>

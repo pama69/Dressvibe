@@ -9,6 +9,7 @@ type Props = {
   url: string;
   width: number;
   height: number;
+  expired?: boolean;
   onDelete?: () => void;
   onShare?: () => void;
   onPublishTelegram?: () => void;
@@ -17,7 +18,7 @@ type Props = {
   showActions?: boolean;
 };
 
-export default function VideoCard({ url, width, height, onDelete, onShare, onPublishTelegram, publishingTelegram, onOpenStudio, showActions = true }: Props) {
+export default function VideoCard({ url, width, height, expired, onDelete, onShare, onPublishTelegram, publishingTelegram, onOpenStudio, showActions = true }: Props) {
   const player = useVideoPlayer(url, (p) => {
     p.loop = true;
     p.muted = true;
@@ -46,14 +47,24 @@ export default function VideoCard({ url, width, height, onDelete, onShare, onPub
   return (
     <View style={[s.wrap, { width }]}>
       <View style={[s.player, { width, height }]}>
-        <VideoView
-          player={player}
-          style={{ width, height }}
-          contentFit="cover"
-          nativeControls
-          allowsFullscreen
-          allowsPictureInPicture
-        />
+        {expired ? (
+          <View style={s.expired}>
+            <Ionicons name="cloud-offline-outline" size={32} color={theme.colors.textMuted} />
+            <Text style={s.expiredTitle}>Video non più disponibile</Text>
+            <Text style={s.expiredSub}>
+              Il link xAI è scaduto. I nuovi video vengono archiviati automaticamente; questo è stato generato prima della fix.
+            </Text>
+          </View>
+        ) : (
+          <VideoView
+            player={player}
+            style={{ width, height }}
+            contentFit="cover"
+            nativeControls
+            allowsFullscreen
+            allowsPictureInPicture
+          />
+        )}
       </View>
       {showActions ? (
         <View style={s.actions}>
@@ -131,5 +142,11 @@ const s = StyleSheet.create({
     borderColor: theme.colors.magic2,
     backgroundColor: "rgba(225,29,72,0.12)",
   },
+  expired: {
+    flex: 1, alignItems: "center", justifyContent: "center", gap: 8,
+    paddingHorizontal: 18,
+  },
+  expiredTitle: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
+  expiredSub: { color: theme.colors.textMuted, fontSize: 11, textAlign: "center", lineHeight: 16 },
   danger: { borderColor: theme.colors.error },
 });

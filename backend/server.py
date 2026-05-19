@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Request
+from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -890,7 +891,21 @@ async def create_video(payload: VideoGenerateRequest, authorization: Optional[st
             except Exception:
                 pass
 
-        # 4. Persist the video doc
+        # 4. Download the video bytes immediately — xAI URLs expire after a few
+        # hours, so we self-host the file (served via /api/videos/{id}/file).
+        video_bytes_b64: Optional[str] = None
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as http:
+                vr = await http.get(video_url)
+                if vr.status_code == 200 and len(vr.content) < 14 * 1024 * 1024:
+                    video_bytes_b64 = base64.b64encode(vr.content).decode("ascii")
+                    logger.info(f"[VID] archived {video_id_for_log if False else 'pending'} bytes={len(vr.content)}")
+                else:
+                    logger.warning(f"[VID] could not archive video status={vr.status_code} size={len(vr.content)}")
+        except Exception as e:
+            logger.warning(f"[VID] archive download failed: {e}")
+
+        # 5. Persist the video doc (with archived bytes if we got them)
         video_id = f"vid_{uuid.uuid4().hex[:12]}"
         doc = {
             "id": video_id,
@@ -899,12 +914,18 @@ async def create_video(payload: VideoGenerateRequest, authorization: Optional[st
             "gen_id": payload.gen_id,
             "image_index": payload.image_index,
             "video_url": video_url,
+            "video_b64": video_bytes_b64,  # None if download failed
+            "archived": bool(video_bytes_b64),
             "duration_seconds": payload.duration_seconds,
             "prompt": final_prompt,
             "created_at": datetime.now(timezone.utc),
         }
         await db.videos.insert_one(doc.copy())
+        # Don't leak the heavy bytes in the response
         doc.pop("_id", None)
+        doc.pop("video_b64", None)
+        # Tell the client our self-hosted playback url
+        doc["playback_url"] = f"/api/videos/{video_id}/file" if video_bytes_b64 else video_url
         return doc
 
     raise HTTPException(
@@ -936,12 +957,61 @@ async def list_videos(authorization: Optional[str] = Header(None)):
 
 
 @api_router.get("/generations/{gen_id}/videos")
-async def list_generation_videos(gen_id: str, authorization: Optional[str] = Header(None)):
+async def list_generation_videos(gen_id: str, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     items = await db.videos.find(
-        {"user_id": user["user_id"], "gen_id": gen_id}, {"_id": 0}
+        {"user_id": user["user_id"], "gen_id": gen_id},
+        {"_id": 0, "video_b64": 0, "prompt": 0},
     ).sort("created_at", 1).to_list(200)
+
+    # Inject playback_url: self-hosted when archived, otherwise fall back to xAI URL
+    fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    fwd_host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(",")[0].strip()
+    base = f"{fwd_proto}://{fwd_host}" if fwd_host else ""
+
+    # Also infer "archived" from presence of video_b64 in DB (without sending bytes)
+    ids = [it["id"] for it in items]
+    archived_ids: set = set()
+    if ids:
+        async for d in db.videos.find(
+            {"id": {"$in": ids}, "video_b64": {"$exists": True, "$ne": None}}, {"_id": 0, "id": 1}
+        ):
+            archived_ids.add(d["id"])
+
+    for it in items:
+        if it["id"] in archived_ids:
+            it["archived"] = True
+            it["playback_url"] = f"{base}/api/videos/{it['id']}/file" if base else f"/api/videos/{it['id']}/file"
+        else:
+            it["archived"] = False
+            it["playback_url"] = it.get("video_url")
     return items
+
+
+@api_router.get("/videos/{video_id}/file")
+async def serve_archived_video(video_id: str):
+    """Serve the archived MP4 bytes for a video. Public on purpose so the
+    HTML5/native video player can fetch it without sending Auth headers."""
+    doc = await db.videos.find_one({"id": video_id}, {"_id": 0, "video_b64": 1})
+    if not doc or not doc.get("video_b64"):
+        raise HTTPException(status_code=404, detail="Video non disponibile (non archiviato)")
+    try:
+        data = base64.b64decode(doc["video_b64"])
+    except Exception:
+        raise HTTPException(status_code=500, detail="Video corrotto")
+    return Response(
+        content=data,
+        media_type="video/mp4",
+        headers={
+            "Content-Length": str(len(data)),
+            "Cache-Control": "public, max-age=86400",
+            "Accept-Ranges": "bytes",
+        },
+    )
 
 
 @api_router.delete("/videos/{video_id}")
