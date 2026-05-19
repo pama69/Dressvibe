@@ -198,6 +198,14 @@ async def root():
     return {"message": "DressVibe API", "status": "ok"}
 
 
+# Lightweight, no-auth endpoint dedicated to external uptime monitors.
+# Hit this URL every 5 minutes from cron-job.org / UptimeRobot / similar
+# to prevent the deployed container from being suspended for inactivity.
+@api_router.get("/health")
+async def health():
+    return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
+
+
 # ---------- Auth ----------
 @api_router.post("/auth/session")
 async def create_session(payload: SessionCreate):
