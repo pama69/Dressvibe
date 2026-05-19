@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { api } from "@/src/api/client";
@@ -63,6 +63,38 @@ export default function Upload() {
   const [gender, setGender] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // After a successful save we navigate back via router.back(). Expo Router may
+  // keep this screen mounted, so the next time the user opens "Aggiungi capo"
+  // they would see the previous photo still there with only a "Cambia" button
+  // visible (no Galleria / Scatta foto). This flag resets the form the next
+  // time the screen becomes focused after a save.
+  const didSaveRef = useRef(false);
+
+  const resetForm = useCallback(() => {
+    setImageBase64(null);
+    setName("");
+    setCategory("t-shirt");
+    setColor("");
+    setSize("");
+    setPrice("");
+    setSeason("");
+    setGender("");
+    setError(null);
+    setSaving(false);
+  }, []);
+
+  // When the screen comes (back) into focus, if the previous visit ended with
+  // a successful save, wipe the form so the user lands on the initial
+  // "Galleria / Scatta foto" picker. We don't reset on every focus to preserve
+  // form state if the user only dipped into /backgrounds and came back.
+  useFocusEffect(
+    useCallback(() => {
+      if (didSaveRef.current) {
+        didSaveRef.current = false;
+        resetForm();
+      }
+    }, [resetForm])
+  );
 
   const pickImage = async () => {
     try {
@@ -145,6 +177,9 @@ export default function Upload() {
         season: season || null,
         gender: gender || null,
       });
+      // Mark the save so the next focus on this screen resets the form
+      // (in case Expo Router keeps the component mounted).
+      didSaveRef.current = true;
       router.back();
     } catch (e: any) {
       const msg = e?.message || "Impossibile salvare";
