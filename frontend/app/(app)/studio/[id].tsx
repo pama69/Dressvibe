@@ -48,6 +48,7 @@ export default function Studio() {
   const [videos, setVideos] = useState<any[]>([]);
   const [tgDescription, setTgDescription] = useState("");
   const [publishingTgVideoId, setPublishingTgVideoId] = useState<string | null>(null);
+  const [videoBusy, setVideoBusy] = useState(false);
   const [igSheet, setIgSheet] = useState<{ image?: string; video?: string } | null>(null);
 
   const loadVideos = useCallback(async () => {
@@ -524,8 +525,5 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(16,185,129,0.08)",
   },
   editedText: { color: theme.colors.success, fontSize: 12, flex: 1 },
-});
-
-s, fontSize: 12, flex: 1 },
 });
 
