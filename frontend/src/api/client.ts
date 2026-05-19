@@ -150,6 +150,17 @@ export const api = {
     ),
   telegramWebhookInfo: () =>
     request<{ ok: boolean; info: any }>("/telegram/webhook-info"),
+
+  // user settings (per-shop preferences)
+  getUserSettings: () =>
+    request<{ telegram_channel: string; telegram_channel_default: string; shop_name: string; city: string }>(
+      "/user-settings"
+    ),
+  updateUserSettings: (body: { telegram_channel?: string; shop_name?: string; city?: string }) =>
+    request<{ telegram_channel: string; telegram_channel_default: string; shop_name: string; city: string }>(
+      "/user-settings",
+      { method: "PUT", body }
+    ),
   telegramStatus: () =>
     request<{ configured: boolean; channel_id: string | null }>("/telegram/status"),
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -105,6 +105,39 @@ export default function Profile() {
   // Telegram diagnostics
   const [tgBusy, setTgBusy] = useState(false);
   const [tgInfo, setTgInfo] = useState<any>(null);
+
+  // Telegram channel + shop settings
+  const [channelInput, setChannelInput] = useState("");
+  const [channelDefault, setChannelDefault] = useState("");
+  const [channelSaving, setChannelSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await api.getUserSettings();
+        setChannelInput(s.telegram_channel || "");
+        setChannelDefault(s.telegram_channel_default || "");
+      } catch {}
+    })();
+  }, []);
+
+  const saveChannel = async () => {
+    setChannelSaving(true);
+    try {
+      const s = await api.updateUserSettings({ telegram_channel: channelInput });
+      setChannelInput(s.telegram_channel || "");
+      Alert.alert(
+        "Canale aggiornato ✅",
+        s.telegram_channel
+          ? `Le prossime pubblicazioni andranno su:\n${s.telegram_channel}\n\nAssicurati che @instapost_mybot sia amministratore con permesso di pubblicare.`
+          : "Canale rimosso. Tornerai a usare il canale di default."
+      );
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile salvare il canale");
+    } finally {
+      setChannelSaving(false);
+    }
+  };
 
   const handleTelegramSetup = async () => {
     setTgBusy(true);
@@ -249,6 +282,44 @@ export default function Profile() {
           <Text style={s.logoutText}>Esci dall'account</Text>
         </TouchableOpacity>
 
+        {/* Telegram channel selector */}
+        <View style={s.tgBlock}>
+          <Text style={s.tgTitle}>📣 Canale Telegram per pubblicazioni</Text>
+          <Text style={s.tgHint}>
+            Dove il bot @instapost_mybot pubblicherà le foto e i video.
+            Scrivi il nome del canale (es. <Text style={{ fontWeight: "700" }}>@frammenti_pe</Text>) o l'ID numerico.
+            Il bot deve essere amministratore del canale con permesso di pubblicare.
+          </Text>
+          <TextInput
+            value={channelInput}
+            onChangeText={setChannelInput}
+            placeholder={channelDefault || "@nomecanale"}
+            placeholderTextColor={theme.colors.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={s.channelInput}
+            testID="tg-channel-input"
+          />
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TouchableOpacity
+              style={[s.tgBtn, channelSaving && { opacity: 0.5 }]}
+              onPress={saveChannel}
+              disabled={channelSaving}
+              testID="tg-channel-save"
+            >
+              {channelSaving ? <ActivityIndicator color="#000" /> : (
+                <>
+                  <Ionicons name="save-outline" size={16} color="#000" />
+                  <Text style={s.tgBtnText}>Salva canale</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+          {channelDefault ? (
+            <Text style={s.tgInfoText}>Default sistema: {channelDefault}</Text>
+          ) : null}
+        </View>
+
         {/* Telegram diagnostics — fix for deployed env */}
         <View style={s.tgBlock}>
           <Text style={s.tgTitle}>📡 Diagnostica Telegram</Text>
@@ -351,5 +422,10 @@ const s = StyleSheet.create({
   },
   tgBtnSecondaryText: { color: theme.colors.text, fontSize: 13 },
   tgInfoText: { color: theme.colors.textMuted, fontSize: 11, fontFamily: "monospace" },
+  channelInput: {
+    borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.bg,
+    paddingHorizontal: 14, paddingVertical: 12, color: theme.colors.text, fontSize: 15,
+    fontFamily: "monospace",
+  },
   tgError: { color: theme.colors.error, fontSize: 11 },
 });

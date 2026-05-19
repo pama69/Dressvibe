@@ -1055,8 +1055,14 @@ class TelegramPublishRequest(BaseModel):
 @api_router.post("/telegram/publish")
 async def telegram_publish(payload: TelegramPublishRequest, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
-        raise HTTPException(status_code=503, detail="Telegram non configurato")
+    if not TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="Telegram non configurato (token mancante)")
+
+    # Per-user channel override; falls back to the env default
+    us = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    channel_id = (us.get("telegram_channel") or "").strip() or TELEGRAM_CHANNEL_ID
+    if not channel_id:
+        raise HTTPException(status_code=503, detail="Nessun canale Telegram configurato. Imposta il canale nel Profilo.")
 
     media_type = (payload.media_type or "photo").lower()
     if media_type == "video":
@@ -1083,7 +1089,7 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
     if media_type == "video":
         # Try URL-mode first. Telegram itself downloads from the URL.
         data = {
-            "chat_id": TELEGRAM_CHANNEL_ID,
+            "chat_id": channel_id,
             "video": payload.video_url,
             "caption": caption,
             "reply_markup": _json.dumps(keyboard),
@@ -1099,7 +1105,7 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
                     raise HTTPException(status_code=502, detail=f"Impossibile scaricare il video sorgente ({vr.status_code})")
                 files = {"video": ("clip.mp4", vr.content, "video/mp4")}
                 up_data = {
-                    "chat_id": TELEGRAM_CHANNEL_ID,
+                    "chat_id": channel_id,
                     "caption": caption,
                     "reply_markup": _json.dumps(keyboard),
                     "supports_streaming": "true",
@@ -1123,7 +1129,7 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
         photo_bytes = base64.b64decode(payload.image_base64)
         files = {"photo": ("outfit.png", photo_bytes, "image/png")}
         data = {
-            "chat_id": TELEGRAM_CHANNEL_ID,
+            "chat_id": channel_id,
             "caption": caption,
             "reply_markup": _json.dumps(keyboard),
         }
@@ -1143,7 +1149,7 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
         "gen_id": payload.gen_id,
         "image_index": payload.image_index,
         "media_type": media_type,
-        "channel_id": TELEGRAM_CHANNEL_ID,
+        "channel_id": channel_id,
         "channel_message_id": message_id,
         "caption": caption,
         "file_id": file_id,
@@ -1348,11 +1354,71 @@ async def telegram_webhook(secret: str, request: Request):
 
 @api_router.get("/telegram/status")
 async def telegram_status(authorization: Optional[str] = Header(None)):
-    await get_current_user(authorization)
+    user = await get_current_user(authorization)
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
     return {
-        "configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL_ID),
-        "channel_id": TELEGRAM_CHANNEL_ID if TELEGRAM_BOT_TOKEN else None,
+        "configured": bool(TELEGRAM_BOT_TOKEN and (settings.get("telegram_channel") or TELEGRAM_CHANNEL_ID)),
+        "channel_id": settings.get("telegram_channel") or TELEGRAM_CHANNEL_ID if TELEGRAM_BOT_TOKEN else None,
+        "channel_source": "user" if settings.get("telegram_channel") else "default",
     }
+
+
+# ---------- User Settings ----------
+class UserSettingsUpdate(BaseModel):
+    telegram_channel: Optional[str] = None
+    shop_name: Optional[str] = None
+    city: Optional[str] = None
+
+
+def normalize_channel(value: Optional[str]) -> Optional[str]:
+    """Accept '@frammenti_pe', 'frammenti_pe', 't.me/frammenti_pe', full URL.
+    Always return Telegram's canonical form '@frammenti_pe' (or numeric id
+    untouched). Empty string clears the override."""
+    if value is None:
+        return None
+    s = value.strip()
+    if not s:
+        return ""  # explicit clear
+    # numeric chat id (e.g. -1001234567890) — leave as-is
+    if s.lstrip("-").isdigit():
+        return s
+    # strip URL prefixes
+    for prefix in ("https://t.me/", "http://t.me/", "t.me/", "telegram.me/"):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):]
+            break
+    s = s.lstrip("@").strip("/")
+    return f"@{s}" if s else ""
+
+
+@api_router.get("/user-settings")
+async def get_user_settings(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    s = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    return {
+        "telegram_channel": s.get("telegram_channel") or "",
+        "telegram_channel_default": TELEGRAM_CHANNEL_ID or "",
+        "shop_name": s.get("shop_name") or "Frammenti",
+        "city": s.get("city") or "Pescara",
+    }
+
+
+@api_router.put("/user-settings")
+async def update_user_settings(payload: UserSettingsUpdate, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    update_doc: dict = {"user_id": user["user_id"], "updated_at": datetime.now(timezone.utc)}
+    if payload.telegram_channel is not None:
+        update_doc["telegram_channel"] = normalize_channel(payload.telegram_channel)
+    if payload.shop_name is not None:
+        update_doc["shop_name"] = payload.shop_name.strip()[:80]
+    if payload.city is not None:
+        update_doc["city"] = payload.city.strip()[:80]
+    await db.user_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": update_doc},
+        upsert=True,
+    )
+    return await get_user_settings(authorization)
 
 
 # =================== App init ===================
