@@ -44,9 +44,15 @@ XAI_API_BASE = "https://api.x.ai/v1"
 # (which has a shared budget). Free tier on AI Studio is generous.
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
 GEMINI_TEXT_MODEL = os.environ.get('GEMINI_TEXT_MODEL', 'gemini-flash-latest')
-GEMINI_IMAGE_MODEL = os.environ.get(
-    'GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-image-preview'
-)
+# Image generation: try the newest Nano Banana first, falling back across models
+# if a specific one is overloaded (503) or unavailable.
+GEMINI_IMAGE_MODEL_CHAIN = [
+    m.strip() for m in os.environ.get(
+        'GEMINI_IMAGE_MODEL_CHAIN',
+        'gemini-3.1-flash-image-preview,nano-banana-pro-preview,gemini-3-pro-image-preview,gemini-2.5-flash-image',
+    ).split(',') if m.strip()
+]
+GEMINI_IMAGE_MODEL = GEMINI_IMAGE_MODEL_CHAIN[0] if GEMINI_IMAGE_MODEL_CHAIN else 'gemini-3.1-flash-image-preview'
 
 _gemini_client = None
 if GEMINI_API_KEY:
@@ -421,43 +427,75 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label
 async def _gemini_direct_generate_image(
     prompt: str, reference_images_b64: List[str]
 ) -> Optional[str]:
-    """Use the shop owner's personal Gemini API key — bypasses Emergent budget."""
+    """Use the shop owner's personal Gemini API key — bypasses Emergent budget.
+
+    Tries each model in GEMINI_IMAGE_MODEL_CHAIN until one succeeds. Each model
+    is retried up to 3 times with exponential backoff on transient 503 errors.
+    """
     if not _gemini_client:
         return None
-    try:
-        from google.genai import types as _gtypes
-        parts: list = []
-        for b64 in reference_images_b64:
-            try:
-                raw = base64.b64decode(b64)
-                parts.append(_gtypes.Part.from_bytes(data=raw, mime_type="image/png"))
-            except Exception:
-                continue
-        parts.append(_gtypes.Part.from_text(text=prompt))
-        # Run blocking SDK call in a worker thread to avoid blocking the event loop
-        loop = asyncio.get_running_loop()
-        resp = await loop.run_in_executor(
-            None,
-            lambda: _gemini_client.models.generate_content(
-                model=GEMINI_IMAGE_MODEL,
+    from google.genai import types as _gtypes
+
+    parts: list = []
+    for b64 in reference_images_b64:
+        try:
+            raw = base64.b64decode(b64)
+            parts.append(_gtypes.Part.from_bytes(data=raw, mime_type="image/png"))
+        except Exception:
+            continue
+    parts.append(_gtypes.Part.from_text(text=prompt))
+
+    loop = asyncio.get_running_loop()
+
+    def _try_one(model_name: str) -> Optional[str]:
+        try:
+            resp = _gemini_client.models.generate_content(
+                model=model_name,
                 contents=parts,
-            ),
-        )
-        cands = getattr(resp, "candidates", None) or []
-        for c in cands:
-            content = getattr(c, "content", None)
-            for p in getattr(content, "parts", []) or []:
-                inline = getattr(p, "inline_data", None)
-                if inline and getattr(inline, "data", None):
-                    raw = inline.data
-                    if isinstance(raw, bytes):
-                        return base64.b64encode(raw).decode("ascii")
-                    if isinstance(raw, str):
-                        return raw  # already base64
-        return None
-    except Exception as e:
-        logger.exception(f"[Gemini-direct] image gen failed: {e}")
-        return None
+            )
+            for c in (getattr(resp, "candidates", None) or []):
+                content = getattr(c, "content", None)
+                for p in (getattr(content, "parts", []) or []):
+                    inline = getattr(p, "inline_data", None)
+                    if inline and getattr(inline, "data", None):
+                        raw = inline.data
+                        if isinstance(raw, bytes):
+                            return base64.b64encode(raw).decode("ascii")
+                        if isinstance(raw, str):
+                            return raw  # already base64
+            return None
+        except Exception as exc:
+            # Re-raise so the caller can see the error / pick the next model
+            raise exc
+
+    last_err: Optional[Exception] = None
+    for model_name in GEMINI_IMAGE_MODEL_CHAIN or [GEMINI_IMAGE_MODEL]:
+        for attempt in range(3):
+            try:
+                img = await loop.run_in_executor(None, _try_one, model_name)
+                if img:
+                    if attempt > 0 or model_name != (GEMINI_IMAGE_MODEL_CHAIN[0] if GEMINI_IMAGE_MODEL_CHAIN else GEMINI_IMAGE_MODEL):
+                        logger.info(f"[Gemini-direct] image OK via {model_name} (attempt {attempt + 1})")
+                    return img
+                # No image returned, try next model immediately
+                logger.warning(f"[Gemini-direct] {model_name} returned no image, trying next")
+                break
+            except Exception as e:
+                last_err = e
+                msg = str(e)
+                # Only retry on transient 503/UNAVAILABLE
+                if "503" in msg or "UNAVAILABLE" in msg or "overload" in msg.lower() or "high demand" in msg.lower():
+                    backoff = 1.5 * (attempt + 1)
+                    logger.warning(f"[Gemini-direct] {model_name} 503 (try {attempt + 1}/3), retry in {backoff}s")
+                    await asyncio.sleep(backoff)
+                    continue
+                # Hard error → break out and try next model
+                logger.warning(f"[Gemini-direct] {model_name} hard error, skipping: {msg[:200]}")
+                break
+
+    if last_err:
+        logger.error(f"[Gemini-direct] all models failed, last: {str(last_err)[:300]}")
+    return None
 
 
 async def generate_single_image(prompt: str, reference_images_b64: List[str], session_id: str) -> Optional[str]:
