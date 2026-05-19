@@ -38,6 +38,25 @@ TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 XAI_API_KEY = os.environ.get('XAI_API_KEY', '')
 XAI_API_BASE = "https://api.x.ai/v1"
 
+# Optional: shop-owner-provided Gemini API key. When set, we route both text
+# (Instagram captions, etc.) and image generation (Nano Banana) DIRECTLY to
+# Google's official Gemini API instead of going through the Emergent LLM gateway
+# (which has a shared budget). Free tier on AI Studio is generous.
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '').strip()
+GEMINI_TEXT_MODEL = os.environ.get('GEMINI_TEXT_MODEL', 'gemini-flash-latest')
+GEMINI_IMAGE_MODEL = os.environ.get(
+    'GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-image-preview'
+)
+
+_gemini_client = None
+if GEMINI_API_KEY:
+    try:
+        from google import genai as _google_genai
+        _gemini_client = _google_genai.Client(api_key=GEMINI_API_KEY)
+    except Exception as _e:  # pragma: no cover - defensive
+        logging.getLogger("server").warning(f"Gemini client init failed: {_e}")
+        _gemini_client = None
+
 app = FastAPI(title="DressVibe API")
 api_router = APIRouter(prefix="/api")
 
@@ -399,7 +418,56 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label
     )
 
 
+async def _gemini_direct_generate_image(
+    prompt: str, reference_images_b64: List[str]
+) -> Optional[str]:
+    """Use the shop owner's personal Gemini API key — bypasses Emergent budget."""
+    if not _gemini_client:
+        return None
+    try:
+        from google.genai import types as _gtypes
+        parts: list = []
+        for b64 in reference_images_b64:
+            try:
+                raw = base64.b64decode(b64)
+                parts.append(_gtypes.Part.from_bytes(data=raw, mime_type="image/png"))
+            except Exception:
+                continue
+        parts.append(_gtypes.Part.from_text(text=prompt))
+        # Run blocking SDK call in a worker thread to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: _gemini_client.models.generate_content(
+                model=GEMINI_IMAGE_MODEL,
+                contents=parts,
+            ),
+        )
+        cands = getattr(resp, "candidates", None) or []
+        for c in cands:
+            content = getattr(c, "content", None)
+            for p in getattr(content, "parts", []) or []:
+                inline = getattr(p, "inline_data", None)
+                if inline and getattr(inline, "data", None):
+                    raw = inline.data
+                    if isinstance(raw, bytes):
+                        return base64.b64encode(raw).decode("ascii")
+                    if isinstance(raw, str):
+                        return raw  # already base64
+        return None
+    except Exception as e:
+        logger.exception(f"[Gemini-direct] image gen failed: {e}")
+        return None
+
+
 async def generate_single_image(prompt: str, reference_images_b64: List[str], session_id: str) -> Optional[str]:
+    # Prefer the shop-owner's personal Gemini key when configured.
+    if _gemini_client:
+        img = await _gemini_direct_generate_image(prompt, reference_images_b64)
+        if img:
+            return img
+        logger.warning("[Gemini-direct] returned no image, falling back to Emergent gateway")
+
     try:
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
@@ -762,14 +830,26 @@ async def generate_instagram_caption(payload: InstagramCaptionRequest, authoriza
     )
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"ig_caption_{user['user_id']}_{uuid.uuid4().hex[:6]}",
-            system_message=system_msg,
-        ).with_model("gemini", "gemini-2.5-flash")
-        msg = UserMessage(text=user_prompt)
-        reply = await chat.send_message(msg)
-        text = (reply or "").strip()
+        if _gemini_client:
+            # Use the shop owner's personal Gemini key — no Emergent budget consumed
+            loop = asyncio.get_running_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: _gemini_client.models.generate_content(
+                    model=GEMINI_TEXT_MODEL,
+                    contents=f"{system_msg}\n\n{user_prompt}",
+                ),
+            )
+            text = (getattr(resp, "text", None) or "").strip()
+        else:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"ig_caption_{user['user_id']}_{uuid.uuid4().hex[:6]}",
+                system_message=system_msg,
+            ).with_model("gemini", "gemini-2.5-flash")
+            msg = UserMessage(text=user_prompt)
+            reply = await chat.send_message(msg)
+            text = (reply or "").strip()
         # Strip eventual markdown fences just in case
         if text.startswith("```"):
             text = text.strip("`")
