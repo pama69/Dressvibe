@@ -143,6 +143,13 @@ export const api = {
       "/telegram/publish",
       { method: "POST", body }
     ),
+  telegramSetupWebhook: () =>
+    request<{ ok: boolean; webhook_url: string; info: any }>(
+      "/telegram/setup-webhook",
+      { method: "POST", body: {} }
+    ),
+  telegramWebhookInfo: () =>
+    request<{ ok: boolean; info: any }>("/telegram/webhook-info"),
   telegramStatus: () =>
     request<{ configured: boolean; channel_id: string | null }>("/telegram/status"),
 

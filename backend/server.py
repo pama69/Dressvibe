@@ -1082,6 +1082,80 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
     return {"ok": True, "channel_message_id": message_id, "token": token, "media_type": media_type}
 
 
+@api_router.post("/telegram/setup-webhook")
+async def telegram_setup_webhook(request: Request, authorization: Optional[str] = Header(None)):
+    """
+    Re-binds Telegram bot webhook to the *current* deployed host. This is critical
+    because PUBLIC_BASE_URL is baked at preview time and does not auto-update when
+    the app is deployed under a different domain. Calling this endpoint from the
+    deployed frontend uses the inbound Host header to point Telegram at the right
+    place.
+    """
+    user = await get_current_user(authorization)
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Telegram non configurato (token/secret mancanti)")
+
+    # Pick the host that the client actually used to reach us (works behind the
+    # k8s ingress because the ingress forwards the public host).
+    fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    fwd_host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(",")[0].strip()
+    if not fwd_host:
+        raise HTTPException(status_code=400, detail="Impossibile determinare l'host pubblico")
+
+    base = f"{fwd_proto}://{fwd_host}"
+    webhook_url = f"{base}/api/telegram/webhook/{TELEGRAM_WEBHOOK_SECRET}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.post(
+                f"{TELEGRAM_API}/setWebhook",
+                json={
+                    "url": webhook_url,
+                    "allowed_updates": ["message", "channel_post", "callback_query"],
+                    "drop_pending_updates": False,
+                },
+            )
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"raw": resp.text}
+            ok = bool(body.get("ok"))
+            logger.info(f"[TG] setup-webhook by user={user['user_id']} url={webhook_url} ok={ok} body={body}")
+            if not ok:
+                raise HTTPException(status_code=502, detail=f"Telegram error: {body}")
+        # Also fetch current webhook info for the response so the UI can show it
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            info = await http.get(f"{TELEGRAM_API}/getWebhookInfo")
+            info_body = info.json() if info.headers.get("content-type", "").startswith("application/json") else {}
+        return {
+            "ok": True,
+            "webhook_url": webhook_url,
+            "info": info_body.get("result", {}),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"setup-webhook failed: {e}")
+        raise HTTPException(status_code=502, detail=f"setup-webhook failed: {e}")
+
+
+@api_router.get("/telegram/webhook-info")
+async def telegram_webhook_info(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="Telegram non configurato")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            info = await http.get(f"{TELEGRAM_API}/getWebhookInfo")
+            body = info.json()
+        return {"ok": True, "info": body.get("result", {}), "user_id": user["user_id"]}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"webhook-info failed: {e}")
+
+
+
+
 @api_router.post("/telegram/webhook/{secret}")
 async def telegram_webhook(secret: str, request: Request):
     if not TELEGRAM_WEBHOOK_SECRET or secret != TELEGRAM_WEBHOOK_SECRET:
@@ -1117,22 +1191,39 @@ async def telegram_webhook(secret: str, request: Request):
         if data.startswith("book:"):
             token = data.split(":", 1)[1]
             pub = await db.tg_publications.find_one({"token": token}, {"_id": 0})
+            logger.info(
+                f"[TG-CB] click token={token} user_tg={user_id_tg} handle={handle} "
+                f"pub_found={bool(pub)} admin_set={bool(TELEGRAM_ADMIN_CHAT_ID)}"
+            )
 
             # 1. Acknowledge the tap (always shows a Telegram-native toast)
-            await tg_api("answerCallbackQuery", {
-                "callback_query_id": cq["id"],
-                "text": "✓ Prenotazione inviata! Sarai contattata al più presto.",
-                "show_alert": True,
-            })
-
-            # 2. Try to DM the user a private confirmation
-            if user_id_tg:
-                await tg_api("sendMessage", {
-                    "chat_id": user_id_tg,
-                    "text": "Grazie per l'interesse! Sarai ricontattata a breve!",
+            try:
+                await tg_api("answerCallbackQuery", {
+                    "callback_query_id": cq["id"],
+                    "text": "✓ Richiesta inviata! Sarai ricontattata a breve.",
+                    "show_alert": True,
                 })
+            except Exception as e:
+                logger.warning(f"[TG-CB] answerCallbackQuery failed: {e}")
 
-            # 3. Notify the admin
+            # 2. Try to DM the user a private confirmation. This almost always
+            # fails for users who haven't started the bot first (Telegram safety
+            # rule). We wrap in try/except so it never breaks the rest of the flow.
+            if user_id_tg:
+                try:
+                    s, b = await tg_api("sendMessage", {
+                        "chat_id": user_id_tg,
+                        "text": "Grazie per l'interesse! Sarai ricontattata a breve!",
+                    })
+                    if s != 200 or not b.get("ok"):
+                        logger.info(
+                            f"[TG-CB] DM to user {user_id_tg} skipped (probably never "
+                            f"started the bot): {b.get('description')}"
+                        )
+                except Exception as e:
+                    logger.warning(f"[TG-CB] DM exception: {e}")
+
+            # 3. Notify the admin (always, even if pub is None for some reason)
             if TELEGRAM_ADMIN_CHAT_ID:
                 now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
                 admin_text = (
@@ -1142,29 +1233,44 @@ async def telegram_webhook(secret: str, request: Request):
                 )
                 if pub and pub.get("caption"):
                     admin_text += f"📝 Capo: {pub['caption'][:200]}\n"
-                # Forward the original photo to admin, fallback to text-only
-                if pub and pub.get("file_id"):
-                    await tg_api("sendPhoto", {
-                        "chat_id": TELEGRAM_ADMIN_CHAT_ID,
-                        "photo": pub["file_id"],
-                        "caption": admin_text,
-                        "parse_mode": "Markdown",
-                    })
                 else:
-                    await tg_api("sendMessage", {
-                        "chat_id": TELEGRAM_ADMIN_CHAT_ID,
-                        "text": admin_text,
-                        "parse_mode": "Markdown",
-                    })
+                    admin_text += (
+                        f"⚠️ Pubblicazione non trovata nel database "
+                        f"(token={token[:6]}…). "
+                        f"Probabile mismatch tra ambiente di pubblicazione e webhook.\n"
+                    )
+                try:
+                    if pub and pub.get("file_id"):
+                        s, b = await tg_api("sendPhoto", {
+                            "chat_id": TELEGRAM_ADMIN_CHAT_ID,
+                            "photo": pub["file_id"],
+                            "caption": admin_text,
+                            "parse_mode": "Markdown",
+                        })
+                    else:
+                        s, b = await tg_api("sendMessage", {
+                            "chat_id": TELEGRAM_ADMIN_CHAT_ID,
+                            "text": admin_text,
+                            "parse_mode": "Markdown",
+                        })
+                    if s != 200 or not b.get("ok"):
+                        logger.error(f"[TG-CB] admin notify failed status={s} body={b}")
+                except Exception as e:
+                    logger.exception(f"[TG-CB] admin notify exception: {e}")
+            else:
+                logger.warning("[TG-CB] TELEGRAM_ADMIN_CHAT_ID not configured — cannot notify admin")
 
             # 4. Log the booking
-            await db.tg_bookings.insert_one({
-                "token": token,
-                "tg_user_id": user_id_tg,
-                "tg_username": username,
-                "tg_name": full_name,
-                "created_at": datetime.now(timezone.utc),
-            })
+            try:
+                await db.tg_bookings.insert_one({
+                    "token": token,
+                    "tg_user_id": user_id_tg,
+                    "tg_username": username,
+                    "tg_name": full_name,
+                    "created_at": datetime.now(timezone.utc),
+                })
+            except Exception as e:
+                logger.warning(f"[TG-CB] booking log failed: {e}")
         else:
             await tg_api("answerCallbackQuery", {"callback_query_id": cq["id"]})
     return {"ok": True}

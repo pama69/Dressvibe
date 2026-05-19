@@ -102,6 +102,46 @@ export default function Profile() {
     ]);
   };
 
+  // Telegram diagnostics
+  const [tgBusy, setTgBusy] = useState(false);
+  const [tgInfo, setTgInfo] = useState<any>(null);
+
+  const handleTelegramSetup = async () => {
+    setTgBusy(true);
+    try {
+      const res = await api.telegramSetupWebhook();
+      setTgInfo(res.info || null);
+      Alert.alert(
+        "Webhook Telegram aggiornato ✅",
+        `Telegram ora invia gli eventi a:\n\n${res.webhook_url}\n\nProva a far premere "Richiedi info" da un cliente — riceverai la notifica qui sull'admin.`,
+      );
+    } catch (err: any) {
+      Alert.alert("Errore", err?.message || "Impossibile aggiornare il webhook");
+    } finally {
+      setTgBusy(false);
+    }
+  };
+
+  const handleTelegramCheck = async () => {
+    setTgBusy(true);
+    try {
+      const res = await api.telegramWebhookInfo();
+      setTgInfo(res.info || null);
+      const info = res.info || {};
+      const last = info.last_error_message
+        ? `\n⚠️ Ultimo errore: ${info.last_error_message}`
+        : "";
+      Alert.alert(
+        "Stato webhook",
+        `URL: ${info.url || "(nessuno)"}\nUpdate pendenti: ${info.pending_update_count ?? 0}${last}`,
+      );
+    } catch (err: any) {
+      Alert.alert("Errore", err?.message || "Impossibile leggere lo stato");
+    } finally {
+      setTgBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={s.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
@@ -208,6 +248,48 @@ export default function Profile() {
           <Ionicons name="log-out-outline" size={18} color={theme.colors.error} />
           <Text style={s.logoutText}>Esci dall'account</Text>
         </TouchableOpacity>
+
+        {/* Telegram diagnostics — fix for deployed env */}
+        <View style={s.tgBlock}>
+          <Text style={s.tgTitle}>📡 Diagnostica Telegram</Text>
+          <Text style={s.tgHint}>
+            Se hai pubblicato sul canale ma il pulsante "Richiedi info" non manda notifiche, il webhook
+            del bot sta puntando al vecchio ambiente di preview. Premi "Aggiorna webhook" qui sotto
+            DALLA VERSIONE DEPLOYATA e il bot inizierà a parlare con questo backend.
+          </Text>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TouchableOpacity
+              style={[s.tgBtn, tgBusy && { opacity: 0.5 }]}
+              onPress={handleTelegramSetup}
+              disabled={tgBusy}
+              testID="tg-setup-webhook"
+            >
+              {tgBusy ? <ActivityIndicator color="#000" /> : (
+                <>
+                  <Ionicons name="link-outline" size={16} color="#000" />
+                  <Text style={s.tgBtnText}>Aggiorna webhook</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.tgBtnSecondary, tgBusy && { opacity: 0.5 }]}
+              onPress={handleTelegramCheck}
+              disabled={tgBusy}
+              testID="tg-check-webhook"
+            >
+              <Ionicons name="information-circle-outline" size={16} color={theme.colors.text} />
+              <Text style={s.tgBtnSecondaryText}>Stato</Text>
+            </TouchableOpacity>
+          </View>
+          {tgInfo?.url ? (
+            <Text style={s.tgInfoText} numberOfLines={3}>
+              ✓ {tgInfo.url.replace(/\/[a-f0-9_]+$/i, "/***")}
+            </Text>
+          ) : null}
+          {tgInfo?.last_error_message ? (
+            <Text style={s.tgError}>⚠️ {tgInfo.last_error_message}</Text>
+          ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -250,4 +332,24 @@ const s = StyleSheet.create({
     flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10,
   },
   logoutText: { color: theme.colors.error, fontSize: 14, fontWeight: "500" },
+  tgBlock: {
+    marginTop: 28, marginHorizontal: 24, marginBottom: 60,
+    padding: 18, gap: 12,
+    borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
+  },
+  tgTitle: { color: theme.colors.text, fontSize: 13, fontWeight: "600", letterSpacing: 0.5 },
+  tgHint: { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 17 },
+  tgBtn: {
+    flex: 1, paddingVertical: 12, paddingHorizontal: 14,
+    backgroundColor: "#2AABEE", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+  },
+  tgBtnText: { color: "#000", fontWeight: "700", letterSpacing: 0.3, fontSize: 13 },
+  tgBtnSecondary: {
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: theme.colors.border,
+    flexDirection: "row", alignItems: "center", gap: 8,
+  },
+  tgBtnSecondaryText: { color: theme.colors.text, fontSize: 13 },
+  tgInfoText: { color: theme.colors.textMuted, fontSize: 11, fontFamily: "monospace" },
+  tgError: { color: theme.colors.error, fontSize: 11 },
 });
