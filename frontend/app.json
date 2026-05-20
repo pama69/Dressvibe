@@ -50,7 +50,8 @@
           "cameraPermission": "Scatta foto dei tuoi capi da vendere"
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

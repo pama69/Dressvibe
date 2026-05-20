@@ -111,15 +111,41 @@ export default function Profile() {
   const [channelDefault, setChannelDefault] = useState("");
   const [channelSaving, setChannelSaving] = useState(false);
 
+  // WhatsApp channel
+  const [waChannelInput, setWaChannelInput] = useState("");
+  const [waChannelSaved, setWaChannelSaved] = useState("");
+  const [waChannelSaving, setWaChannelSaving] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
         const s = await api.getUserSettings();
         setChannelInput(s.telegram_channel || "");
         setChannelDefault(s.telegram_channel_default || "");
+        setWaChannelInput(s.whatsapp_channel_url || "");
+        setWaChannelSaved(s.whatsapp_channel_url || "");
       } catch {}
     })();
   }, []);
+
+  const saveWaChannel = async () => {
+    setWaChannelSaving(true);
+    try {
+      const s = await api.updateUserSettings({ whatsapp_channel_url: waChannelInput });
+      setWaChannelInput(s.whatsapp_channel_url || "");
+      setWaChannelSaved(s.whatsapp_channel_url || "");
+      Alert.alert(
+        "Canale WhatsApp salvato ✅",
+        s.whatsapp_channel_url
+          ? `I link "Posta su WhatsApp" apriranno:\n${s.whatsapp_channel_url}`
+          : "Canale rimosso."
+      );
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile salvare il canale WhatsApp");
+    } finally {
+      setWaChannelSaving(false);
+    }
+  };
 
   const saveChannel = async () => {
     setChannelSaving(true);
@@ -281,6 +307,46 @@ export default function Profile() {
           <Ionicons name="log-out-outline" size={18} color={theme.colors.error} />
           <Text style={s.logoutText}>Esci dall'account</Text>
         </TouchableOpacity>
+
+        {/* WhatsApp channel selector */}
+        <View style={s.tgBlock}>
+          <Text style={s.tgTitle}>💬 Canale WhatsApp</Text>
+          <Text style={s.tgHint}>
+            Il canale dove pubblichi i tuoi look. Quando premerai "Posta su WhatsApp"
+            dallo Studio, l'app aprirà direttamente questo canale per consentirti di
+            allegare la foto e incollare il link "Richiedi info".
+            {"\n"}Incolla qui il link completo del canale (lo trovi in WhatsApp →
+            Canale → ⋮ → "Copia link del canale").
+          </Text>
+          <TextInput
+            value={waChannelInput}
+            onChangeText={setWaChannelInput}
+            placeholder="https://whatsapp.com/channel/0029Va..."
+            placeholderTextColor={theme.colors.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={s.channelInput}
+            testID="wa-channel-input"
+          />
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TouchableOpacity
+              style={[s.tgBtn, waChannelSaving && { opacity: 0.5 }]}
+              onPress={saveWaChannel}
+              disabled={waChannelSaving}
+              testID="wa-channel-save"
+            >
+              {waChannelSaving ? <ActivityIndicator color="#000" /> : (
+                <>
+                  <Ionicons name="logo-whatsapp" size={16} color="#000" />
+                  <Text style={s.tgBtnText}>Salva canale</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+          {waChannelSaved ? (
+            <Text style={s.tgInfoText} numberOfLines={1}>Attivo: {waChannelSaved}</Text>
+          ) : null}
+        </View>
 
         {/* Telegram channel selector */}
         <View style={s.tgBlock}>

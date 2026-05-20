@@ -7,6 +7,7 @@ import * as Font from "expo-font";
 import { Ionicons } from "@expo/vector-icons";
 import { AuthProvider } from "@/src/contexts/AuthContext";
 import { ConfirmProvider } from "@/src/contexts/ConfirmContext";
+import { NotificationsProvider } from "@/src/contexts/NotificationsContext";
 import { theme } from "@/src/theme";
 
 // Suppress non-fatal warnings that clutter the dev overlay on Expo Go.
@@ -44,18 +45,20 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ConfirmProvider>
         <AuthProvider>
-          <StatusBar style="light" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: theme.colors.bg },
-              animation: "fade",
-            }}
-          >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="login" />
-            <Stack.Screen name="(app)" />
-          </Stack>
+          <NotificationsProvider>
+            <StatusBar style="light" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: theme.colors.bg },
+                animation: "fade",
+              }}
+            >
+              <Stack.Screen name="index" />
+              <Stack.Screen name="login" />
+              <Stack.Screen name="(app)" />
+            </Stack>
+          </NotificationsProvider>
         </AuthProvider>
       </ConfirmProvider>
     </SafeAreaProvider>

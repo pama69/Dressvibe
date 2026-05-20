@@ -72,6 +72,7 @@ export default function AppTabs() {
       <Tabs.Screen name="generating" options={{ href: null }} />
       <Tabs.Screen name="results/[id]" options={{ href: null }} />
       <Tabs.Screen name="studio/[id]" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Linking,
   KeyboardAvoidingView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -50,6 +51,63 @@ export default function Studio() {
   const [publishingTgVideoId, setPublishingTgVideoId] = useState<string | null>(null);
   const [videoBusy, setVideoBusy] = useState(false);
   const [igSheet, setIgSheet] = useState<{ image?: string; video?: string } | null>(null);
+  const [waBusy, setWaBusy] = useState(false);
+
+  const shareToWhatsApp = async () => {
+    if (!id || waBusy) return;
+    setWaBusy(true);
+    try {
+      // Generate (or reuse) a short public link for this look + image
+      const link = await api.createShortLink({
+        gen_id: id,
+        image_index: idx,
+        look_name: genTitle || "Look DressVibe",
+      });
+      // Copy the link so the shop owner can paste it into the channel post
+      await Clipboard.setStringAsync(link.public_url).catch(() => {});
+
+      // Read the user's configured WhatsApp channel
+      let channelUrl = "";
+      try {
+        const settings = await api.getUserSettings();
+        channelUrl = settings.whatsapp_channel_url || "";
+      } catch {}
+
+      if (!channelUrl) {
+        Alert.alert(
+          "Canale WhatsApp non configurato",
+          "Vai in Profilo → Canale WhatsApp e incolla il link del tuo canale.",
+          [
+            { text: "Annulla", style: "cancel" },
+            { text: "Apri Profilo", onPress: () => router.push("/(app)/profile") },
+          ],
+        );
+        return;
+      }
+
+      const open = async () => {
+        try { await Linking.openURL(channelUrl); }
+        catch { if (Platform.OS === "web") (globalThis as any).open?.(channelUrl, "_blank"); }
+      };
+
+      Alert.alert(
+        "Pronto per WhatsApp ✅",
+        `Link copiato negli appunti:\n${link.public_url}\n\n` +
+          "1) Salva la foto sul telefono (Scarica HD).\n" +
+          "2) Apri il canale WhatsApp.\n" +
+          "3) Crea un nuovo post → allega la foto → incolla il link.\n" +
+          "4) Quando un cliente premerà 'Richiedi info', riceverai una notifica nella campanella 🔔.",
+        [
+          { text: "Più tardi", style: "cancel" },
+          { text: "Apri WhatsApp", onPress: open },
+        ],
+      );
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile creare il link");
+    } finally {
+      setWaBusy(false);
+    }
+  };
 
   const loadVideos = useCallback(async () => {
     if (!id) return;
@@ -433,6 +491,20 @@ export default function Studio() {
               <TouchableOpacity style={s.shareBtn} onPress={() => image && setIgSheet({ image })} testID="share-instagram">
                 <Ionicons name="logo-instagram" size={20} color={theme.colors.text} />
                 <Text style={s.shareLabel}>Instagram</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.shareBtn, waBusy && { opacity: 0.6 }]}
+                onPress={shareToWhatsApp}
+                disabled={waBusy}
+                testID="share-whatsapp"
+              >
+                {waBusy ? (
+                  <ActivityIndicator color={theme.colors.text} />
+                ) : (
+                  <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+                )}
+                <Text style={s.shareLabel}>WhatsApp</Text>
+                <Text style={s.shareSub}>+ link info</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("share")} testID="share-download">
                 <Ionicons name="download-outline" size={20} color={theme.colors.text} />

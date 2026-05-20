@@ -173,16 +173,37 @@ export const api = {
 
   // user settings (per-shop preferences)
   getUserSettings: () =>
-    request<{ telegram_channel: string; telegram_channel_default: string; shop_name: string; city: string }>(
+    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; shop_name: string; city: string }>(
       "/user-settings"
     ),
-  updateUserSettings: (body: { telegram_channel?: string; shop_name?: string; city?: string }) =>
-    request<{ telegram_channel: string; telegram_channel_default: string; shop_name: string; city: string }>(
+  updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; shop_name?: string; city?: string }) =>
+    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; shop_name: string; city: string }>(
       "/user-settings",
       { method: "PUT", body }
     ),
   telegramStatus: () =>
     request<{ configured: boolean; channel_id: string | null }>("/telegram/status"),
+
+  // WhatsApp / Richiesta Info
+  createShortLink: (body: { gen_id: string; image_index: number; look_name?: string }) =>
+    request<{ short_id: string; look_name: string; public_url: string }>("/short-links", {
+      method: "POST", body,
+    }),
+  listInfoRequests: (onlyNew = false) =>
+    request<Array<{
+      id: string; short_id: string; gen_id: string; image_index: number;
+      look_name: string; customer_name?: string | null; phone?: string | null;
+      message?: string | null; source: string; status: "new" | "read";
+      created_at: string;
+    }>>(`/info-requests${onlyNew ? "?only_new=true" : ""}`),
+  infoRequestsUnreadCount: () =>
+    request<{ count: number }>("/info-requests/unread-count"),
+  markInfoRequestRead: (id: string) =>
+    request<{ ok: boolean }>(`/info-requests/${id}/read`, { method: "POST", body: {} }),
+  markAllInfoRequestsRead: () =>
+    request<{ ok: boolean; updated: number }>("/info-requests/mark-all-read", { method: "POST", body: {} }),
+  deleteInfoRequest: (id: string) =>
+    request<{ ok: boolean }>(`/info-requests/${id}`, { method: "DELETE" }),
 
   // stats
   stats: () => request<any>("/stats"),

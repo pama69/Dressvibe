@@ -17,6 +17,7 @@ import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
+import { useNotifications } from "@/src/contexts/NotificationsContext";
 
 type Garment = {
   id: string;
@@ -41,6 +42,7 @@ export default function Galleria() {
   const router = useRouter();
   const { user } = useAuth();
   const confirm = useConfirm();
+  const { unread } = useNotifications();
   const [items, setItems] = useState<Garment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -100,14 +102,29 @@ export default function Galleria() {
             {user?.name?.split(" ")[0] || "Atelier"}
           </Text>
         </View>
-        <TouchableOpacity
-          style={styles.uploadFab}
-          onPress={() => router.push("/upload")}
-          testID="upload-fab"
-          activeOpacity={0.8}
-        >
-          <Ionicons name="add" size={22} color={theme.colors.primaryFg} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+          <TouchableOpacity
+            style={styles.bell}
+            onPress={() => router.push("/notifications")}
+            testID="bell-btn"
+            activeOpacity={0.7}
+          >
+            <Ionicons name="notifications-outline" size={20} color={theme.colors.text} />
+            {unread > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{unread > 99 ? "99+" : String(unread)}</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.uploadFab}
+            onPress={() => router.push("/upload")}
+            testID="upload-fab"
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add" size={22} color={theme.colors.primaryFg} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.section}>
@@ -218,6 +235,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  bell: {
+    width: 44, height: 44,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  badge: {
+    position: "absolute",
+    top: 2, right: 2,
+    minWidth: 18, height: 18, borderRadius: 9,
+    backgroundColor: "#E11D48",
+    paddingHorizontal: 4,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: theme.colors.bg,
+  },
+  badgeText: { color: "#fff", fontSize: 9, fontWeight: "700", letterSpacing: 0.2 },
   section: {
     paddingHorizontal: 24,
     paddingTop: 24,
