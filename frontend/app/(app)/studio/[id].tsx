@@ -57,22 +57,13 @@ export default function Studio() {
     if (!id || waBusy) return;
     setWaBusy(true);
     try {
-      // Generate (or reuse) a short public link for this look + image
-      const link = await api.createShortLink({
-        gen_id: id,
-        image_index: idx,
-        look_name: genTitle || "Look DressVibe",
-      });
-      // Copy the link so the shop owner can paste it into the channel post
-      await Clipboard.setStringAsync(link.public_url).catch(() => {});
-
-      // Read the user's configured WhatsApp channel
+      // Read the user's configured WhatsApp channel FIRST. If not set we bail
+      // out early and don't even bother creating a short link.
       let channelUrl = "";
       try {
         const settings = await api.getUserSettings();
-        channelUrl = settings.whatsapp_channel_url || "";
+        channelUrl = (settings.whatsapp_channel_url || "").trim();
       } catch {}
-
       if (!channelUrl) {
         Alert.alert(
           "Canale WhatsApp non configurato",
@@ -85,23 +76,55 @@ export default function Studio() {
         return;
       }
 
-      const open = async () => {
-        try { await Linking.openURL(channelUrl); }
-        catch { if (Platform.OS === "web") (globalThis as any).open?.(channelUrl, "_blank"); }
-      };
+      // Generate (or reuse) a short public link for this look + image
+      const link = await api.createShortLink({
+        gen_id: id,
+        image_index: idx,
+        look_name: genTitle || "Look DressVibe",
+      });
 
-      Alert.alert(
-        "Pronto per WhatsApp ✅",
-        `Link copiato negli appunti:\n${link.public_url}\n\n` +
-          "1) Salva la foto sul telefono (Scarica HD).\n" +
-          "2) Apri il canale WhatsApp.\n" +
-          "3) Crea un nuovo post → allega la foto → incolla il link.\n" +
-          "4) Quando un cliente premerà 'Richiedi info', riceverai una notifica nella campanella 🔔.",
-        [
-          { text: "Più tardi", style: "cancel" },
-          { text: "Apri WhatsApp", onPress: open },
-        ],
-      );
+      // Copy link so the shop owner can paste it into the channel post
+      try { await Clipboard.setStringAsync(link.public_url); } catch {}
+
+      // Open WhatsApp IMMEDIATELY (no confirm dialog). On web we use
+      // window.open in the same synchronous tick as the button press so the
+      // popup blocker doesn't kick in. On native we use Linking.openURL.
+      let opened = false;
+      if (Platform.OS === "web") {
+        try {
+          const w = (globalThis as any).open?.(channelUrl, "_blank", "noopener,noreferrer");
+          opened = !!w;
+        } catch { opened = false; }
+        if (!opened) {
+          // Last-resort: navigate the current tab
+          try { (globalThis as any).location.href = channelUrl; opened = true; } catch {}
+        }
+      } else {
+        try {
+          const supported = await Linking.canOpenURL(channelUrl);
+          if (supported) {
+            await Linking.openURL(channelUrl);
+            opened = true;
+          }
+        } catch {
+          try { await Linking.openURL(channelUrl); opened = true; } catch {}
+        }
+      }
+
+      // Lightweight feedback — no blocking dialog so the user can immediately
+      // switch to WhatsApp without an extra tap.
+      if (opened) {
+        Alert.alert(
+          "Pronto per WhatsApp ✅",
+          `Link copiato negli appunti:\n${link.public_url}\n\n` +
+            "Nel canale: nuovo post → allega la foto (Scarica HD) → incolla il link.",
+        );
+      } else {
+        Alert.alert(
+          "Apri il canale manualmente",
+          `Non sono riuscito ad aprire WhatsApp automaticamente. Il link è copiato negli appunti:\n${link.public_url}\n\nCanale: ${channelUrl}`,
+        );
+      }
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile creare il link");
     } finally {
