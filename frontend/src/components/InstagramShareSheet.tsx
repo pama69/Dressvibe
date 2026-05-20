@@ -131,29 +131,40 @@ export default function InstagramShareSheet({
       await Clipboard.setStringAsync(caption);
 
       if (Platform.OS === "web") {
-        // Web fallback: download the file via temp link and try to open instagram.com
+        // Web fallback: download the file via temp link and show instructions.
+        // We intentionally do NOT auto-open instagram.com here because:
+        //   - Instagram sends Cross-Origin-Opener-Policy: same-origin which,
+        //     combined with the preview iframe context, triggers
+        //     ERR_BLOCKED_BY_RESPONSE in Chrome.
+        //   - On desktop Instagram you can't post anyway (no "+" upload UI).
+        // The user can open Instagram manually from their phone — most likely
+        // the real flow they want when posting fashion content.
         const filename = mediaType === "video" ? `dressvibe_${genId || "clip"}.mp4` : `dressvibe_${genId || "img"}.png`;
         if (mediaType === "photo" && imageBase64) {
           const a = document.createElement("a");
           a.href = `data:image/png;base64,${imageBase64}`;
           a.download = filename;
+          a.rel = "noopener noreferrer";
+          document.body.appendChild(a);
           a.click();
+          a.remove();
         } else if (mediaType === "video" && videoUrl) {
           const a = document.createElement("a");
           a.href = videoUrl;
           a.target = "_blank";
           a.rel = "noopener noreferrer";
           a.download = filename;
+          document.body.appendChild(a);
           a.click();
+          a.remove();
         }
-        // Best-effort: open Instagram web in a new tab
-        window.open("https://www.instagram.com/", "_blank");
         notify(
-          "Pronto per Instagram",
-          "Caption copiata negli appunti. " +
-            (mediaType === "video"
-              ? "Salva il video nel telefono e apri Instagram per pubblicarlo."
-              : "Salva l'immagine nel telefono e apri Instagram per pubblicarla."),
+          "Pronto per Instagram ✅",
+          (mediaType === "video"
+            ? "Video scaricato sul PC."
+            : "Foto scaricata sul PC.") +
+            "\nCaption copiata negli appunti.\n\n" +
+            "Per pubblicare: trasferisci il file sul telefono (AirDrop / Drive / WhatsApp Web a te stesso) → apri Instagram dall'app → incolla la caption.",
         );
         return;
       }
