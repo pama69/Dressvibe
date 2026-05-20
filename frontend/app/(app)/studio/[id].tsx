@@ -83,8 +83,11 @@ export default function Studio() {
         look_name: genTitle || "Look DressVibe",
       });
 
-      // Copy link so the shop owner can paste it into the channel post
-      try { await Clipboard.setStringAsync(link.public_url); } catch {}
+      // Copy a polished message + link so the shop owner just pastes it in the
+      // channel post. The arrow emojis make the link visually obvious to
+      // customers scrolling the WhatsApp channel.
+      const clipboardText = `👇 Premi qui per ricevere info 👇\n${link.public_url}`;
+      try { await Clipboard.setStringAsync(clipboardText); } catch {}
 
       // Open WhatsApp IMMEDIATELY (no confirm dialog). On web we use
       // window.open in the same synchronous tick as the button press so the
@@ -116,13 +119,13 @@ export default function Studio() {
       if (opened) {
         Alert.alert(
           "Pronto per WhatsApp ✅",
-          `Link copiato negli appunti:\n${link.public_url}\n\n` +
-            "Nel canale: nuovo post → allega la foto (Scarica HD) → incolla il link.",
+          `Messaggio + link copiati negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\n` +
+            "Nel canale: nuovo post → allega la foto (Scarica HD) → incolla.",
         );
       } else {
         Alert.alert(
           "Apri il canale manualmente",
-          `Non sono riuscito ad aprire WhatsApp automaticamente. Il link è copiato negli appunti:\n${link.public_url}\n\nCanale: ${channelUrl}`,
+          `Non sono riuscito ad aprire WhatsApp automaticamente. Messaggio copiato negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\nCanale: ${channelUrl}`,
         );
       }
     } catch (e: any) {
