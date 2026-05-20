@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Font from "expo-font";
+import * as FileSystem from "expo-file-system/legacy";
 import { Ionicons } from "@expo/vector-icons";
 import { AuthProvider } from "@/src/contexts/AuthContext";
 import { ConfirmProvider } from "@/src/contexts/ConfirmContext";
@@ -49,28 +50,26 @@ export default function RootLayout() {
   useEffect(() => {
     (async () => {
       // KNOWN BUG (Expo SDK 54 + Expo Go): require() for the Ionicons TTF
-      // intermittently returns a 0-byte buffer, which makes Font.loadAsync
-      // reject with "Font file for ionicons is empty". This rejection then
-      // surfaces in dev mode as an uncaught promise error overlay.
-      //
-      // Workaround: skip the broken local require entirely and load the TTF
-      // straight from a public CDN. ~390KB, cached for 1 year by jsdelivr,
-      // so only downloaded on the very first launch.
+      // ships a 0-byte buffer, and Font.loadAsync with `{ uri: ... }` also
+      // fails on some Android builds. Solution: download the TTF ourselves
+      // via expo-file-system to a local cache path, then ask Font.loadAsync
+      // to use that local file:// URI. This works on every platform.
+      const CDN = "https://cdn.jsdelivr.net/npm/@expo/vector-icons@15.0.3/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf";
       try {
-        await Font.loadAsync({
-          Ionicons: {
-            uri: "https://cdn.jsdelivr.net/npm/@expo/vector-icons@15.0.3/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
-          },
-        });
-      } catch (e: any) {
-        // Last-ditch fallback to the bundled asset. If this also fails the
-        // user will see tofu boxes but the app is still usable.
-        console.warn("[fonts] CDN load failed, trying bundled asset:", e?.message || e);
-        try {
-          await Font.loadAsync({ ...Ionicons.font });
-        } catch (e2) {
-          console.warn("[fonts] bundled asset load also failed:", e2);
+        const localPath = `${FileSystem.cacheDirectory}Ionicons.ttf`;
+        let info: any = null;
+        try { info = await FileSystem.getInfoAsync(localPath); } catch {}
+        if (!info?.exists || (info.size || 0) < 10000) {
+          // Download fresh — the file is 389KB.
+          const dl = await FileSystem.downloadAsync(CDN, localPath);
+          console.log("[fonts] downloaded Ionicons.ttf:", dl.status, "→", localPath);
         }
+        await Font.loadAsync({ Ionicons: localPath });
+        console.log("[fonts] Ionicons loaded successfully from", localPath);
+      } catch (e: any) {
+        console.warn("[fonts] download+load chain failed:", e?.message || e);
+        // Last-ditch fallback to the bundled asset.
+        try { await Font.loadAsync({ ...Ionicons.font }); } catch {}
       }
       setFontsLoaded(true);
     })();
