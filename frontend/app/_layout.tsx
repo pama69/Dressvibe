@@ -12,8 +12,6 @@ import { theme } from "@/src/theme";
 
 // Suppress non-fatal warnings that clutter the dev overlay on Expo Go.
 LogBox.ignoreLogs([
-  "Font file for ionicons is empty",
-  "ExpoFontLoader.loadAsync",
   "shadow*",
   "Require cycle:",
 ]);
@@ -24,12 +22,24 @@ export default function RootLayout() {
   useEffect(() => {
     (async () => {
       try {
-        await Font.loadAsync({ ...Ionicons.font });
+        // Explicit TTF require — bypasses any @expo/vector-icons resolver
+        // weirdness that intermittently returns an empty/0-byte buffer on
+        // Expo Go. Doing exactly ONE load keeps the asset registry clean.
+        await Font.loadAsync({
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          Ionicons: require("@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf"),
+        });
       } catch (e) {
-        console.warn("Font load failed", e);
-      } finally {
-        setFontsLoaded(true);
+        console.warn("Ionicons explicit TTF load failed, trying fallback", e);
+        try {
+          // Fallback to the wrapper API in case the explicit path doesn't
+          // resolve in a future @expo/vector-icons release.
+          await Font.loadAsync({ ...Ionicons.font });
+        } catch (e2) {
+          console.warn("Ionicons fallback load failed", e2);
+        }
       }
+      setFontsLoaded(true);
     })();
   }, []);
 
