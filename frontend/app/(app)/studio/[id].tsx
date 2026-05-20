@@ -23,6 +23,7 @@ import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import VideoCard from "@/src/components/VideoCard";
 import InstagramShareSheet from "@/src/components/InstagramShareSheet";
 import { shareToInstagram, shareGeneric } from "@/src/utils/share";
+import { saveImageToGallery } from "@/src/utils/gallery";
 
 const QUICK_EDITS = [
   { label: "Rimuovi sfondo", prompt: "Remove the background completely and replace it with a clean white studio background." },
@@ -50,8 +51,27 @@ export default function Studio() {
   const [tgDescription, setTgDescription] = useState("");
   const [publishingTgVideoId, setPublishingTgVideoId] = useState<string | null>(null);
   const [videoBusy, setVideoBusy] = useState(false);
-  const [igSheet, setIgSheet] = useState<{ image?: string; video?: string } | null>(null);
+  const [igSheet, setIgSheet] = useState<{ image?: string; video?: string; skipSave?: boolean } | null>(null);
   const [waBusy, setWaBusy] = useState(false);
+
+  /** When the user taps the Instagram button we immediately save the active
+   * image into the device gallery so they don't have to wait until the
+   * caption modal is confirmed. The modal will skip its own save thanks to
+   * the `skipSave` flag we pass through. */
+  const openInstagramShare = async () => {
+    if (!image) return;
+    const saved = await saveImageToGallery(image, `dressvibe_${id}_${idx}`);
+    if (Platform.OS !== "web" && saved.ok && saved.where === "gallery") {
+      // Silent on success — modal already gives feedback. We just want the
+      // file to be in the gallery by the time the modal asks "open Instagram".
+    } else if (Platform.OS !== "web" && !saved.ok && saved.error?.includes("Permesso")) {
+      Alert.alert(
+        "Permesso galleria",
+        "Per salvare le foto nella galleria devi concedere il permesso a DressVibe nelle impostazioni del telefono."
+      );
+    }
+    setIgSheet({ image, skipSave: saved.ok });
+  };
 
   const shareToWhatsApp = async () => {
     if (!id || waBusy) return;
@@ -82,6 +102,12 @@ export default function Studio() {
         image_index: idx,
         look_name: genTitle || "Look DressVibe",
       });
+
+      // Save the active image to the device gallery (Photos on iOS, "DressVibe"
+      // album on Android). On web this falls back to a normal Download. Doing it
+      // *before* opening WhatsApp means by the time the channel opens, the file
+      // is already in the user's gallery ready to attach.
+      const saved = await saveImageToGallery(image || "", `dressvibe_${id}_${idx}`);
 
       // Copy a polished message + link so the shop owner just pastes it in the
       // channel post. The arrow emojis make the link visually obvious to
@@ -116,16 +142,22 @@ export default function Studio() {
 
       // Lightweight feedback — no blocking dialog so the user can immediately
       // switch to WhatsApp without an extra tap.
+      const savedMsg = saved.ok
+        ? (saved.where === "gallery" ? "📸 Foto salvata nella galleria.\n" : "📥 Foto scaricata.\n")
+        : "";
+
       if (opened) {
         Alert.alert(
           "Pronto per WhatsApp ✅",
-          `Messaggio + link copiati negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\n` +
-            "Nel canale: nuovo post → allega la foto (Scarica HD) → incolla.",
+          savedMsg +
+            `Messaggio + link copiati negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\n` +
+            "Nel canale: nuovo post → allega la foto dalla galleria → incolla.",
         );
       } else {
         Alert.alert(
           "Apri il canale manualmente",
-          `Non sono riuscito ad aprire WhatsApp automaticamente. Messaggio copiato negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\nCanale: ${channelUrl}`,
+          savedMsg +
+            `Non sono riuscito ad aprire WhatsApp automaticamente. Messaggio copiato negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\nCanale: ${channelUrl}`,
         );
       }
     } catch (e: any) {
@@ -514,7 +546,7 @@ export default function Studio() {
                 <Text style={s.shareLabel}>🚀 PUBBLICA TG</Text>
                 <Text style={s.shareSub}>con "Prenota"</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.shareBtn} onPress={() => image && setIgSheet({ image })} testID="share-instagram">
+              <TouchableOpacity style={s.shareBtn} onPress={openInstagramShare} testID="share-instagram">
                 <Ionicons name="logo-instagram" size={20} color={theme.colors.text} />
                 <Text style={s.shareLabel}>Instagram</Text>
               </TouchableOpacity>
@@ -547,6 +579,7 @@ export default function Studio() {
         videoUrl={igSheet?.video}
         genId={id}
         imageIndex={idx}
+        skipSave={igSheet?.skipSave}
       />
     </SafeAreaView>
   );

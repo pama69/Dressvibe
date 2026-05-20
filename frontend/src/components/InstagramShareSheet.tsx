@@ -41,6 +41,10 @@ type Props = {
   imageIndex?: number;
   shopName?: string;
   city?: string;
+  /** When true, the modal will NOT re-save the media to gallery — used when
+   * the caller (e.g. the Studio screen) has already saved the image to the
+   * gallery before opening the modal. */
+  skipSave?: boolean;
 };
 
 const STYLE_LABELS: { id: Style; label: string; emoji: string }[] = [
@@ -67,6 +71,7 @@ export default function InstagramShareSheet({
   imageIndex,
   shopName = "Frammenti",
   city = "Pescara",
+  skipSave = false,
 }: Props) {
   const mediaType: "photo" | "video" = videoUrl ? "video" : "photo";
   const [style, setStyle] = useState<Style>("elegante");
@@ -169,42 +174,48 @@ export default function InstagramShareSheet({
         return;
       }
 
-      // 2. Save media to device gallery (native)
-      const perm = await MediaLibrary.requestPermissionsAsync(true);
-      if (perm.status !== "granted") {
-        notify("Permesso negato", "Per salvare nella galleria devi concedere il permesso a DressVibe.");
-        return;
-      }
-
-      let localUri: string | null = null;
-      if (mediaType === "photo" && imageBase64) {
-        const path = `${FileSystem.cacheDirectory}dressvibe_${genId || "img"}_${Date.now()}.png`;
-        await FileSystem.writeAsStringAsync(path, imageBase64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        localUri = path;
-      } else if (mediaType === "video" && videoUrl) {
-        const path = `${FileSystem.cacheDirectory}dressvibe_${genId || "clip"}_${Date.now()}.mp4`;
-        const dl = await FileSystem.downloadAsync(videoUrl, path);
-        if (dl.status !== 200) {
-          throw new Error(`Download video fallito (${dl.status})`);
+      // 2. Save media to device gallery (native) — skipped for photos if the
+      // caller has already saved them (avoids creating duplicate gallery items).
+      if (skipSave && mediaType === "photo") {
+        // No save needed; just deep-link to Instagram. We don't have a localUri
+        // so we go straight to the deep-link step.
+      } else {
+        const perm = await MediaLibrary.requestPermissionsAsync(true);
+        if (perm.status !== "granted") {
+          notify("Permesso negato", "Per salvare nella galleria devi concedere il permesso a DressVibe.");
+          return;
         }
-        localUri = dl.uri;
-      }
 
-      if (!localUri) throw new Error("Nessun media da salvare");
-
-      const asset = await MediaLibrary.createAssetAsync(localUri);
-      try {
-        const album = await MediaLibrary.getAlbumAsync("DressVibe");
-        if (album) {
-          await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-        } else {
-          await MediaLibrary.createAlbumAsync("DressVibe", asset, false);
+        let localUri: string | null = null;
+        if (mediaType === "photo" && imageBase64) {
+          const path = `${FileSystem.cacheDirectory}dressvibe_${genId || "img"}_${Date.now()}.png`;
+          await FileSystem.writeAsStringAsync(path, imageBase64, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          localUri = path;
+        } else if (mediaType === "video" && videoUrl) {
+          const path = `${FileSystem.cacheDirectory}dressvibe_${genId || "clip"}_${Date.now()}.mp4`;
+          const dl = await FileSystem.downloadAsync(videoUrl, path);
+          if (dl.status !== 200) {
+            throw new Error(`Download video fallito (${dl.status})`);
+          }
+          localUri = dl.uri;
         }
-      } catch (e) {
-        // Album creation may fail on some Android versions, but asset is already saved
-        console.warn("album save failed", e);
+
+        if (!localUri) throw new Error("Nessun media da salvare");
+
+        const asset = await MediaLibrary.createAssetAsync(localUri);
+        try {
+          const album = await MediaLibrary.getAlbumAsync("DressVibe");
+          if (album) {
+            await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+          } else {
+            await MediaLibrary.createAlbumAsync("DressVibe", asset, false);
+          }
+        } catch (e) {
+          // Album creation may fail on some Android versions, but asset is already saved
+          console.warn("album save failed", e);
+        }
       }
 
       // 3. Try to open Instagram app
