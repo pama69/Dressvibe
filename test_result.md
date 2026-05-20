@@ -308,6 +308,79 @@ backend:
           review request — also consumes Gemini); it shares
           generate_single_image() so the same 429 propagation applies.
 
+backend:
+  - task: "WhatsApp / Richiesta Info — short links + public landing + info-requests CRUD"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Full WhatsApp / "Richiesta Info" suite verified via
+          /app/backend_test_whatsapp.py against http://localhost:8001/api
+          using Bearer test_session_screen (user_demo01). 28/28 cases PASS.
+
+          1) /api/user-settings (whatsapp_channel_url):
+             * GET → 200, key "whatsapp_channel_url" present (default "") ✅
+             * PUT full URL "https://whatsapp.com/channel/0029VaTest123"
+               → 200, stored verbatim ✅
+             * PUT bare code "0029VaXYZ" → normalized to
+               "https://whatsapp.com/channel/0029VaXYZ" ✅
+             * PUT "" → cleared (empty string returned) ✅
+             * GET after re-set persists last write ✅
+
+          2) POST /api/short-links (with gen_id=gen_521e202684f1, image 0,
+             look_name="Giubbotto Blu Navy"):
+             * 200 with 6-char short_id (e.g. "BZ9jJ5"), look_name echoed,
+               public_url ".../api/r/{short_id}" ✅
+             * Idempotent: second call with same (gen_id, image_index) returns
+               the SAME short_id, even if look_name differs ✅
+             * gen_id="does-not-exist" → 404 ("Generazione non trovata") ✅
+             * image_index=999 → 400 ("Indice immagine non valido") ✅
+
+          3) GET /api/r/{short_id} (no Authorization):
+             * 200, Content-Type text/html, body contains "Giubbotto Blu Navy"
+               and "<img" with src="/api/r/{short_id}/image" ✅
+             * GET /api/r/doesnotexist → 404 with HTML 404 page ✅
+             * GET /api/r/{short_id}/image → 200, Content-Type image/png,
+               523000 bytes ✅
+             * GET /api/r/badid/image → 404 ✅
+
+          4) POST /api/r/{short_id}/info-request (no auth):
+             * Body {customer_name:"Maria Rossi", phone:"+39 333 1234567",
+               message:"Vorrei sapere prezzo e taglie"} → 200 {ok:true} ✅
+             * Body {} → 400 ("Inserisci almeno un dato...") ✅
+             * POST /api/r/badid/info-request → 404 ✅
+
+          5) Owner-side /api/info-requests (auth):
+             * GET → 200, list contains the Maria Rossi row with
+               source="whatsapp", status="new" ✅
+             * GET /api/info-requests/unread-count → 200, count=1 ✅
+             * POST /api/info-requests/{id}/read → 200 ✅
+             * unread-count then drops to 0 (decreased by 1) ✅
+             * POST /api/info-requests/mark-all-read → 200 with
+               {ok:true, updated:0} (nothing left to mark, expected) ✅
+             * DELETE /api/info-requests/{id} → 200; DELETE again → 404 ✅
+
+          6) Security / isolation:
+             * GET /api/info-requests without Authorization → 401
+               ("Missing authentication") ✅
+             * GET /api/r/{short_id} without Authorization → 200 (public) ✅
+             * GET /api/r/{short_id}/image without Authorization → 200
+               (public, image/png) ✅
+
+          7) Regression:
+             * GET /api/health → 200 ✅
+             * GET /api/generations (auth) → 200 list ✅
+
+          No issues, mocks, or 5xx encountered. /api/videos,
+          /api/telegram/publish and /api/studio/edit were intentionally not
+          touched per the review request.
+
 test_plan:
   current_focus: []
   stuck_tasks: []

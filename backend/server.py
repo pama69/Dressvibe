@@ -1668,11 +1668,358 @@ async def telegram_status(authorization: Optional[str] = Header(None)):
     }
 
 
-# ---------- User Settings ----------
+# =================== Short Links + Public "Richiesta Info" page ===================
+import secrets as _secrets
+import string as _string
+from fastapi.responses import HTMLResponse, Response as FAResponse
+import html as _html
+
+
+def _gen_short_id(length: int = 6) -> str:
+    alphabet = _string.ascii_letters + _string.digits
+    return "".join(_secrets.choice(alphabet) for _ in range(length))
+
+
+class ShortLinkCreate(BaseModel):
+    gen_id: str
+    image_index: int = 0
+    look_name: Optional[str] = None  # human-friendly display name
+
+
+class InfoRequestPublicCreate(BaseModel):
+    customer_name: Optional[str] = None
+    phone: Optional[str] = None
+    message: Optional[str] = None
+
+
+@api_router.post("/short-links")
+async def create_short_link(payload: ShortLinkCreate, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    # Verify the generation belongs to the user
+    gen = await db.generations.find_one({"id": payload.gen_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not gen:
+        raise HTTPException(status_code=404, detail="Generazione non trovata")
+    images = gen.get("images") or []
+    if payload.image_index < 0 or payload.image_index >= len(images):
+        raise HTTPException(status_code=400, detail="Indice immagine non valido")
+
+    # Reuse an existing short link for the same (gen, image) if any → idempotent
+    existing = await db.short_links.find_one(
+        {"user_id": user["user_id"], "gen_id": payload.gen_id, "image_index": payload.image_index},
+        {"_id": 0},
+    )
+    if existing:
+        return _short_link_response(existing)
+
+    # Generate a unique short id (retry if collision)
+    short_id = ""
+    for _ in range(8):
+        candidate = _gen_short_id(6)
+        if not await db.short_links.find_one({"short_id": candidate}):
+            short_id = candidate
+            break
+    if not short_id:
+        raise HTTPException(status_code=500, detail="Impossibile generare short id")
+
+    doc = {
+        "short_id": short_id,
+        "user_id": user["user_id"],
+        "gen_id": payload.gen_id,
+        "image_index": payload.image_index,
+        "look_name": (payload.look_name or gen.get("title") or "Look").strip()[:120],
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.short_links.insert_one(doc.copy())
+    return _short_link_response(doc)
+
+
+def _short_link_response(doc: dict) -> dict:
+    base = (PUBLIC_BASE_URL or "").rstrip("/")
+    short_id = doc["short_id"]
+    return {
+        "short_id": short_id,
+        "look_name": doc.get("look_name"),
+        # Public landing URL — served by FastAPI under /api/r/{id}
+        "public_url": f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}",
+    }
+
+
+@api_router.get("/r/{short_id}", response_class=HTMLResponse)
+async def public_richiesta_info_page(short_id: str):
+    """Mobile-first landing page shown when a customer taps the WhatsApp link."""
+    sl = await db.short_links.find_one({"short_id": short_id}, {"_id": 0})
+    if not sl:
+        return HTMLResponse(_render_404_page(), status_code=404)
+    base = (PUBLIC_BASE_URL or "").rstrip("/")
+    image_url = f"{base}/api/r/{short_id}/image" if base else f"/api/r/{short_id}/image"
+    return HTMLResponse(_render_landing_page(short_id, sl.get("look_name") or "Look", image_url))
+
+
+@api_router.get("/r/{short_id}/image")
+async def public_richiesta_info_image(short_id: str):
+    sl = await db.short_links.find_one({"short_id": short_id}, {"_id": 0})
+    if not sl:
+        raise HTTPException(status_code=404, detail="Not found")
+    gen = await db.generations.find_one({"id": sl["gen_id"]}, {"_id": 0})
+    if not gen:
+        raise HTTPException(status_code=404, detail="Not found")
+    images = gen.get("images") or []
+    idx = sl.get("image_index", 0)
+    if idx >= len(images):
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        raw = base64.b64decode(images[idx])
+    except Exception:
+        raise HTTPException(status_code=500, detail="Bad image data")
+    return FAResponse(content=raw, media_type="image/png", headers={
+        "Cache-Control": "public, max-age=3600",
+    })
+
+
+@api_router.post("/r/{short_id}/info-request")
+async def public_submit_info_request(short_id: str, payload: InfoRequestPublicCreate, request: Request):
+    sl = await db.short_links.find_one({"short_id": short_id}, {"_id": 0})
+    if not sl:
+        raise HTTPException(status_code=404, detail="Link non valido")
+    name = (payload.customer_name or "").strip()[:80]
+    phone = (payload.phone or "").strip()[:40]
+    message = (payload.message or "").strip()[:600]
+    # Sanity: require at least one of (name, phone, message) so we don't store
+    # totally empty rows from accidental presses.
+    if not (name or phone or message):
+        raise HTTPException(status_code=400, detail="Inserisci almeno un dato (nome, telefono o messaggio).")
+
+    doc = {
+        "id": f"req_{uuid.uuid4().hex[:12]}",
+        "user_id": sl["user_id"],
+        "short_id": short_id,
+        "gen_id": sl["gen_id"],
+        "image_index": sl.get("image_index", 0),
+        "look_name": sl.get("look_name") or "Look",
+        "customer_name": name or None,
+        "phone": phone or None,
+        "message": message or None,
+        "source": "whatsapp",
+        "status": "new",
+        "client_ip": (request.client.host if request.client else None),
+        "user_agent": (request.headers.get("user-agent") or "")[:200],
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.info_requests.insert_one(doc.copy())
+    return {"ok": True}
+
+
+# -------- Owner (authenticated) endpoints --------
+@api_router.get("/info-requests")
+async def list_info_requests(
+    only_new: bool = False,
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_current_user(authorization)
+    q: dict = {"user_id": user["user_id"]}
+    if only_new:
+        q["status"] = "new"
+    items = await db.info_requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return items
+
+
+@api_router.get("/info-requests/unread-count")
+async def info_requests_unread_count(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    n = await db.info_requests.count_documents({"user_id": user["user_id"]
+                                                 , "status": "new"})
+    return {"count": n}
+
+
+@api_router.post("/info-requests/{req_id}/read")
+async def mark_info_request_read(req_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    res = await db.info_requests.update_one(
+        {"id": req_id, "user_id": user["user_id"]},
+        {"$set": {"status": "read", "read_at": datetime.now(timezone.utc)}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Richiesta non trovata")
+    return {"ok": True}
+
+
+@api_router.post("/info-requests/mark-all-read")
+async def mark_all_info_requests_read(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    res = await db.info_requests.update_many(
+        {"user_id": user["user_id"], "status": "new"},
+        {"$set": {"status": "read", "read_at": datetime.now(timezone.utc)}},
+    )
+    return {"ok": True, "updated": res.modified_count}
+
+
+@api_router.delete("/info-requests/{req_id}")
+async def delete_info_request(req_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    res = await db.info_requests.delete_one({"id": req_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Richiesta non trovata")
+    return {"ok": True}
+
+
+def _render_404_page() -> str:
+    return """<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Link non valido</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{background:#0a0a0a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:20px}</style>
+</head><body><div><h1 style="font-weight:300;letter-spacing:-1px">Link non valido</h1><p style="opacity:.6">Questo link non esiste o è stato rimosso.</p></div></body></html>"""
+
+
+def _render_landing_page(short_id: str, look_name: str, image_url: str) -> str:
+    name_safe = _html.escape(look_name)
+    return f"""<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<title>{name_safe} — Richiedi informazioni</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta property="og:title" content="{name_safe}" />
+<meta property="og:image" content="{image_url}" />
+<meta property="og:type" content="product" />
+<meta name="twitter:card" content="summary_large_image" />
+<style>
+  * {{ box-sizing: border-box; }}
+  html, body {{ margin: 0; padding: 0; background: #0a0a0a; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased; }}
+  .wrap {{ max-width: 480px; margin: 0 auto; padding: 24px 20px 60px; }}
+  .brand {{ font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; opacity: 0.55; margin-bottom: 12px; }}
+  .photo {{ width: 100%; aspect-ratio: 4/5; background: #1a1a1a; overflow: hidden; border-radius: 4px; }}
+  .photo img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
+  h1 {{ font-size: 26px; font-weight: 300; letter-spacing: -0.6px; line-height: 1.2; margin: 18px 0 6px; }}
+  .hint {{ font-size: 13px; opacity: 0.65; line-height: 1.5; margin: 0 0 24px; }}
+  label {{ display: block; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.55; margin: 14px 0 6px; }}
+  input, textarea {{ width: 100%; background: #161616; border: 1px solid #2a2a2a; color: #fff;
+    padding: 13px 14px; font-size: 15px; border-radius: 4px; font-family: inherit; outline: none; }}
+  input:focus, textarea:focus {{ border-color: #E11D48; }}
+  textarea {{ min-height: 100px; resize: vertical; }}
+  .btn {{ width: 100%; margin-top: 22px; padding: 16px 20px; border: 0; border-radius: 4px;
+    background: linear-gradient(135deg, #E11D48 0%, #B91C1C 100%); color: #fff; font-size: 15px;
+    font-weight: 700; letter-spacing: 0.5px; cursor: pointer; }}
+  .btn[disabled] {{ opacity: 0.55; cursor: default; }}
+  .ok {{ margin-top: 20px; padding: 18px; background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.35);
+    border-radius: 4px; color: #4ade80; font-size: 14px; line-height: 1.5; text-align: center; }}
+  .err {{ margin-top: 16px; color: #f87171; font-size: 13px; }}
+  .foot {{ margin-top: 30px; text-align: center; font-size: 11px; opacity: 0.35; letter-spacing: 1.5px; text-transform: uppercase; }}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">Frammenti · Richiesta informazioni</div>
+    <div class="photo"><img id="lookImg" src="{image_url}" alt="{name_safe}" /></div>
+    <h1>{name_safe}</h1>
+    <p class="hint">Compila i campi qui sotto per ricevere informazioni dal negozio. Verremo contattati appena possibile.</p>
+
+    <form id="f" autocomplete="on">
+      <label>Il tuo nome</label>
+      <input name="customer_name" type="text" placeholder="es. Maria Rossi" maxlength="80" />
+
+      <label>Telefono (opzionale)</label>
+      <input name="phone" type="tel" placeholder="es. +39 333 1234567" maxlength="40" inputmode="tel" />
+
+      <label>Messaggio</label>
+      <textarea name="message" placeholder="es. Vorrei sapere prezzo e taglie disponibili" maxlength="600"></textarea>
+
+      <button class="btn" type="submit" id="btn">Richiedi informazioni</button>
+      <div id="err" class="err" style="display:none"></div>
+    </form>
+
+    <div id="ok" class="ok" style="display:none">
+      ✅ Richiesta inviata!<br/>
+      Il negozio ti contatterà al più presto. Grazie.
+    </div>
+
+    <div class="foot">Powered by DressVibe</div>
+  </div>
+
+<script>
+const f = document.getElementById('f');
+const btn = document.getElementById('btn');
+const okBox = document.getElementById('ok');
+const errBox = document.getElementById('err');
+f.addEventListener('submit', async function(e) {{
+  e.preventDefault();
+  errBox.style.display = 'none';
+  const fd = new FormData(f);
+  const body = {{
+    customer_name: fd.get('customer_name') || null,
+    phone: fd.get('phone') || null,
+    message: fd.get('message') || null,
+  }};
+  if (!body.customer_name && !body.phone && !body.message) {{
+    errBox.textContent = 'Inserisci almeno un dato (nome, telefono o messaggio).';
+    errBox.style.display = 'block';
+    return;
+  }}
+  btn.disabled = true; btn.textContent = 'Invio in corso…';
+  try {{
+    const r = await fetch('/api/r/{short_id}/info-request', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(body),
+    }});
+    if (!r.ok) {{
+      const j = await r.json().catch(() => ({{}}));
+      throw new Error(j.detail || 'Errore di invio');
+    }}
+    f.style.display = 'none';
+    okBox.style.display = 'block';
+  }} catch (err) {{
+    errBox.textContent = err.message || 'Errore di invio. Riprova.';
+    errBox.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Richiedi informazioni';
+  }}
+}});
+</script>
+</body>
+</html>"""
+
+
+
 class UserSettingsUpdate(BaseModel):
     telegram_channel: Optional[str] = None
+    whatsapp_channel_url: Optional[str] = None
     shop_name: Optional[str] = None
     city: Optional[str] = None
+
+
+def normalize_whatsapp_channel(value: Optional[str]) -> Optional[str]:
+    """Accept full WhatsApp channel URL or just the channel code/id.
+
+    Returns the canonical https URL form, e.g.
+    'https://whatsapp.com/channel/0029VaXXXX'. Empty string clears."""
+    if value is None:
+        return None
+    s = (value or "").strip()
+    if not s:
+        return ""
+    # Accept several inputs:
+    #   https://whatsapp.com/channel/0029Va...
+    #   whatsapp.com/channel/0029Va...
+    #   wa.me/channel/0029Va...
+    #   0029Va...
+    low = s.lower()
+    for prefix in (
+        "https://whatsapp.com/channel/",
+        "http://whatsapp.com/channel/",
+        "whatsapp.com/channel/",
+        "https://wa.me/channel/",
+        "wa.me/channel/",
+        "https://chat.whatsapp.com/channel/",
+        "chat.whatsapp.com/channel/",
+    ):
+        if low.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    # If still looks like a URL, give up and keep as-is
+    if "://" in s:
+        return s
+    s = s.strip("/").strip("@")
+    return f"https://whatsapp.com/channel/{s}" if s else ""
 
 
 def normalize_channel(value: Optional[str]) -> Optional[str]:
@@ -1703,6 +2050,7 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
     return {
         "telegram_channel": s.get("telegram_channel") or "",
         "telegram_channel_default": TELEGRAM_CHANNEL_ID or "",
+        "whatsapp_channel_url": s.get("whatsapp_channel_url") or "",
         "shop_name": s.get("shop_name") or "Frammenti",
         "city": s.get("city") or "Pescara",
     }
@@ -1714,6 +2062,8 @@ async def update_user_settings(payload: UserSettingsUpdate, authorization: Optio
     update_doc: dict = {"user_id": user["user_id"], "updated_at": datetime.now(timezone.utc)}
     if payload.telegram_channel is not None:
         update_doc["telegram_channel"] = normalize_channel(payload.telegram_channel)
+    if payload.whatsapp_channel_url is not None:
+        update_doc["whatsapp_channel_url"] = normalize_whatsapp_channel(payload.whatsapp_channel_url)
     if payload.shop_name is not None:
         update_doc["shop_name"] = payload.shop_name.strip()[:80]
     if payload.city is not None:
@@ -1755,6 +2105,11 @@ async def startup_db():
     await db.temp_images.create_index("created_at", expireAfterSeconds=900)  # 15 min TTL
     await db.videos.create_index("user_id")
     await db.videos.create_index("id", unique=True)
+    await db.short_links.create_index("short_id", unique=True)
+    await db.short_links.create_index([("user_id", 1), ("gen_id", 1), ("image_index", 1)])
+    await db.info_requests.create_index("id", unique=True)
+    await db.info_requests.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
+    await db.info_requests.create_index("created_at")
     logger.info("DressVibe API started")
 
     # Register Telegram webhook (best-effort)
