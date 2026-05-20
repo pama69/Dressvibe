@@ -541,46 +541,46 @@ export default function Studio() {
             <Text style={s.sectionLabel}>Condividi</Text>
             <View style={s.shareRow}>
               <TouchableOpacity
-                style={[s.shareIconBtn, { backgroundColor: "#229ED9" }, busy && { opacity: 0.6 }]}
+                style={[s.shareWordBtn, busy && { opacity: 0.6 }]}
                 onPress={() => downloadAndShare("telegram")}
                 testID="share-telegram"
                 disabled={busy}
                 activeOpacity={0.7}
               >
                 {busy ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color="#229ED9" />
                 ) : (
-                  <Text style={s.shareEmoji}>✈️</Text>
+                  <Text style={[s.shareWord, { color: "#229ED9" }]}>Telegram</Text>
                 )}
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.shareIconBtn, { backgroundColor: "#E4405F" }]}
+                style={s.shareWordBtn}
                 onPress={openInstagramShare}
                 testID="share-instagram"
                 activeOpacity={0.7}
               >
-                <Text style={s.shareEmoji}>📷</Text>
+                <Text style={[s.shareWord, { color: "#E4405F" }]}>Instagram</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.shareIconBtn, { backgroundColor: "#25D366" }, waBusy && { opacity: 0.6 }]}
+                style={[s.shareWordBtn, waBusy && { opacity: 0.6 }]}
                 onPress={shareToWhatsApp}
                 disabled={waBusy}
                 testID="share-whatsapp"
                 activeOpacity={0.7}
               >
                 {waBusy ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color="#25D366" />
                 ) : (
-                  <Text style={s.shareEmoji}>💬</Text>
+                  <Text style={[s.shareWord, { color: "#25D366" }]}>WhatsApp</Text>
                 )}
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.shareIconBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}
+                style={s.shareWordBtn}
                 onPress={() => downloadAndShare("share")}
                 testID="share-download"
                 activeOpacity={0.7}
               >
-                <Text style={s.shareEmoji}>⬇️</Text>
+                <Text style={[s.shareWord, { color: theme.colors.text }]}>Scarica</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -648,6 +648,16 @@ const s = StyleSheet.create({
     borderRadius: 12,
   },
   shareEmoji: { fontSize: 30, lineHeight: 36, textAlign: "center" },
+  shareWordBtn: {
+    flex: 1,
+    paddingVertical: 16, paddingHorizontal: 6,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: theme.colors.surface,
+    borderRadius: 8,
+    borderWidth: 1, borderColor: theme.colors.border,
+    minHeight: 52,
+  },
+  shareWord: { fontSize: 13, fontWeight: "700", letterSpacing: 0.2, textAlign: "center" },
   shareBtn: {
     flex: 1, alignItems: "center", paddingVertical: 18, gap: 6,
     borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,

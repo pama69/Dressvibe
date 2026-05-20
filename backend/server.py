@@ -433,17 +433,23 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label
 
 
 def pad_to_instagram_45(image_b64: str) -> str:
-    """Ensure the image fits Instagram's feed natively (4:5 portrait, 1080x1350).
+    """Ensure the image fits Instagram's feed natively (4:5 portrait).
 
-    If the source image already has ratio ≈ 4:5 we return it untouched.
-    Otherwise we letterbox it with a soft, blurred copy of the same image so
-    the FULL model is always visible — no crops — and the background looks
-    intentional rather than a black/white bar.
+    Strategy: smart CENTER CROP (no blurred letterbox, no white bars). We only
+    remove pixels from the source image's edges to reach the 4:5 ratio. The
+    final asset is then scaled up/down so its short side is exactly 1080 (the
+    Instagram-recommended width) → output ≈ 1080×1350.
+
+    This is the same approach Instagram itself uses when you upload a non-4:5
+    image, and it preserves the model/subject because for fashion shots the
+    subject is centered in the frame.
+
+    If the image is already very close to 4:5 we return it untouched.
     """
     if not image_b64:
         return image_b64
     try:
-        from PIL import Image, ImageFilter
+        from PIL import Image
         from io import BytesIO
 
         raw = base64.b64decode(image_b64)
@@ -453,41 +459,37 @@ def pad_to_instagram_45(image_b64: str) -> str:
             return image_b64
         cur = w / h
         target = 4 / 5  # 0.8
-
-        # Already close to 4:5 → leave it alone
+        # Already close to 4:5 — leave it alone (still scale to 1080 width
+        # for consistency if it's larger than that)
         if abs(cur - target) < 0.02:
-            return image_b64
-
-        if cur < target:
-            # Taller than 4:5 (e.g. 9:16): canvas wider than source
-            new_w = max(int(round(h * target)), w)
-            new_h = h
+            out_img = src
+        elif cur < target:
+            # Taller than 4:5 (e.g. 9:16) → crop top + bottom equally.
+            # For fashion shots we bias the crop SLIGHTLY toward the upper
+            # portion (face/upper body matter more than excess background
+            # near the feet).
+            new_h = int(round(w / target))
+            crop_total = h - new_h
+            # 40% from top, 60% from bottom → keeps feet, trims sky.
+            top = int(round(crop_total * 0.4))
+            out_img = src.crop((0, top, w, top + new_h))
         else:
-            # Wider than 4:5: canvas taller than source
-            new_w = w
-            new_h = max(int(round(w / target)), h)
+            # Wider than 4:5 → crop sides equally (center-anchored).
+            new_w = int(round(h * target))
+            left = (w - new_w) // 2
+            out_img = src.crop((left, 0, left + new_w, h))
 
-        # Blurred background: scale src to fully cover the canvas then blur
-        cover_scale = max(new_w / w, new_h / h) * 1.05  # tiny over-scan
-        bg_w = int(round(w * cover_scale))
-        bg_h = int(round(h * cover_scale))
-        bg = src.resize((bg_w, bg_h), Image.LANCZOS).filter(ImageFilter.GaussianBlur(28))
-        # Slightly darken the blurred bg so the subject pops
-        from PIL import ImageEnhance
-        bg = ImageEnhance.Brightness(bg).enhance(0.72)
-        bg = ImageEnhance.Contrast(bg).enhance(0.95)
-
-        canvas = Image.new("RGB", (new_w, new_h))
-        # Center the blurred bg
-        canvas.paste(bg, ((new_w - bg_w) // 2, (new_h - bg_h) // 2))
-        # Center the original sharp image on top
-        canvas.paste(src, ((new_w - w) // 2, (new_h - h) // 2))
+        # Normalize output size to the Instagram recommendation 1080×1350.
+        target_w = 1080
+        target_h = 1350
+        if out_img.size != (target_w, target_h):
+            out_img = out_img.resize((target_w, target_h), Image.LANCZOS)
 
         out = BytesIO()
-        canvas.save(out, format="PNG", optimize=True)
+        out_img.save(out, format="PNG", optimize=True)
         return base64.b64encode(out.getvalue()).decode("ascii")
     except Exception as e:
-        logging.getLogger("server").warning(f"pad_to_instagram_45 failed: {e}")
+        logging.getLogger("server").warning(f"pad_to_instagram_45 (crop) failed: {e}")
         return image_b64
 
 
