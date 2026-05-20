@@ -1803,7 +1803,11 @@ async def public_richiesta_info_page(short_id: str):
     shop_name = (owner_settings.get("shop_name") or "").strip() or "Frammenti"
     base = (PUBLIC_BASE_URL or "").rstrip("/")
     image_url = f"{base}/api/r/{short_id}/image" if base else f"/api/r/{short_id}/image"
-    public_page_url = f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}"
+    # Prefer the short tinyurl in the wa.me message body — looks much nicer
+    # when the customer's phone shows the auto-composed text, and the link
+    # preview is identical (tinyurl just redirects). Fall back to the long
+    # canonical URL when tinyurl wasn't generated (e.g. legacy short links).
+    public_page_url = sl.get("tiny_url") or (f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}")
     return HTMLResponse(_render_landing_page(
         short_id=short_id,
         look_name=sl.get("look_name") or "Look",

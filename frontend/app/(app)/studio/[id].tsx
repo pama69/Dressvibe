@@ -109,12 +109,9 @@ export default function Studio() {
       // is already in the user's gallery ready to attach.
       const saved = await saveImageToGallery(image || "", `dressvibe_${id}_${idx}`);
 
-      // Copy a polished message + link. Put URL FIRST so WhatsApp's
-      // "paste link from clipboard" suggestion appears when the user switches
-      // to the app, AND so the URL auto-linkifies as blue in the channel post
-      // (WhatsApp channels sometimes don't auto-link URLs preceded by emoji).
+      // Copy a polished message with the dicitura FIRST then the short URL.
       const shareUrl = link.tiny_url || link.public_url;
-      const clipboardText = `${shareUrl}\n👇 Premi qui per ricevere info 👇`;
+      const clipboardText = `👇 Premi qui per ricevere info 👇\n${shareUrl}`;
       try { await Clipboard.setStringAsync(clipboardText); } catch {}
 
       // Open WhatsApp IMMEDIATELY (no confirm dialog). On web we use
@@ -543,31 +540,37 @@ export default function Studio() {
           <View style={s.section}>
             <Text style={s.sectionLabel}>Condividi</Text>
             <View style={s.shareRow}>
-              <TouchableOpacity style={[s.shareBtn, busy && { opacity: 0.6 }]} onPress={() => downloadAndShare("telegram")} testID="share-telegram" disabled={busy} activeOpacity={0.7}>
-                <Ionicons name="paper-plane-outline" size={20} color={theme.colors.text} />
-                <Text style={s.shareLabel}>🚀 PUBBLICA TG</Text>
-                <Text style={s.shareSub}>con "Prenota"</Text>
+              <TouchableOpacity
+                style={[s.shareIconBtn, busy && { opacity: 0.6 }]}
+                onPress={() => downloadAndShare("telegram")}
+                testID="share-telegram"
+                disabled={busy}
+                activeOpacity={0.7}
+              >
+                {busy ? (
+                  <ActivityIndicator color="#229ED9" />
+                ) : (
+                  <Ionicons name="paper-plane" size={26} color="#229ED9" />
+                )}
               </TouchableOpacity>
-              <TouchableOpacity style={s.shareBtn} onPress={openInstagramShare} testID="share-instagram">
-                <Ionicons name="logo-instagram" size={20} color={theme.colors.text} />
-                <Text style={s.shareLabel}>Instagram</Text>
+              <TouchableOpacity style={s.shareIconBtn} onPress={openInstagramShare} testID="share-instagram" activeOpacity={0.7}>
+                <Ionicons name="logo-instagram" size={28} color="#E4405F" />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.shareBtn, waBusy && { opacity: 0.6 }]}
+                style={[s.shareIconBtn, waBusy && { opacity: 0.6 }]}
                 onPress={shareToWhatsApp}
                 disabled={waBusy}
                 testID="share-whatsapp"
+                activeOpacity={0.7}
               >
                 {waBusy ? (
-                  <ActivityIndicator color={theme.colors.text} />
+                  <ActivityIndicator color="#25D366" />
                 ) : (
-                  <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+                  <Ionicons name="logo-whatsapp" size={28} color="#25D366" />
                 )}
-                <Text style={s.shareLabel}>WhatsApp</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("share")} testID="share-download">
-                <Ionicons name="download-outline" size={20} color={theme.colors.text} />
-                <Text style={s.shareLabel}>Scarica HD</Text>
+              <TouchableOpacity style={s.shareIconBtn} onPress={() => downloadAndShare("share")} testID="share-download" activeOpacity={0.7}>
+                <Ionicons name="download-outline" size={26} color={theme.colors.text} />
               </TouchableOpacity>
             </View>
           </View>
@@ -627,7 +630,14 @@ const s = StyleSheet.create({
     paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.colors.border,
   },
   copyText: { color: theme.colors.text, fontSize: 12 },
-  shareRow: { flexDirection: "row", gap: 10 },
+  shareRow: { flexDirection: "row", gap: 10, justifyContent: "center" },
+  shareIconBtn: {
+    width: 64, height: 64,
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 12,
+  },
   shareBtn: {
     flex: 1, alignItems: "center", paddingVertical: 18, gap: 6,
     borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
