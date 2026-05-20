@@ -109,7 +109,7 @@ export default function Galleria() {
             testID="bell-btn"
             activeOpacity={0.7}
           >
-            <Ionicons name="notifications-outline" size={20} color={theme.colors.text} />
+            <Text style={styles.bellEmoji}>🔔</Text>
             {unread > 0 ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{unread > 99 ? "99+" : String(unread)}</Text>
@@ -122,7 +122,7 @@ export default function Galleria() {
             testID="upload-fab"
             activeOpacity={0.8}
           >
-            <Ionicons name="add" size={22} color={theme.colors.primaryFg} />
+            <Text style={styles.fabPlus}>＋</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -235,6 +235,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  fabPlus: { color: theme.colors.primaryFg, fontSize: 26, fontWeight: "300", lineHeight: 30, marginTop: -2 },
+  bellEmoji: { fontSize: 22, lineHeight: 26 },
   bell: {
     width: 44, height: 44,
     alignItems: "center", justifyContent: "center",

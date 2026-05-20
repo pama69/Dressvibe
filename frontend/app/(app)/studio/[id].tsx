@@ -541,36 +541,46 @@ export default function Studio() {
             <Text style={s.sectionLabel}>Condividi</Text>
             <View style={s.shareRow}>
               <TouchableOpacity
-                style={[s.shareIconBtn, busy && { opacity: 0.6 }]}
+                style={[s.shareIconBtn, { backgroundColor: "#229ED9" }, busy && { opacity: 0.6 }]}
                 onPress={() => downloadAndShare("telegram")}
                 testID="share-telegram"
                 disabled={busy}
                 activeOpacity={0.7}
               >
                 {busy ? (
-                  <ActivityIndicator color="#229ED9" />
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <Ionicons name="paper-plane" size={26} color="#229ED9" />
+                  <Text style={s.shareEmoji}>✈️</Text>
                 )}
               </TouchableOpacity>
-              <TouchableOpacity style={s.shareIconBtn} onPress={openInstagramShare} testID="share-instagram" activeOpacity={0.7}>
-                <Ionicons name="logo-instagram" size={28} color="#E4405F" />
+              <TouchableOpacity
+                style={[s.shareIconBtn, { backgroundColor: "#E4405F" }]}
+                onPress={openInstagramShare}
+                testID="share-instagram"
+                activeOpacity={0.7}
+              >
+                <Text style={s.shareEmoji}>📷</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.shareIconBtn, waBusy && { opacity: 0.6 }]}
+                style={[s.shareIconBtn, { backgroundColor: "#25D366" }, waBusy && { opacity: 0.6 }]}
                 onPress={shareToWhatsApp}
                 disabled={waBusy}
                 testID="share-whatsapp"
                 activeOpacity={0.7}
               >
                 {waBusy ? (
-                  <ActivityIndicator color="#25D366" />
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <Ionicons name="logo-whatsapp" size={28} color="#25D366" />
+                  <Text style={s.shareEmoji}>💬</Text>
                 )}
               </TouchableOpacity>
-              <TouchableOpacity style={s.shareIconBtn} onPress={() => downloadAndShare("share")} testID="share-download" activeOpacity={0.7}>
-                <Ionicons name="download-outline" size={26} color={theme.colors.text} />
+              <TouchableOpacity
+                style={[s.shareIconBtn, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderWidth: 1 }]}
+                onPress={() => downloadAndShare("share")}
+                testID="share-download"
+                activeOpacity={0.7}
+              >
+                <Text style={s.shareEmoji}>⬇️</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -634,10 +644,10 @@ const s = StyleSheet.create({
   shareIconBtn: {
     width: 64, height: 64,
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
     borderRadius: 12,
   },
+  shareEmoji: { fontSize: 30, lineHeight: 36, textAlign: "center" },
   shareBtn: {
     flex: 1, alignItems: "center", paddingVertical: 18, gap: 6,
     borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
