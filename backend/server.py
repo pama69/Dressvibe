@@ -1750,9 +1750,21 @@ async def public_richiesta_info_page(short_id: str):
     sl = await db.short_links.find_one({"short_id": short_id}, {"_id": 0})
     if not sl:
         return HTMLResponse(_render_404_page(), status_code=404)
+    # Load the shop owner's WhatsApp Business phone (for the "Chiedi su WA" button)
+    owner_settings = await db.user_settings.find_one({"user_id": sl["user_id"]}, {"_id": 0}) or {}
+    shop_phone_e164 = (owner_settings.get("whatsapp_business_phone") or "").strip()
+    shop_name = (owner_settings.get("shop_name") or "").strip() or "Frammenti"
     base = (PUBLIC_BASE_URL or "").rstrip("/")
     image_url = f"{base}/api/r/{short_id}/image" if base else f"/api/r/{short_id}/image"
-    return HTMLResponse(_render_landing_page(short_id, sl.get("look_name") or "Look", image_url))
+    public_page_url = f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}"
+    return HTMLResponse(_render_landing_page(
+        short_id=short_id,
+        look_name=sl.get("look_name") or "Look",
+        image_url=image_url,
+        shop_phone_e164=shop_phone_e164,
+        shop_name=shop_name,
+        public_page_url=public_page_url,
+    ))
 
 
 @api_router.get("/r/{short_id}/image")
@@ -1869,8 +1881,36 @@ def _render_404_page() -> str:
 </head><body><div><h1 style="font-weight:300;letter-spacing:-1px">Link non valido</h1><p style="opacity:.6">Questo link non esiste o è stato rimosso.</p></div></body></html>"""
 
 
-def _render_landing_page(short_id: str, look_name: str, image_url: str) -> str:
+def _render_landing_page(short_id: str, look_name: str, image_url: str,
+                          shop_phone_e164: str = "", shop_name: str = "Frammenti",
+                          public_page_url: str = "") -> str:
     name_safe = _html.escape(look_name)
+    shop_safe = _html.escape(shop_name)
+    # Build the wa.me click-to-chat URL when the shop has configured its
+    # business number. Pre-fills a polite Italian message that references the
+    # specific look + landing page URL so the shop owner sees the customer's
+    # phone number directly in WhatsApp the moment they tap "Invia".
+    has_wa_chat = bool(shop_phone_e164 and shop_phone_e164.startswith("+"))
+    wa_button_html = ""
+    if has_wa_chat:
+        wa_digits = shop_phone_e164.lstrip("+")
+        wa_message = (
+            f"Ciao {shop_name}! 👋\n"
+            f"Vorrei informazioni sul look:\n*{look_name}*\n"
+            f"{public_page_url}"
+        )
+        from urllib.parse import quote
+        wa_url = f"https://wa.me/{wa_digits}?text={quote(wa_message)}"
+        wa_url_safe = _html.escape(wa_url, quote=True)
+        wa_button_html = f"""
+    <a class="wa-btn" href="{wa_url_safe}" target="_blank" rel="noopener" id="waChatBtn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="margin-right:8px;vertical-align:middle">
+        <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 2.1.55 4.14 1.6 5.95L2.05 22l4.27-1.65a9.9 9.9 0 0 0 5.72 1.74h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zM17.4 16.1c-.22.62-1.32 1.2-1.83 1.27-.49.07-1.1.1-1.78-.11-.41-.13-.94-.31-1.62-.6-2.84-1.23-4.7-4.1-4.84-4.28-.14-.18-1.16-1.54-1.16-2.94 0-1.4.73-2.09 1-2.38.27-.29.58-.36.78-.36.2 0 .39 0 .56.01.18.01.42-.07.66.5.24.58.83 2.01.9 2.15.07.14.12.31.02.49-.1.18-.15.29-.29.45-.14.16-.3.36-.43.49-.14.14-.29.29-.13.57.16.29.71 1.18 1.53 1.9 1.06.93 1.95 1.22 2.23 1.36.28.14.45.12.62-.07.18-.19.71-.83.9-1.12.19-.29.39-.24.65-.14.27.1 1.7.81 1.99.95.29.14.49.22.56.34.07.12.07.69-.15 1.31z"/>
+      </svg>
+      <span>Chiedi su WhatsApp a {shop_safe}</span>
+    </a>
+    <div class="or"><span>oppure</span></div>"""
+
     return f"""<!doctype html>
 <html lang="it">
 <head>
@@ -1901,6 +1941,15 @@ def _render_landing_page(short_id: str, look_name: str, image_url: str) -> str:
     background: linear-gradient(135deg, #E11D48 0%, #B91C1C 100%); color: #fff; font-size: 15px;
     font-weight: 700; letter-spacing: 0.5px; cursor: pointer; }}
   .btn[disabled] {{ opacity: 0.55; cursor: default; }}
+  .wa-btn {{ display: flex; align-items: center; justify-content: center;
+    width: 100%; margin-top: 8px; padding: 18px 20px; border-radius: 4px;
+    background: linear-gradient(135deg, #25D366 0%, #128C7E 100%); color: #fff;
+    font-size: 16px; font-weight: 700; letter-spacing: 0.3px; text-decoration: none;
+    box-shadow: 0 4px 18px rgba(37,211,102,0.25); }}
+  .wa-btn:active {{ transform: scale(0.985); }}
+  .or {{ display: flex; align-items: center; gap: 12px; margin: 22px 0 6px; opacity: 0.5; }}
+  .or::before, .or::after {{ content: ""; flex: 1; height: 1px; background: #2a2a2a; }}
+  .or span {{ font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }}
   .ok {{ margin-top: 20px; padding: 18px; background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.35);
     border-radius: 4px; color: #4ade80; font-size: 14px; line-height: 1.5; text-align: center; }}
   .err {{ margin-top: 16px; color: #f87171; font-size: 13px; }}
@@ -1909,22 +1958,30 @@ def _render_landing_page(short_id: str, look_name: str, image_url: str) -> str:
 </head>
 <body>
   <div class="wrap">
-    <div class="brand">Frammenti · Richiesta informazioni</div>
+    <div class="brand">{shop_safe} · Richiesta informazioni</div>
     <div class="photo"><img id="lookImg" src="{image_url}" alt="{name_safe}" /></div>
     <h1>{name_safe}</h1>
-    <p class="hint">Compila i campi qui sotto per ricevere informazioni dal negozio. Verremo contattati appena possibile.</p>
+    <p class="hint">Vuoi prezzo, taglie disponibili o info su questo look? Scegli il modo più comodo:</p>
+
+    {wa_button_html}
 
     <form id="f" autocomplete="on">
       <label>Il tuo nome</label>
-      <input name="customer_name" type="text" placeholder="es. Maria Rossi" maxlength="80" />
+      <input name="customer_name" id="iName" type="text"
+        placeholder="es. Maria Rossi" maxlength="80"
+        autocomplete="name" />
 
-      <label>Telefono (opzionale)</label>
-      <input name="phone" type="tel" placeholder="es. +39 333 1234567" maxlength="40" inputmode="tel" />
+      <label>Telefono</label>
+      <input name="phone" id="iPhone" type="tel"
+        placeholder="es. +39 333 1234567" maxlength="40"
+        inputmode="tel"
+        autocomplete="tel" />
 
       <label>Messaggio</label>
-      <textarea name="message" placeholder="es. Vorrei sapere prezzo e taglie disponibili" maxlength="600"></textarea>
+      <textarea name="message" id="iMsg" placeholder="es. Vorrei sapere prezzo e taglie disponibili" maxlength="600"
+        autocomplete="off"></textarea>
 
-      <button class="btn" type="submit" id="btn">Richiedi informazioni</button>
+      <button class="btn" type="submit" id="btn">Invia richiesta</button>
       <div id="err" class="err" style="display:none"></div>
     </form>
 
@@ -1941,6 +1998,20 @@ const f = document.getElementById('f');
 const btn = document.getElementById('btn');
 const okBox = document.getElementById('ok');
 const errBox = document.getElementById('err');
+const iName = document.getElementById('iName');
+const iPhone = document.getElementById('iPhone');
+
+// --- Strategy 2: localStorage pre-fill ---
+// On 2nd+ visit (any look from the same shop) the form is filled automatically.
+const LS_KEY = 'dv_customer_v1';
+try {{
+  const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+  if (saved && typeof saved === 'object') {{
+    if (saved.name && !iName.value) iName.value = saved.name;
+    if (saved.phone && !iPhone.value) iPhone.value = saved.phone;
+  }}
+}} catch (e) {{}}
+
 f.addEventListener('submit', async function(e) {{
   e.preventDefault();
   errBox.style.display = 'none';
@@ -1955,6 +2026,14 @@ f.addEventListener('submit', async function(e) {{
     errBox.style.display = 'block';
     return;
   }}
+  // Persist for next visit (privacy-friendly: lives only in the customer's browser)
+  try {{
+    localStorage.setItem(LS_KEY, JSON.stringify({{
+      name: body.customer_name || '',
+      phone: body.phone || '',
+    }}));
+  }} catch (e) {{}}
+
   btn.disabled = true; btn.textContent = 'Invio in corso…';
   try {{
     const r = await fetch('/api/r/{short_id}/info-request', {{
@@ -1971,7 +2050,7 @@ f.addEventListener('submit', async function(e) {{
   }} catch (err) {{
     errBox.textContent = err.message || 'Errore di invio. Riprova.';
     errBox.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Richiedi informazioni';
+    btn.disabled = false; btn.textContent = 'Invia richiesta';
   }}
 }});
 </script>
@@ -1983,8 +2062,28 @@ f.addEventListener('submit', async function(e) {{
 class UserSettingsUpdate(BaseModel):
     telegram_channel: Optional[str] = None
     whatsapp_channel_url: Optional[str] = None
+    whatsapp_business_phone: Optional[str] = None
     shop_name: Optional[str] = None
     city: Optional[str] = None
+
+
+def normalize_phone_e164(value: Optional[str]) -> Optional[str]:
+    """Best-effort normalisation to E.164. Italian numbers without country
+    code get a +39 prefix as a sensible default for this app."""
+    if value is None:
+        return None
+    s = (value or "").strip()
+    if not s:
+        return ""
+    cleaned = "".join(c for c in s if c.isdigit() or c == "+")
+    if cleaned.startswith("00"):
+        cleaned = "+" + cleaned[2:]
+    if not cleaned:
+        return ""
+    if not cleaned.startswith("+"):
+        digits = cleaned.lstrip("0")
+        cleaned = "+39" + digits
+    return cleaned
 
 
 def normalize_whatsapp_channel(value: Optional[str]) -> Optional[str]:
@@ -2051,6 +2150,7 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
         "telegram_channel": s.get("telegram_channel") or "",
         "telegram_channel_default": TELEGRAM_CHANNEL_ID or "",
         "whatsapp_channel_url": s.get("whatsapp_channel_url") or "",
+        "whatsapp_business_phone": s.get("whatsapp_business_phone") or "",
         "shop_name": s.get("shop_name") or "Frammenti",
         "city": s.get("city") or "Pescara",
     }
@@ -2064,6 +2164,8 @@ async def update_user_settings(payload: UserSettingsUpdate, authorization: Optio
         update_doc["telegram_channel"] = normalize_channel(payload.telegram_channel)
     if payload.whatsapp_channel_url is not None:
         update_doc["whatsapp_channel_url"] = normalize_whatsapp_channel(payload.whatsapp_channel_url)
+    if payload.whatsapp_business_phone is not None:
+        update_doc["whatsapp_business_phone"] = normalize_phone_e164(payload.whatsapp_business_phone)
     if payload.shop_name is not None:
         update_doc["shop_name"] = payload.shop_name.strip()[:80]
     if payload.city is not None:

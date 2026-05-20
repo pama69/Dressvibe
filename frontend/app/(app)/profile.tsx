@@ -116,6 +116,11 @@ export default function Profile() {
   const [waChannelSaved, setWaChannelSaved] = useState("");
   const [waChannelSaving, setWaChannelSaving] = useState(false);
 
+  // WhatsApp Business phone (used on landing page as "Chiedi su WhatsApp" button)
+  const [waPhoneInput, setWaPhoneInput] = useState("");
+  const [waPhoneSaved, setWaPhoneSaved] = useState("");
+  const [waPhoneSaving, setWaPhoneSaving] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -124,6 +129,8 @@ export default function Profile() {
         setChannelDefault(s.telegram_channel_default || "");
         setWaChannelInput(s.whatsapp_channel_url || "");
         setWaChannelSaved(s.whatsapp_channel_url || "");
+        setWaPhoneInput(s.whatsapp_business_phone || "");
+        setWaPhoneSaved(s.whatsapp_business_phone || "");
       } catch {}
     })();
   }, []);
@@ -144,6 +151,25 @@ export default function Profile() {
       Alert.alert("Errore", e?.message || "Impossibile salvare il canale WhatsApp");
     } finally {
       setWaChannelSaving(false);
+    }
+  };
+
+  const saveWaPhone = async () => {
+    setWaPhoneSaving(true);
+    try {
+      const s = await api.updateUserSettings({ whatsapp_business_phone: waPhoneInput });
+      setWaPhoneInput(s.whatsapp_business_phone || "");
+      setWaPhoneSaved(s.whatsapp_business_phone || "");
+      Alert.alert(
+        "Numero WhatsApp salvato ✅",
+        s.whatsapp_business_phone
+          ? `Sulla pagina "Richiesta info" apparirà un pulsante verde che apre una chat WhatsApp diretta verso:\n${s.whatsapp_business_phone}`
+          : "Numero rimosso. Il pulsante verde non apparirà più sulla pagina pubblica."
+      );
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile salvare il numero");
+    } finally {
+      setWaPhoneSaving(false);
     }
   };
 
@@ -345,6 +371,46 @@ export default function Profile() {
           </View>
           {waChannelSaved ? (
             <Text style={s.tgInfoText} numberOfLines={1}>Attivo: {waChannelSaved}</Text>
+          ) : null}
+
+          {/* Numero WhatsApp Business — usato per il pulsante "Chiedi su WhatsApp"
+              che appare ai clienti sulla pagina pubblica di richiesta info. */}
+          <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: 14 }} />
+          <Text style={[s.tgTitle, { fontSize: 14 }]}>📞 Numero WhatsApp Business</Text>
+          <Text style={s.tgHint}>
+            Il TUO numero (es. quello del negozio). Sulla pagina pubblica "Richiedi info"
+            apparirà un grande pulsante verde "Chiedi su WhatsApp": il cliente lo preme,
+            ti scrive direttamente e <Text style={{ fontWeight: "700" }}>vedrai automaticamente
+            il suo numero</Text> nella tua chat.
+          </Text>
+          <TextInput
+            value={waPhoneInput}
+            onChangeText={setWaPhoneInput}
+            placeholder="+39 333 1234567"
+            placeholderTextColor={theme.colors.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="phone-pad"
+            style={s.channelInput}
+            testID="wa-phone-input"
+          />
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TouchableOpacity
+              style={[s.tgBtn, waPhoneSaving && { opacity: 0.5 }]}
+              onPress={saveWaPhone}
+              disabled={waPhoneSaving}
+              testID="wa-phone-save"
+            >
+              {waPhoneSaving ? <ActivityIndicator color="#000" /> : (
+                <>
+                  <Ionicons name="call-outline" size={16} color="#000" />
+                  <Text style={s.tgBtnText}>Salva numero</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+          {waPhoneSaved ? (
+            <Text style={s.tgInfoText} numberOfLines={1}>Attivo: {waPhoneSaved}</Text>
           ) : null}
         </View>
 

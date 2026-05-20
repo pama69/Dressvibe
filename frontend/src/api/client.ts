@@ -173,11 +173,11 @@ export const api = {
 
   // user settings (per-shop preferences)
   getUserSettings: () =>
-    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; shop_name: string; city: string }>(
+    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string }>(
       "/user-settings"
     ),
-  updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; shop_name?: string; city?: string }) =>
-    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; shop_name: string; city: string }>(
+  updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; whatsapp_business_phone?: string; shop_name?: string; city?: string }) =>
+    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string }>(
       "/user-settings",
       { method: "PUT", body }
     ),
