@@ -109,8 +109,9 @@ export default function Upload() {
         mediaTypes: ["images"],
         base64: true,
         quality: 0.55,
-        allowsEditing: Platform.OS !== "web",
-        aspect: Platform.OS !== "web" ? [4, 5] : undefined,
+        // Skip the forced crop step — user wanted the picker to return the
+        // photo as-is. They can re-pick if they want a different framing.
+        allowsEditing: false,
       });
       if (res.canceled || !res.assets || res.assets.length === 0) return;
       const b64 = await assetToBase64(res.assets[0]);
@@ -138,8 +139,8 @@ export default function Upload() {
       const res = await ImagePicker.launchCameraAsync({
         base64: true,
         quality: 0.55,
-        allowsEditing: Platform.OS !== "web",
-        aspect: Platform.OS !== "web" ? [4, 5] : undefined,
+        // No forced crop after the shot — user wanted the photo saved as-is.
+        allowsEditing: false,
       });
       if (res.canceled || !res.assets?.[0]) return;
       const b64 = await assetToBase64(res.assets[0]);

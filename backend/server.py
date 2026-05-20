@@ -426,10 +426,69 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label
         f"Shot with a 35mm lens, soft natural lighting, magazine-quality, "
         f"sharp focus on the entire outfit, photorealistic skin tones, no plastic skin, no extra fingers, "
         f"correct anatomy with both feet on the ground. "
-        f"STRICT vertical 9:16 aspect ratio (portrait, taller than wide, perfect for Instagram Stories and Telegram). "
-        f"The composition must fit the model fully inside the 9:16 frame with comfortable margins. "
+        f"STRICT vertical 4:5 aspect ratio (portrait, ratio 1080x1350 — the native Instagram feed format). "
+        f"The composition must fit the model fully inside the 4:5 frame with comfortable margins on top and bottom. "
         f"Variation seed {variation_idx}."
     )
+
+
+def pad_to_instagram_45(image_b64: str) -> str:
+    """Ensure the image fits Instagram's feed natively (4:5 portrait, 1080x1350).
+
+    If the source image already has ratio ≈ 4:5 we return it untouched.
+    Otherwise we letterbox it with a soft, blurred copy of the same image so
+    the FULL model is always visible — no crops — and the background looks
+    intentional rather than a black/white bar.
+    """
+    if not image_b64:
+        return image_b64
+    try:
+        from PIL import Image, ImageFilter
+        from io import BytesIO
+
+        raw = base64.b64decode(image_b64)
+        src = Image.open(BytesIO(raw)).convert("RGB")
+        w, h = src.size
+        if w <= 0 or h <= 0:
+            return image_b64
+        cur = w / h
+        target = 4 / 5  # 0.8
+
+        # Already close to 4:5 → leave it alone
+        if abs(cur - target) < 0.02:
+            return image_b64
+
+        if cur < target:
+            # Taller than 4:5 (e.g. 9:16): canvas wider than source
+            new_w = max(int(round(h * target)), w)
+            new_h = h
+        else:
+            # Wider than 4:5: canvas taller than source
+            new_w = w
+            new_h = max(int(round(w / target)), h)
+
+        # Blurred background: scale src to fully cover the canvas then blur
+        cover_scale = max(new_w / w, new_h / h) * 1.05  # tiny over-scan
+        bg_w = int(round(w * cover_scale))
+        bg_h = int(round(h * cover_scale))
+        bg = src.resize((bg_w, bg_h), Image.LANCZOS).filter(ImageFilter.GaussianBlur(28))
+        # Slightly darken the blurred bg so the subject pops
+        from PIL import ImageEnhance
+        bg = ImageEnhance.Brightness(bg).enhance(0.72)
+        bg = ImageEnhance.Contrast(bg).enhance(0.95)
+
+        canvas = Image.new("RGB", (new_w, new_h))
+        # Center the blurred bg
+        canvas.paste(bg, ((new_w - bg_w) // 2, (new_h - bg_h) // 2))
+        # Center the original sharp image on top
+        canvas.paste(src, ((new_w - w) // 2, (new_h - h) // 2))
+
+        out = BytesIO()
+        canvas.save(out, format="PNG", optimize=True)
+        return base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception as e:
+        logging.getLogger("server").warning(f"pad_to_instagram_45 failed: {e}")
+        return image_b64
 
 
 async def _gemini_direct_generate_image(
@@ -547,7 +606,22 @@ async def _gemini_direct_generate_image(
 
 
 async def generate_single_image(prompt: str, reference_images_b64: List[str], session_id: str) -> Optional[str]:
-    """Generate a single image. Raises HTTPException(429) if hard-rate-limited."""
+    """Generate a single image. Raises HTTPException(429) if hard-rate-limited.
+
+    The returned base64 PNG is guaranteed to fit Instagram's feed natively
+    (4:5 portrait) — if the upstream model returns a different ratio (e.g.
+    9:16) we pad it with a blurred copy of itself so nothing gets cropped.
+    """
+    raw_img = await _generate_single_image_raw(prompt, reference_images_b64, session_id)
+    if not raw_img:
+        return None
+    # CPU-bound PIL work → push to executor so we don't block the loop
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, pad_to_instagram_45, raw_img)
+
+
+async def _generate_single_image_raw(prompt: str, reference_images_b64: List[str], session_id: str) -> Optional[str]:
+    """Internal: returns the raw upstream image without post-processing."""
     rate_limit_hit = False
     # Prefer the shop-owner's personal Gemini key when configured.
     if _gemini_client:
@@ -748,7 +822,7 @@ async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] =
     session_id = f"studio_{user['user_id']}_{uuid.uuid4().hex[:6]}"
     prompt = (
         f"Edit the provided photograph as requested while keeping the model, outfit, and overall composition identical. "
-        f"Preserve the full-body framing (head to feet) and the 9:16 vertical aspect ratio. "
+        f"Preserve the full-body framing (head to feet) and the 4:5 vertical aspect ratio (Instagram feed). "
         f"Request: {payload.edit_prompt}. "
         f"Keep photorealistic quality, high-end fashion photography aesthetic."
     )
