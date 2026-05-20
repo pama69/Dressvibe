@@ -186,7 +186,7 @@ export const api = {
 
   // WhatsApp / Richiesta Info
   createShortLink: (body: { gen_id: string; image_index: number; look_name?: string }) =>
-    request<{ short_id: string; look_name: string; public_url: string }>("/short-links", {
+    request<{ short_id: string; look_name: string; public_url: string; tiny_url: string | null }>("/short-links", {
       method: "POST", body,
     }),
   listInfoRequests: (onlyNew = false) =>

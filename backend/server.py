@@ -1709,6 +1709,19 @@ async def create_short_link(payload: ShortLinkCreate, authorization: Optional[st
         {"_id": 0},
     )
     if existing:
+        # If we have an existing record but it doesn't have a tiny URL yet
+        # (e.g. created before this feature shipped, or tinyurl was down),
+        # try to generate one now and persist it.
+        if not existing.get("tiny_url"):
+            base = (PUBLIC_BASE_URL or "").rstrip("/")
+            full_url = f"{base}/api/r/{existing['short_id']}" if base else f"/api/r/{existing['short_id']}"
+            tiny = await _shorten_with_tinyurl(full_url)
+            if tiny:
+                await db.short_links.update_one(
+                    {"short_id": existing["short_id"]},
+                    {"$set": {"tiny_url": tiny}},
+                )
+                existing["tiny_url"] = tiny
         return _short_link_response(existing)
 
     # Generate a unique short id (retry if collision)
@@ -1721,26 +1734,60 @@ async def create_short_link(payload: ShortLinkCreate, authorization: Optional[st
     if not short_id:
         raise HTTPException(status_code=500, detail="Impossibile generare short id")
 
+    base = (PUBLIC_BASE_URL or "").rstrip("/")
+    full_url = f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}"
+    # Best-effort shortening via TinyURL (no key, free, generous limits).
+    # If it fails the caller still gets the full public_url so the flow keeps
+    # working — never breaks the user-facing share button.
+    tiny_url = await _shorten_with_tinyurl(full_url)
+
     doc = {
         "short_id": short_id,
         "user_id": user["user_id"],
         "gen_id": payload.gen_id,
         "image_index": payload.image_index,
         "look_name": (payload.look_name or gen.get("title") or "Look").strip()[:120],
+        "tiny_url": tiny_url,
         "created_at": datetime.now(timezone.utc),
     }
     await db.short_links.insert_one(doc.copy())
     return _short_link_response(doc)
 
 
+async def _shorten_with_tinyurl(long_url: str) -> Optional[str]:
+    """Call the free TinyURL endpoint. Returns the short URL or None on failure.
+    No API key needed. Times out fast so we don't block the UI."""
+    if not long_url or not long_url.startswith(("http://", "https://")):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as http:
+            r = await http.get(
+                "https://tinyurl.com/api-create.php",
+                params={"url": long_url},
+            )
+            if r.status_code == 200:
+                short = r.text.strip()
+                # Sanity check: must look like a URL we can trust
+                if short.startswith(("https://tinyurl.com/", "http://tinyurl.com/")):
+                    # Always serve over HTTPS
+                    return short.replace("http://", "https://", 1)
+            logger.warning(f"[tinyurl] non-200 or unexpected body: {r.status_code} {r.text[:80]}")
+    except Exception as e:
+        logger.warning(f"[tinyurl] failed: {e}")
+    return None
+
+
 def _short_link_response(doc: dict) -> dict:
     base = (PUBLIC_BASE_URL or "").rstrip("/")
     short_id = doc["short_id"]
+    full_url = f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}"
     return {
         "short_id": short_id,
         "look_name": doc.get("look_name"),
-        # Public landing URL — served by FastAPI under /api/r/{id}
-        "public_url": f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}",
+        # Long, canonical public URL (always works, even if TinyURL is down)
+        "public_url": full_url,
+        # Short, paste-friendly URL when available
+        "tiny_url": doc.get("tiny_url") or None,
     }
 
 
@@ -1886,10 +1933,6 @@ def _render_landing_page(short_id: str, look_name: str, image_url: str,
                           public_page_url: str = "") -> str:
     name_safe = _html.escape(look_name)
     shop_safe = _html.escape(shop_name)
-    # Build the wa.me click-to-chat URL when the shop has configured its
-    # business number. Pre-fills a polite Italian message that references the
-    # specific look + landing page URL so the shop owner sees the customer's
-    # phone number directly in WhatsApp the moment they tap "Invia".
     has_wa_chat = bool(shop_phone_e164 and shop_phone_e164.startswith("+"))
     wa_button_html = ""
     if has_wa_chat:
@@ -1903,13 +1946,17 @@ def _render_landing_page(short_id: str, look_name: str, image_url: str,
         wa_url = f"https://wa.me/{wa_digits}?text={quote(wa_message)}"
         wa_url_safe = _html.escape(wa_url, quote=True)
         wa_button_html = f"""
-    <a class="wa-btn" href="{wa_url_safe}" target="_blank" rel="noopener" id="waChatBtn">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="margin-right:8px;vertical-align:middle">
-        <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 2.1.55 4.14 1.6 5.95L2.05 22l4.27-1.65a9.9 9.9 0 0 0 5.72 1.74h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zM17.4 16.1c-.22.62-1.32 1.2-1.83 1.27-.49.07-1.1.1-1.78-.11-.41-.13-.94-.31-1.62-.6-2.84-1.23-4.7-4.1-4.84-4.28-.14-.18-1.16-1.54-1.16-2.94 0-1.4.73-2.09 1-2.38.27-.29.58-.36.78-.36.2 0 .39 0 .56.01.18.01.42-.07.66.5.24.58.83 2.01.9 2.15.07.14.12.31.02.49-.1.18-.15.29-.29.45-.14.16-.3.36-.43.49-.14.14-.29.29-.13.57.16.29.71 1.18 1.53 1.9 1.06.93 1.95 1.22 2.23 1.36.28.14.45.12.62-.07.18-.19.71-.83.9-1.12.19-.29.39-.24.65-.14.27.1 1.7.81 1.99.95.29.14.49.22.56.34.07.12.07.69-.15 1.31z"/>
-      </svg>
-      <span>Chiedi su WhatsApp a {shop_safe}</span>
-    </a>
-    <div class="or"><span>oppure</span></div>"""
+    <div class="option-block">
+      <div class="option-num">Opzione 2</div>
+      <div class="option-title">Contattaci su WhatsApp</div>
+      <div class="option-desc">Apri una chat diretta. Il negozio risponde dal proprio cellulare.</div>
+      <a class="wa-btn" href="{wa_url_safe}" target="_blank" rel="noopener" id="waChatBtn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="white" style="margin-right:10px;vertical-align:middle">
+          <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 2.1.55 4.14 1.6 5.95L2.05 22l4.27-1.65a9.9 9.9 0 0 0 5.72 1.74h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zM17.4 16.1c-.22.62-1.32 1.2-1.83 1.27-.49.07-1.1.1-1.78-.11-.41-.13-.94-.31-1.62-.6-2.84-1.23-4.7-4.1-4.84-4.28-.14-.18-1.16-1.54-1.16-2.94 0-1.4.73-2.09 1-2.38.27-.29.58-.36.78-.36.2 0 .39 0 .56.01.18.01.42-.07.66.5.24.58.83 2.01.9 2.15.07.14.12.31.02.49-.1.18-.15.29-.29.45-.14.16-.3.36-.43.49-.14.14-.29.29-.13.57.16.29.71 1.18 1.53 1.9 1.06.93 1.95 1.22 2.23 1.36.28.14.45.12.62-.07.18-.19.71-.83.9-1.12.19-.29.39-.24.65-.14.27.1 1.7.81 1.99.95.29.14.49.22.56.34.07.12.07.69-.15 1.31z"/>
+        </svg>
+        <span>Apri WhatsApp</span>
+      </a>
+    </div>"""
 
     return f"""<!doctype html>
 <html lang="it">
@@ -1931,28 +1978,33 @@ def _render_landing_page(short_id: str, look_name: str, image_url: str,
   .photo {{ width: 100%; aspect-ratio: 4/5; background: #1a1a1a; overflow: hidden; border-radius: 4px; }}
   .photo img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
   h1 {{ font-size: 26px; font-weight: 300; letter-spacing: -0.6px; line-height: 1.2; margin: 18px 0 6px; }}
-  .hint {{ font-size: 13px; opacity: 0.65; line-height: 1.5; margin: 0 0 24px; }}
-  label {{ display: block; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.55; margin: 14px 0 6px; }}
-  input, textarea {{ width: 100%; background: #161616; border: 1px solid #2a2a2a; color: #fff;
-    padding: 13px 14px; font-size: 15px; border-radius: 4px; font-family: inherit; outline: none; }}
+  .hint {{ font-size: 14px; opacity: 0.75; line-height: 1.5; margin: 0 0 26px; font-weight: 500; }}
+
+  .option-block {{ margin-top: 22px; padding: 18px 16px 16px;
+    border: 1px solid #2a2a2a; border-radius: 8px; background: #131313; }}
+  .option-num {{ font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: #E11D48; font-weight: 700; margin-bottom: 6px; }}
+  .option-title {{ font-size: 17px; font-weight: 600; letter-spacing: -0.3px; margin-bottom: 4px; }}
+  .option-desc {{ font-size: 13px; opacity: 0.6; line-height: 1.4; margin-bottom: 14px; }}
+
+  label {{ display: block; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.55; margin: 12px 0 6px; }}
+  input, textarea {{ width: 100%; background: #1a1a1a; border: 1px solid #2e2e2e; color: #fff;
+    padding: 12px 14px; font-size: 15px; border-radius: 4px; font-family: inherit; outline: none; }}
   input:focus, textarea:focus {{ border-color: #E11D48; }}
-  textarea {{ min-height: 100px; resize: vertical; }}
-  .btn {{ width: 100%; margin-top: 22px; padding: 16px 20px; border: 0; border-radius: 4px;
+  textarea {{ min-height: 80px; resize: vertical; }}
+  .btn {{ width: 100%; margin-top: 16px; padding: 16px 20px; border: 0; border-radius: 4px;
     background: linear-gradient(135deg, #E11D48 0%, #B91C1C 100%); color: #fff; font-size: 15px;
     font-weight: 700; letter-spacing: 0.5px; cursor: pointer; }}
   .btn[disabled] {{ opacity: 0.55; cursor: default; }}
   .wa-btn {{ display: flex; align-items: center; justify-content: center;
-    width: 100%; margin-top: 8px; padding: 18px 20px; border-radius: 4px;
+    width: 100%; padding: 16px 20px; border-radius: 4px;
     background: linear-gradient(135deg, #25D366 0%, #128C7E 100%); color: #fff;
-    font-size: 16px; font-weight: 700; letter-spacing: 0.3px; text-decoration: none;
+    font-size: 15px; font-weight: 700; letter-spacing: 0.3px; text-decoration: none;
     box-shadow: 0 4px 18px rgba(37,211,102,0.25); }}
   .wa-btn:active {{ transform: scale(0.985); }}
-  .or {{ display: flex; align-items: center; gap: 12px; margin: 22px 0 6px; opacity: 0.5; }}
-  .or::before, .or::after {{ content: ""; flex: 1; height: 1px; background: #2a2a2a; }}
-  .or span {{ font-size: 11px; letter-spacing: 2px; text-transform: uppercase; }}
   .ok {{ margin-top: 20px; padding: 18px; background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.35);
     border-radius: 4px; color: #4ade80; font-size: 14px; line-height: 1.5; text-align: center; }}
-  .err {{ margin-top: 16px; color: #f87171; font-size: 13px; }}
+  .err {{ margin-top: 12px; color: #f87171; font-size: 13px; }}
   .foot {{ margin-top: 30px; text-align: center; font-size: 11px; opacity: 0.35; letter-spacing: 1.5px; text-transform: uppercase; }}
 </style>
 </head>
@@ -1961,34 +2013,38 @@ def _render_landing_page(short_id: str, look_name: str, image_url: str,
     <div class="brand">{shop_safe} · Richiesta informazioni</div>
     <div class="photo"><img id="lookImg" src="{image_url}" alt="{name_safe}" /></div>
     <h1>{name_safe}</h1>
-    <p class="hint">Vuoi prezzo, taglie disponibili o info su questo look? Scegli il modo più comodo:</p>
+    <p class="hint">Come vuoi ricevere informazioni? Scegli una delle due opzioni:</p>
+
+    <!-- Opzione 1: form di richiamata -->
+    <div class="option-block">
+      <div class="option-num">Opzione 1 · Consigliata</div>
+      <div class="option-title">Contattaci ora · Ti ricontattiamo subito</div>
+      <div class="option-desc">Lascia i tuoi dati e il negozio ti chiamerà al più presto (con notifica immediata).</div>
+
+      <form id="f" autocomplete="on">
+        <label>Il tuo nome</label>
+        <input name="customer_name" id="iName" type="text"
+          placeholder="es. Maria Rossi" maxlength="80" autocomplete="name" />
+
+        <label>Telefono</label>
+        <input name="phone" id="iPhone" type="tel"
+          placeholder="+39 333 1234567" maxlength="40"
+          inputmode="tel" autocomplete="tel" />
+
+        <label>Messaggio</label>
+        <textarea name="message" id="iMsg" placeholder="es. Vorrei sapere prezzo e taglie disponibili" maxlength="600" autocomplete="off"></textarea>
+
+        <button class="btn" type="submit" id="btn">📨 Invia richiesta · Verrò ricontattato</button>
+        <div id="err" class="err" style="display:none"></div>
+      </form>
+
+      <div id="ok" class="ok" style="display:none">
+        ✅ Richiesta inviata!<br/>
+        Il negozio ti contatterà al più presto. Grazie.
+      </div>
+    </div>
 
     {wa_button_html}
-
-    <form id="f" autocomplete="on">
-      <label>Il tuo nome</label>
-      <input name="customer_name" id="iName" type="text"
-        placeholder="es. Maria Rossi" maxlength="80"
-        autocomplete="name" />
-
-      <label>Telefono</label>
-      <input name="phone" id="iPhone" type="tel"
-        placeholder="es. +39 333 1234567" maxlength="40"
-        inputmode="tel"
-        autocomplete="tel" />
-
-      <label>Messaggio</label>
-      <textarea name="message" id="iMsg" placeholder="es. Vorrei sapere prezzo e taglie disponibili" maxlength="600"
-        autocomplete="off"></textarea>
-
-      <button class="btn" type="submit" id="btn">Invia richiesta</button>
-      <div id="err" class="err" style="display:none"></div>
-    </form>
-
-    <div id="ok" class="ok" style="display:none">
-      ✅ Richiesta inviata!<br/>
-      Il negozio ti contatterà al più presto. Grazie.
-    </div>
 
     <div class="foot">Powered by DressVibe</div>
   </div>
@@ -2001,8 +2057,7 @@ const errBox = document.getElementById('err');
 const iName = document.getElementById('iName');
 const iPhone = document.getElementById('iPhone');
 
-// --- Strategy 2: localStorage pre-fill ---
-// On 2nd+ visit (any look from the same shop) the form is filled automatically.
+// Strategy 2: localStorage pre-fill
 const LS_KEY = 'dv_customer_v1';
 try {{
   const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
@@ -2026,7 +2081,6 @@ f.addEventListener('submit', async function(e) {{
     errBox.style.display = 'block';
     return;
   }}
-  // Persist for next visit (privacy-friendly: lives only in the customer's browser)
   try {{
     localStorage.setItem(LS_KEY, JSON.stringify({{
       name: body.customer_name || '',
@@ -2050,7 +2104,7 @@ f.addEventListener('submit', async function(e) {{
   }} catch (err) {{
     errBox.textContent = err.message || 'Errore di invio. Riprova.';
     errBox.style.display = 'block';
-    btn.disabled = false; btn.textContent = 'Invia richiesta';
+    btn.disabled = false; btn.textContent = '📨 Invia richiesta · Verrò ricontattato';
   }}
 }});
 </script>

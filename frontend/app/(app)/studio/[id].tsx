@@ -109,10 +109,12 @@ export default function Studio() {
       // is already in the user's gallery ready to attach.
       const saved = await saveImageToGallery(image || "", `dressvibe_${id}_${idx}`);
 
-      // Copy a polished message + link so the shop owner just pastes it in the
-      // channel post. The arrow emojis make the link visually obvious to
-      // customers scrolling the WhatsApp channel.
-      const clipboardText = `👇 Premi qui per ricevere info 👇\n${link.public_url}`;
+      // Copy a polished message + link. Put URL FIRST so WhatsApp's
+      // "paste link from clipboard" suggestion appears when the user switches
+      // to the app, AND so the URL auto-linkifies as blue in the channel post
+      // (WhatsApp channels sometimes don't auto-link URLs preceded by emoji).
+      const shareUrl = link.tiny_url || link.public_url;
+      const clipboardText = `${shareUrl}\n👇 Premi qui per ricevere info 👇`;
       try { await Clipboard.setStringAsync(clipboardText); } catch {}
 
       // Open WhatsApp IMMEDIATELY (no confirm dialog). On web we use
@@ -562,7 +564,6 @@ export default function Studio() {
                   <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
                 )}
                 <Text style={s.shareLabel}>WhatsApp</Text>
-                <Text style={s.shareSub}>+ link info</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.shareBtn} onPress={() => downloadAndShare("share")} testID="share-download">
                 <Ionicons name="download-outline" size={20} color={theme.colors.text} />
