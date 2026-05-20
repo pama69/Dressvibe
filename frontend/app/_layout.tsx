@@ -21,24 +21,41 @@ export default function RootLayout() {
 
   useEffect(() => {
     (async () => {
-      try {
-        // Explicit TTF require — bypasses any @expo/vector-icons resolver
-        // weirdness that intermittently returns an empty/0-byte buffer on
-        // Expo Go. Doing exactly ONE load keeps the asset registry clean.
-        await Font.loadAsync({
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          Ionicons: require("@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf"),
-        });
-      } catch (e) {
-        console.warn("Ionicons explicit TTF load failed, trying fallback", e);
+      // Try multiple loading strategies — on Expo Go SDK 54 the Metro asset
+      // bundler intermittently ships a 0-byte TTF for ionicons, breaking
+      // every icon in the app. We try the local asset first (instant when it
+      // works), then fall back to a public CDN URL (always works, ~400KB
+      // download on first launch only).
+      const tryLoad = async (label: string, fn: () => Promise<any>): Promise<boolean> => {
         try {
-          // Fallback to the wrapper API in case the explicit path doesn't
-          // resolve in a future @expo/vector-icons release.
-          await Font.loadAsync({ ...Ionicons.font });
-        } catch (e2) {
-          console.warn("Ionicons fallback load failed", e2);
+          await fn();
+          return true;
+        } catch (e: any) {
+          console.warn(`[fonts] ${label} failed:`, e?.message || e);
+          return false;
         }
+      };
+
+      // 1) Local explicit require — fast path
+      let ok = await tryLoad("local-ttf", () => Font.loadAsync({
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        Ionicons: require("@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf"),
+      }));
+      // 2) Wrapper API — different code path inside @expo/vector-icons
+      if (!ok) {
+        ok = await tryLoad("Ionicons.font", () => Font.loadAsync({ ...Ionicons.font }));
       }
+      // 3) Remote CDN — bulletproof fallback that ignores Metro/asset bugs
+      if (!ok) {
+        ok = await tryLoad("cdn", () => Font.loadAsync({
+          Ionicons: {
+            uri: "https://cdn.jsdelivr.net/npm/@expo/vector-icons@15.0.3/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+          },
+        }));
+      }
+      // Never block the UI even if all 3 strategies fail — the user will see
+      // tofu boxes for icons but at least the app is usable. The bell badge,
+      // labels and screens still work without icons.
       setFontsLoaded(true);
     })();
   }, []);
