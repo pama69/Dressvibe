@@ -11,6 +11,20 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+    ROME_TZ = ZoneInfo("Europe/Rome")
+except Exception:
+    ROME_TZ = timezone(timedelta(hours=1))  # fallback CET
+
+def now_rome() -> datetime:
+    """Return current datetime in Europe/Rome timezone."""
+    return datetime.now(ROME_TZ)
+
+def fmt_rome(fmt: str = "%d/%m/%Y %H:%M") -> str:
+    """Return formatted current datetime in Europe/Rome timezone."""
+    return now_rome().strftime(fmt)
+
 import httpx
 import base64
 
@@ -704,7 +718,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
         "id": gen_id,
         "user_id": user["user_id"],
         "garment_ids": payload.garment_ids,
-        "title": payload.title or f"Generazione del {datetime.now().strftime('%d/%m %H:%M')}",
+        "title": payload.title or f"Generazione del {fmt_rome('%d/%m %H:%M')}",
         "params": payload.dict(exclude={"garment_ids", "title"}),
         "images": [],
         "status": "pending",
@@ -1608,7 +1622,7 @@ async def telegram_webhook(secret: str, request: Request):
 
             # 3. Notify the admin (always, even if pub is None for some reason)
             if TELEGRAM_ADMIN_CHAT_ID:
-                now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+                now = fmt_rome("%d/%m/%Y %H:%M") + " (Roma)"
                 admin_text = (
                     f"🔔 *Nuova richiesta info*\n"
                     f"👤 Cliente: {full_name} ({handle})\n"

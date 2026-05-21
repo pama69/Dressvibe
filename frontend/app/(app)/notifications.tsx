@@ -46,7 +46,13 @@ function formatTime(iso: string): string {
     if (diff < 60) return "ora";
     if (diff < 3600) return `${Math.floor(diff / 60)} min fa`;
     if (diff < 86400) return `${Math.floor(diff / 3600)} ore fa`;
-    return d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    // Force display in Italian local time (Europe/Rome) regardless of the
+    // device timezone — the shop owner is in Italy and expects local times,
+    // not whatever the device clock is set to.
+    return d.toLocaleString("it-IT", {
+      day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+      timeZone: "Europe/Rome",
+    });
   } catch {
     return iso;
   }
