@@ -141,6 +141,7 @@ class GenerationCreate(BaseModel):
     title: Optional[str] = None
     provider: Optional[str] = None  # image_gen provider id; None = default
     custom_background_id: Optional[str] = None  # if set, overrides `background`
+    look_styles: Optional[List[str]] = None  # optional aesthetic modifiers (warm/depth/vivid/dynamic/premium)
 
 
 class Generation(BaseModel):
@@ -410,6 +411,34 @@ SHOES_IT = {
     "scarpa_bassa": "minimal low-cut flat shoes (ballerinas, loafers or low boots) that match the outfit",
 }
 
+# Optional aesthetic modifiers selectable from the generation UI. The prompts
+# are appended verbatim to the main outfit prompt to nudge Gemini toward a
+# specific photographic look. Provided in Italian by the shop owner; Gemini
+# handles multilingual prompts natively.
+LOOK_STYLES_PROMPTS = {
+    "warm": (
+        ", fotografia realistica con illuminazione naturale calda e morbida da finestra laterale, "
+        "luce dorata delicata che crea volume sul corpo e sui tessuti, ombre leggere e naturali, "
+        "profondità realistica, stile lifestyle elegante"
+    ),
+    "depth": (
+        ", scattata da angolazione leggermente bassa e di tre quarti, prospettiva naturale che slancia la figura, "
+        "sfocatura leggera sullo sfondo (bokeh delicato), ottima profondità di campo, look professionale e moderno"
+    ),
+    "vivid": (
+        ", colori vividi e fedeli ai tessuti con contrasto equilibrato, tonalità ricche ma realistiche, "
+        "luce diffusa che fa risaltare la trama dei tessuti, atmosfera fresca e commerciale, qualità fotografica premium"
+    ),
+    "dynamic": (
+        ", posa naturale con leggero movimento (capelli o tessuto che si muove delicatamente), "
+        "energia positiva e fluida, luce naturale, sensazione di vita reale senza esagerare, stile editoriale pulito"
+    ),
+    "premium": (
+        ", ambientazione minimal con sfondo neutro leggermente sfocato, illuminazione da studio elegante ma calda, "
+        "composizione bilanciata, look da catalogo di moda alto di gamma, molto appetibile per social"
+    ),
+}
+
 
 def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label: Optional[str] = None) -> str:
     gender = GENDER_IT.get(p.model_gender, p.model_gender)
@@ -443,7 +472,23 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label
         f"STRICT vertical 4:5 aspect ratio (portrait, ratio 1080x1350 — the native Instagram feed format). "
         f"The composition must fit the model fully inside the 4:5 frame with comfortable margins on top and bottom. "
         f"Variation seed {variation_idx}."
+        f"{_compose_look_styles_suffix(p.look_styles)}"
     )
+
+
+def _compose_look_styles_suffix(look_styles: Optional[List[str]]) -> str:
+    """Append the selected aesthetic-style snippets (in Italian) to the prompt."""
+    if not look_styles:
+        return ""
+    parts: List[str] = []
+    for sid in look_styles:
+        snippet = LOOK_STYLES_PROMPTS.get(sid)
+        if snippet:
+            parts.append(snippet.strip())
+    if not parts:
+        return ""
+    # Each snippet already starts with ", " — join naturally.
+    return " " + " ".join(parts)
 
 
 def pad_to_instagram_45(image_b64: str) -> str:

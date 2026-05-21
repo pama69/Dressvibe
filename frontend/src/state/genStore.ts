@@ -11,6 +11,7 @@ type GenParams = {
   num_variations: number;
   provider?: string;
   custom_background_id?: string;
+  look_styles?: string[];
 };
 
 let _params: GenParams | null = null;

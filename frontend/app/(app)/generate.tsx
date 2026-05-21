@@ -28,6 +28,17 @@ import {
 } from "@/src/constants/options";
 import { genStore } from "@/src/state/genStore";
 
+// Aesthetic modifiers shown as a 5-button toggle row in Step 4 (Look).
+// IDs must match the LOOK_STYLES_PROMPTS dict on the backend (server.py).
+type LookStyle = { id: string; label: string; emoji: string };
+const LOOK_STYLES: LookStyle[] = [
+  { id: "warm",    label: "Caldo",    emoji: "🔆" },
+  { id: "depth",   label: "Profondo", emoji: "🎯" },
+  { id: "vivid",   label: "Vivido",   emoji: "🎨" },
+  { id: "dynamic", label: "Dinamico", emoji: "💨" },
+  { id: "premium", label: "Premium",  emoji: "💎" },
+];
+
 type Garment = { id: string; name: string; image_base64: string; category: string };
 
 function ChipRow({
@@ -81,6 +92,7 @@ export default function Generate() {
   const [bg, setBg] = useState("white_studio");
   const [shoes, setShoes] = useState("comoda_fashion");
   const [variations, setVariations] = useState(4);
+  const [lookStyles, setLookStyles] = useState<string[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
   const [aiProvider, setAiProvider] = useState<string>("gemini_nano_banana");
   const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
@@ -127,6 +139,7 @@ export default function Generate() {
       num_variations: variations,
       provider: aiProvider,
       custom_background_id: customBgId || undefined,
+      look_styles: lookStyles.length > 0 ? lookStyles : undefined,
     });
     router.push("/generating");
   };
@@ -242,9 +255,42 @@ export default function Generate() {
           <ChipRow label="Scarpe" options={SHOES} value={shoes} onChange={setShoes} testIDPrefix="shoes" />
         </View>
 
-        {/* Step 4 — Variations */}
+        {/* Step 4 — Look (aesthetic modifiers) */}
         <View style={styles.step}>
-          <Text style={styles.stepLabel}>4 — Variazioni</Text>
+          <View style={styles.stepHead}>
+            <Text style={styles.stepLabel}>4 — Look</Text>
+            <Text style={styles.stepHint}>{lookStyles.length > 0 ? `${lookStyles.length} attivi` : "facoltativo"}</Text>
+          </View>
+          <Text style={styles.lookHint}>
+            Personalizza l'estetica della foto. Tocca uno o più stili — si combinano tra loro.
+          </Text>
+          <View style={styles.lookGrid}>
+            {LOOK_STYLES.map((ls) => {
+              const active = lookStyles.includes(ls.id);
+              return (
+                <TouchableOpacity
+                  key={ls.id}
+                  onPress={() => {
+                    try { Haptics.selectionAsync(); } catch {}
+                    setLookStyles((curr) =>
+                      curr.includes(ls.id) ? curr.filter((x) => x !== ls.id) : [...curr, ls.id]
+                    );
+                  }}
+                  style={[styles.lookBtn, active && styles.lookBtnActive]}
+                  activeOpacity={0.85}
+                  testID={`look-${ls.id}`}
+                >
+                  <Text style={[styles.lookEmoji, active && styles.lookEmojiActive]}>{ls.emoji}</Text>
+                  <Text style={[styles.lookLabel, active && styles.lookLabelActive]}>{ls.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Step 5 — Variations */}
+        <View style={styles.step}>
+          <Text style={styles.stepLabel}>5 — Variazioni</Text>
           <View style={styles.varsRow}>
             {VARIATIONS.map((n) => {
               const active = variations === n;
@@ -265,7 +311,7 @@ export default function Generate() {
         {/* Step 5 — AI provider */}
         {providers.length > 0 && (
           <View style={styles.step}>
-            <Text style={styles.stepLabel}>5 — Provider AI</Text>
+            <Text style={styles.stepLabel}>6 — Provider AI</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 12 }}>
               {providers.map((p) => {
                 const active = aiProvider === p.id;
@@ -375,6 +421,30 @@ const styles = StyleSheet.create({
   varBtnActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   varText: { color: theme.colors.text, fontSize: 16, fontWeight: "500" },
   varTextActive: { color: theme.colors.primaryFg },
+  // Look (aesthetic modifiers)
+  lookHint: {
+    color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: -4,
+  },
+  lookGrid: {
+    flexDirection: "row", flexWrap: "wrap", gap: 8,
+  },
+  lookBtn: {
+    flexBasis: "31%", flexGrow: 1,
+    paddingVertical: 12, paddingHorizontal: 10,
+    borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    alignItems: "center", justifyContent: "center", gap: 4,
+    minWidth: 90,
+  },
+  lookBtnActive: {
+    backgroundColor: theme.colors.text, borderColor: theme.colors.text,
+  },
+  lookEmoji: { fontSize: 20 },
+  lookEmojiActive: {},
+  lookLabel: {
+    color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.3,
+  },
+  lookLabelActive: { color: theme.colors.primaryFg },
   providerChip: {
     padding: 14, borderWidth: 1, borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface, minWidth: 200, gap: 6,

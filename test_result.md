@@ -108,6 +108,82 @@ user_problem_statement: |
   share via the native share sheet (Instagram-ready).
 
 backend:
+  - task: "Look styles modifier appended to outfit generation prompt"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Added optional `look_styles: List[str]` field to GenerationCreate
+          Pydantic model. Defined `LOOK_STYLES_PROMPTS` dict with 5 Italian
+          aesthetic suffixes (warm/depth/vivid/dynamic/premium). New helper
+          `_compose_look_styles_suffix` appends the joined snippets to the
+          end of the outfit prompt (after "Variation seed N."). When no
+          look_styles are passed the prompt is unchanged (backward compatible).
+          Need to verify:
+            * POST /api/generations with look_styles=["warm","premium"] returns
+              200 with images[].length == num_variations.
+            * Generation row in db stores params.look_styles preserved.
+            * Backward compat: POST /api/generations WITHOUT look_styles
+              still works (existing demo gen flows unaffected).
+            * Invalid look_styles ids are silently ignored (no 500).
+      - working: true
+        agent: "testing"
+        comment: |
+          Full suite executed via /app/backend_test_look_styles.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01) + demo garment g_test_demo01.
+          8/8 cases PASS (and every gen actually completed with status="done"
+          and 1 image, so we even verified the Gemini happy path end-to-end —
+          no upstream 429/503 today).
+
+          1) Happy path look_styles=["warm","premium"]
+             POST /api/generations → 200 in 28.0s, gen_id=gen_5da2c52acd46,
+             status="done", images=1/1.
+             response.params.look_styles == ["warm","premium"] ✅
+             MongoDB db.generations row: params.look_styles ==
+             ["warm","premium"] ✅
+          2) Backward compat (no look_styles key)
+             POST /api/generations → 200 in 26.1s, gen_id=gen_65df72e6b2ef,
+             status="done". response.params.look_styles == None and the
+             db row also has look_styles == None ✅
+          3) Empty look_styles=[]
+             POST /api/generations → 200 in 21.9s, gen_id=gen_3dbd169b2bef,
+             status="done". params.look_styles == [] in both response and
+             db row (semantically equivalent to "no styles", suffix helper
+             short-circuits) ✅
+          4) Invalid IDs silently ignored ["foobar","warm","unknown_id"]
+             POST /api/generations → 200 in 18.5s, gen_id=gen_568e3b7af4b4,
+             status="done". params preserved as-is in response AND in db
+             (server stores what the client sent; unknown IDs are filtered
+             only when composing the prompt suffix, so they never crash the
+             flow). NO 5xx ✅
+          5) All 5 styles ["warm","depth","vivid","dynamic","premium"]
+             POST /api/generations → 200 in 16.2s, gen_id=gen_43ce572d91c7,
+             status="done", 1 image. params.look_styles preserved exactly
+             in response and db ✅
+          6) Regression
+             GET /api/providers → 200, 3 keys ✅
+             GET /api/garments  → 200, 1 item ✅
+             GET /api/backgrounds → 200, 2 items ✅
+
+          The `_compose_look_styles_suffix()` helper correctly:
+            * returns "" when input is None or [] (preserves the EXACT
+              previous prompt — backward compatibility verified by case 2/3
+              succeeding identically),
+            * silently skips unknown ids via dict.get() returning None,
+            * appends a single leading space + joined Italian snippets when
+              valid ids are present.
+          The Pydantic field `look_styles: Optional[List[str]] = None` round-
+          trips through `payload.dict(exclude={"garment_ids","title"})` into
+          `db.generations.params` faithfully — confirmed by direct Mongo read.
+          No 5xx, no mocks, no integration issues.
+
   - task: "Telegram publish supports BOTH photo and video"
     implemented: true
     working: true
@@ -425,3 +501,28 @@ agent_communication:
             images[0] non-empty, params preserved — no error ✅
         6) POST /api/backgrounds without image_base64 → 422 ✅
       Telegram/video/studio paths were intentionally NOT retested (out of scope).
+  - agent: "testing"
+    message: |
+      look_styles aesthetic-modifier suite (/app/backend_test_look_styles.py)
+      against the preview URL with Bearer test_session_screen (user_demo01):
+      8/8 PASS — all 5 review-request cases plus the 3 regression GETs.
+
+      Every POST /api/generations actually completed end-to-end with
+      status="done" today (no upstream Gemini issues), so we verified both
+      the API contract AND the live image generation:
+        1) ["warm","premium"] → 200, gen=gen_5da2c52acd46, status=done,
+           images=1/1. response.params.look_styles AND
+           db.generations.params.look_styles both == ["warm","premium"] ✅
+        2) no key → 200, status=done. response & db params.look_styles == None
+           (backward compat: prompt path is unchanged when
+           _compose_look_styles_suffix returns "") ✅
+        3) [] → 200, status=done. params.look_styles == [] (semantically
+           equivalent to None; suffix helper short-circuits, prompt unchanged) ✅
+        4) ["foobar","warm","unknown_id"] → 200, status=done. Server stores
+           the list verbatim; unknown ids are filtered ONLY at prompt-compose
+           time via dict.get(). No 5xx. Exactly the spec'd behavior ✅
+        5) all 5 ["warm","depth","vivid","dynamic","premium"] → 200,
+           status=done, params preserved ✅
+        6) GET /providers (3 keys), /garments (1 item), /backgrounds (2)
+           all 200 ✅
+      No 5xx, no mocks, no integration issues. Nothing to fix.
