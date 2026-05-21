@@ -109,9 +109,14 @@ export default function Studio() {
       // is already in the user's gallery ready to attach.
       const saved = await saveImageToGallery(image || "", `dressvibe_${id}_${idx}`);
 
-      // Copy a polished message with the dicitura FIRST then the short URL.
-      const shareUrl = link.tiny_url || link.public_url;
-      const clipboardText = `👇 Premi qui per ricevere info 👇\n${shareUrl}`;
+      // Copy a polished message with the dicitura on top + a description
+      // (from "Descrizione Post" field) when set + the public link.
+      // We use the long canonical URL — TinyURL was removed because their
+      // landing page now shows third-party ads.
+      const shareUrl = link.public_url;
+      const desc = (tgDescription || "").trim();
+      const clipboardText = (desc ? `${desc}\n\n` : "") +
+        `👇 Premi qui per ricevere info 👇\n${shareUrl}`;
       try { await Clipboard.setStringAsync(clipboardText); } catch {}
 
       // Open WhatsApp IMMEDIATELY (no confirm dialog). On web we use
@@ -425,6 +430,58 @@ export default function Studio() {
               testID="studio-prompt"
               multiline
             />
+
+            {/* Genera Video — collocato fra la modifica personalizzata
+                e il bottone "Applica modifica" su richiesta dell'utente. */}
+            <View style={{ marginTop: 8, gap: 8 }}>
+              <Text style={s.sectionLabel}>🎬 Genera Video</Text>
+              <Text style={s.videoHint}>
+                Crea una clip 9:16 da questa foto: la modella gira su se stessa, cammina, mostra l'outfit. ~60–120 secondi di attesa.
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }}>
+                {videoProviders.map((p) => (
+                  <TouchableOpacity
+                    key={p.id}
+                    onPress={() => handleGenerateVideo(p.id)}
+                    disabled={!p.enabled || videoBusy}
+                    style={[s.videoBtn, (!p.enabled || videoBusy) && { opacity: 0.45 }]}
+                    testID={`video-${p.id}`}
+                  >
+                    <Text style={s.videoBtnName}>{p.name}</Text>
+                    <Text style={s.videoBtnSub}>
+                      {p.enabled ? "✨ Pronto" : `🔒 ${p.missing_keys?.join(", ")}`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {videoBusy ? (
+                <View style={s.videoBusy} testID="video-busy">
+                  <ActivityIndicator color={theme.colors.text} />
+                  <Text style={s.videoBusyText}>Sto generando il video… può richiedere 1–3 minuti</Text>
+                </View>
+              ) : null}
+
+              {videos.length > 0 ? (
+                <View style={{ gap: 18, marginTop: 4 }} testID="video-list">
+                  <Text style={s.videoListLabel}>I tuoi video ({videos.length})</Text>
+                  {videos.map((v) => (
+                    <VideoCard
+                      key={v.id}
+                      url={v.playback_url || v.video_url}
+                      expired={!v.archived}
+                      width={300}
+                      height={Math.round(300 * (16 / 9))}
+                      onDelete={() => handleDeleteVideo(v.id)}
+                      onPublishTelegram={() => handlePublishVideoTelegram(v)}
+                      publishingTelegram={publishingTgVideoId === v.id}
+                      onShare={() => setIgSheet({ video: v.playback_url || v.video_url })}
+                    />
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
             <TouchableOpacity
               onPress={() => editPrompt && applyEdit(editPrompt)}
               disabled={!editPrompt || busy}
@@ -441,87 +498,11 @@ export default function Studio() {
               </LinearGradient>
             </TouchableOpacity>
           </View>
-
-          {/* Caption */}
+          {/* Descrizione Post — usata sia per Telegram che per WhatsApp */}
           <View style={s.section}>
-            <View style={s.sectionHead}>
-              <Text style={s.sectionLabel}>Caption Instagram</Text>
-              <TouchableOpacity onPress={generateCaption} disabled={capBusy} testID="caption-generate">
-                <Text style={s.captionGen}>
-                  {capBusy ? "Generazione…" : "✨ Genera"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              value={caption} onChangeText={setCaption} multiline
-              placeholder="La tua caption apparirà qui…"
-              placeholderTextColor={theme.colors.textMuted}
-              style={[s.input, { minHeight: 90, textAlignVertical: "top" }]}
-              testID="caption-input"
-            />
-            {caption ? (
-              <TouchableOpacity onPress={copyCaption} style={s.copyBtn} testID="caption-copy">
-                <Ionicons name="copy-outline" size={14} color={theme.colors.text} />
-                <Text style={s.copyText}>Copia caption</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          {/* Genera Video */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>🎬 Genera Video</Text>
-            <Text style={s.videoHint}>
-              Crea una clip 9:16 da questa foto: la modella gira su se stessa, cammina, mostra l'outfit. ~60–120 secondi di attesa.
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }}>
-              {videoProviders.map((p) => (
-                <TouchableOpacity
-                  key={p.id}
-                  onPress={() => handleGenerateVideo(p.id)}
-                  disabled={!p.enabled || videoBusy}
-                  style={[s.videoBtn, (!p.enabled || videoBusy) && { opacity: 0.45 }]}
-                  testID={`video-${p.id}`}
-                >
-                  <Text style={s.videoBtnName}>{p.name}</Text>
-                  <Text style={s.videoBtnSub}>
-                    {p.enabled ? "✨ Pronto" : `🔒 ${p.missing_keys?.join(", ")}`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            {videoBusy ? (
-              <View style={s.videoBusy} testID="video-busy">
-                <ActivityIndicator color={theme.colors.text} />
-                <Text style={s.videoBusyText}>Sto generando il video… può richiedere 1–3 minuti</Text>
-              </View>
-            ) : null}
-
-            {videos.length > 0 ? (
-              <View style={{ gap: 18, marginTop: 4 }} testID="video-list">
-                <Text style={s.videoListLabel}>I tuoi video ({videos.length})</Text>
-                {videos.map((v) => (
-                  <VideoCard
-                    key={v.id}
-                    url={v.playback_url || v.video_url}
-                    expired={!v.archived}
-                    width={300}
-                    height={Math.round(300 * (16 / 9))}
-                    onDelete={() => handleDeleteVideo(v.id)}
-                    onPublishTelegram={() => handlePublishVideoTelegram(v)}
-                    publishingTelegram={publishingTgVideoId === v.id}
-                    onShare={() => setIgSheet({ video: v.playback_url || v.video_url })}
-                  />
-                ))}
-              </View>
-            ) : null}
-          </View>
-
-          {/* Descrizione del post */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>📝 Descrizione del post Telegram</Text>
+            <Text style={s.sectionLabel}>📝 Descrizione Post</Text>
             <Text style={s.tgHint}>
-              Questo testo apparirà sotto la foto/video pubblicata sul canale. Se vuoto, useremo la caption Instagram o un testo di default.
+              Questo testo apparirà sotto la foto/video pubblicata su Telegram e sopra il link "Premi qui per ricevere info" quando posti su WhatsApp.
             </Text>
             <TextInput
               value={tgDescription}
