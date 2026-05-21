@@ -27,13 +27,27 @@ export async function saveImageToGallery(
   if (Platform.OS === "web") {
     try {
       const filename = `${fileBaseName}.png`;
+      // Convert base64 → Blob → ObjectURL. iOS Safari + Emergent preview
+      // iframe both refuse to honor `download` on `data:` URLs, but a real
+      // blob URL is treated as a same-origin resource and the download
+      // attribute works (or, as a graceful fallback, the browser opens the
+      // image in a new tab and the user can long-press → "Save to Photos").
+      const byteString = atob(imageBase64);
+      const bytes = new Uint8Array(byteString.length);
+      for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "image/png" });
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = `data:image/png;base64,${imageBase64}`;
+      a.href = url;
       a.download = filename;
+      a.target = "_blank"; // iOS Safari fallback: opens preview so user can save
       a.rel = "noopener noreferrer";
       document.body.appendChild(a);
       a.click();
-      a.remove();
+      // Cleanup later to give the browser time to start the download.
+      setTimeout(() => {
+        try { a.remove(); URL.revokeObjectURL(url); } catch {}
+      }, 4000);
       return { ok: true, where: "download" };
     } catch (e: any) {
       return { ok: false, where: "none", error: e?.message };

@@ -115,21 +115,38 @@ export default function Studio() {
       try { await Clipboard.setStringAsync(clipboardText); } catch {}
 
       // Open WhatsApp:
-      // - Mobile: Linking.openURL → opens the WhatsApp app at the channel.
-      // - Web inside the Emergent preview iframe: window.open of
-      //   whatsapp.com triggers ERR_BLOCKED_BY_RESPONSE because of
-      //   Cross-Origin-Opener-Policy. We DON'T even try and instead show
-      //   a clear notify telling the user to open WA manually.
+      // - Mobile native (iOS/Android via Expo Go or build): try Linking.openURL
+      //   directly without `canOpenURL` — canOpenURL needs LSApplicationQueriesSchemes
+      //   on iOS for https URLs and returns false in Expo Go, blocking the open.
+      // - Web inside the Emergent preview iframe: a programmatic `<a target="_blank">`
+      //   click is treated as a user gesture and bypasses the iframe COOP/COEP
+      //   restrictions that block `window.open`. The WA universal link then
+      //   hands off to the installed WhatsApp app on the device.
       let opened = false;
-      if (Platform.OS !== "web") {
+      if (Platform.OS === "web") {
         try {
-          const supported = await Linking.canOpenURL(channelUrl);
-          if (supported) {
-            await Linking.openURL(channelUrl);
+          if (typeof document !== "undefined") {
+            const a = document.createElement("a");
+            a.href = channelUrl;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { try { a.remove(); } catch {} }, 1000);
             opened = true;
           }
-        } catch {
-          try { await Linking.openURL(channelUrl); opened = true; } catch {}
+        } catch {}
+      } else {
+        try {
+          await Linking.openURL(channelUrl);
+          opened = true;
+        } catch (err) {
+          // Last-ditch: try the wa.me universal link form which iOS reliably
+          // hands off to the WhatsApp app even when canOpenURL says no.
+          try {
+            await Linking.openURL(channelUrl.replace("whatsapp.com/channel/", "wa.me/channel/"));
+            opened = true;
+          } catch {}
         }
       }
 
@@ -554,7 +571,24 @@ export default function Studio() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={s.shareWordBtn}
-                onPress={() => downloadAndShare("share")}
+                onPress={async () => {
+                  if (!image) {
+                    notify({ title: "Nessuna immagine selezionata" });
+                    return;
+                  }
+                  const saved = await saveImageToGallery(image, `dressvibe_${id}_${idx}`);
+                  if (saved.ok) {
+                    if (Platform.OS === "web") {
+                      notify({ title: "Foto scaricata 📥", message: "L'immagine è stata scaricata dal browser. Se sei su iPhone Safari, l'anteprima si apre in una nuova scheda — tienila premuta e tocca \"Salva in Foto\"." });
+                    } else if (saved.where === "gallery") {
+                      notify({ title: "Foto salvata 📸", message: "L'immagine è ora nella tua galleria, dentro l'album \"DressVibe\"." });
+                    } else {
+                      notify({ title: "Foto scaricata 📥", message: "Foto salvata sul dispositivo." });
+                    }
+                  } else {
+                    notify({ title: "Salvataggio non riuscito", message: saved.error?.includes("Permesso") ? "Per salvare le foto nella galleria devi concedere il permesso a DressVibe nelle impostazioni del telefono." : (saved.error || "Riprova") });
+                  }
+                }}
                 testID="share-download"
                 activeOpacity={0.7}
               >
