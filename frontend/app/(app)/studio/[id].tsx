@@ -24,6 +24,7 @@ import VideoCard from "@/src/components/VideoCard";
 import InstagramShareSheet from "@/src/components/InstagramShareSheet";
 import { shareToInstagram, shareGeneric } from "@/src/utils/share";
 import { saveImageToGallery } from "@/src/utils/gallery";
+import { useNotify } from "@/src/contexts/ConfirmContext";
 
 const QUICK_EDITS = [
   { label: "Rimuovi sfondo", prompt: "Remove the background completely and replace it with a clean white studio background." },
@@ -35,6 +36,7 @@ const QUICK_EDITS = [
 export default function Studio() {
   const { id, index } = useLocalSearchParams<{ id: string; index: string }>();
   const router = useRouter();
+  const notify = useNotify();
   const idx = parseInt(index || "0", 10);
 
   const [image, setImage] = useState<string | null>(null);
@@ -65,10 +67,7 @@ export default function Studio() {
       // Silent on success — modal already gives feedback. We just want the
       // file to be in the gallery by the time the modal asks "open Instagram".
     } else if (Platform.OS !== "web" && !saved.ok && saved.error?.includes("Permesso")) {
-      Alert.alert(
-        "Permesso galleria",
-        "Per salvare le foto nella galleria devi concedere il permesso a DressVibe nelle impostazioni del telefono."
-      );
+      notify({ title: "Permesso galleria", message: "Per salvare le foto nella galleria devi concedere il permesso a DressVibe nelle impostazioni del telefono." });
     }
     setIgSheet({ image, skipSave: saved.ok });
   };
@@ -85,14 +84,10 @@ export default function Studio() {
         channelUrl = (settings.whatsapp_channel_url || "").trim();
       } catch {}
       if (!channelUrl) {
-        Alert.alert(
-          "Canale WhatsApp non configurato",
-          "Vai in Profilo → Canale WhatsApp e incolla il link del tuo canale.",
-          [
-            { text: "Annulla", style: "cancel" },
-            { text: "Apri Profilo", onPress: () => router.push("/(app)/profile") },
-          ],
-        );
+        await notify({
+          title: "Canale WhatsApp non configurato",
+          message: "Vai in Profilo → Canale WhatsApp e incolla il link del tuo canale.",
+        });
         return;
       }
 
@@ -119,20 +114,14 @@ export default function Studio() {
         `👇 Premi qui per ricevere info 👇\n${shareUrl}`;
       try { await Clipboard.setStringAsync(clipboardText); } catch {}
 
-      // Open WhatsApp IMMEDIATELY (no confirm dialog). On web we use
-      // window.open in the same synchronous tick as the button press so the
-      // popup blocker doesn't kick in. On native we use Linking.openURL.
+      // Open WhatsApp:
+      // - Mobile: Linking.openURL → opens the WhatsApp app at the channel.
+      // - Web inside the Emergent preview iframe: window.open of
+      //   whatsapp.com triggers ERR_BLOCKED_BY_RESPONSE because of
+      //   Cross-Origin-Opener-Policy. We DON'T even try and instead show
+      //   a clear notify telling the user to open WA manually.
       let opened = false;
-      if (Platform.OS === "web") {
-        try {
-          const w = (globalThis as any).open?.(channelUrl, "_blank", "noopener,noreferrer");
-          opened = !!w;
-        } catch { opened = false; }
-        if (!opened) {
-          // Last-resort: navigate the current tab
-          try { (globalThis as any).location.href = channelUrl; opened = true; } catch {}
-        }
-      } else {
+      if (Platform.OS !== "web") {
         try {
           const supported = await Linking.canOpenURL(channelUrl);
           if (supported) {
@@ -144,28 +133,35 @@ export default function Studio() {
         }
       }
 
-      // Lightweight feedback — no blocking dialog so the user can immediately
-      // switch to WhatsApp without an extra tap.
       const savedMsg = saved.ok
         ? (saved.where === "gallery" ? "📸 Foto salvata nella galleria.\n" : "📥 Foto scaricata.\n")
         : "";
 
       if (opened) {
-        Alert.alert(
-          "Pronto per WhatsApp ✅",
-          savedMsg +
-            `Messaggio + link copiati negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\n` +
+        await notify({
+          title: "Pronto per WhatsApp ✅",
+          message: savedMsg +
+            (desc ? `Testo:\n${desc}\n\n` : "") +
+            `Link copiato:\n${shareUrl}\n\n` +
             "Nel canale: nuovo post → allega la foto dalla galleria → incolla.",
-        );
+        });
       } else {
-        Alert.alert(
-          "Apri il canale manualmente",
-          savedMsg +
-            `Non sono riuscito ad aprire WhatsApp automaticamente. Messaggio copiato negli appunti:\n\n👇 Premi qui per ricevere info 👇\n${link.public_url}\n\nCanale: ${channelUrl}`,
-        );
+        await notify({
+          title: "Apri WhatsApp manualmente",
+          message: savedMsg +
+            (Platform.OS === "web"
+              ? `Il browser blocca l'apertura automatica di WhatsApp dalla preview Emergent. ` +
+                `Apri WhatsApp manualmente (mobile o web) → entra nel tuo canale → nuovo post → incolla.\n\n` +
+                `Testo già negli appunti:\n` +
+                (desc ? `${desc}\n\n` : "") +
+                `👇 Premi qui per ricevere info 👇\n${shareUrl}`
+              : `Non sono riuscito ad aprire WhatsApp automaticamente.\n\nCanale: ${channelUrl}\n\nTesto copiato:\n` +
+                (desc ? `${desc}\n\n` : "") +
+                `👇 Premi qui per ricevere info 👇\n${shareUrl}`),
+        });
       }
     } catch (e: any) {
-      Alert.alert("Errore", e?.message || "Impossibile creare il link");
+      notify({ title: "Errore", message: e?.message || "Impossibile creare il link" });
     } finally {
       setWaBusy(false);
     }
@@ -191,7 +187,7 @@ export default function Studio() {
       setOriginalImage(img || null);
       setGenTitle(g.title || "");
     } catch (e: any) {
-      Alert.alert("Errore", e?.message || "Errore");
+      notify({ title: "Errore", message: e?.message || "Errore" });
       router.back();
     } finally {
       setLoading(false);
@@ -218,7 +214,7 @@ export default function Studio() {
       setImage(res.image_base64);
       setEdited(true);
     } catch (e: any) {
-      Alert.alert("Modifica non riuscita", e?.message || "Riprova");
+      notify({ title: "Modifica non riuscita", message: e?.message || "Riprova" });
     } finally {
       setBusy(false);
     }
@@ -241,10 +237,10 @@ export default function Studio() {
       }
       await loadVideos();
       const msg = "Il tuo video è pronto qui sotto. Premi play per vederlo.";
-      if (Platform.OS === "web") window.alert("Video pronto\n\n" + msg); else Alert.alert("Video pronto", msg);
+      if (Platform.OS === "web") notify({ title: "Video pronto", message: msg }); else notify({ title: "Video pronto", message: msg });
     } catch (e: any) {
       const msg = e?.message || "Errore generazione video";
-      if (Platform.OS === "web") window.alert("Errore video\n\n" + msg); else Alert.alert("Errore video", msg);
+      if (Platform.OS === "web") notify({ title: "Errore video", message: msg }); else notify({ title: "Errore video", message: msg });
     } finally {
       setVideoBusy(false);
     }
@@ -255,7 +251,7 @@ export default function Studio() {
       await api.deleteVideo(videoId);
       setVideos((prev) => prev.filter((v) => v.id !== videoId));
     } catch (e: any) {
-      Alert.alert("Errore", e?.message || "Impossibile eliminare");
+      notify({ title: "Errore", message: e?.message || "Impossibile eliminare" });
     }
   };
 
@@ -275,10 +271,10 @@ export default function Studio() {
         image_index: idx,
       });
       const msg = `Video pubblicato sul canale (id ${res.channel_message_id}).\nQuando un cliente preme "RICHIEDI INFO" riceverai una notifica.`;
-      if (Platform.OS === "web") window.alert("Pubblicato su Telegram\n\n" + msg); else Alert.alert("Pubblicato su Telegram", msg);
+      if (Platform.OS === "web") notify({ title: "Pubblicato su Telegram ✅", message: msg }); else notify({ title: "Pubblicato su Telegram", message: msg });
     } catch (e: any) {
       const m = e?.message || "Impossibile pubblicare il video";
-      if (Platform.OS === "web") window.alert("Errore Telegram\n\n" + m); else Alert.alert("Errore Telegram", m);
+      if (Platform.OS === "web") notify({ title: "Errore Telegram", message: m }); else notify({ title: "Errore Telegram", message: m });
     } finally {
       setPublishingTgVideoId(null);
     }
@@ -296,7 +292,7 @@ export default function Studio() {
       });
       setCaption(r.caption);
     } catch (e: any) {
-      Alert.alert("Errore", e?.message || "Errore caption");
+      notify({ title: "Errore", message: e?.message || "Errore caption" });
     } finally {
       setCapBusy(false);
     }
@@ -305,12 +301,13 @@ export default function Studio() {
   const copyCaption = async () => {
     if (!caption) return;
     await Clipboard.setStringAsync(caption);
-    Alert.alert("Copiato!", "La caption è negli appunti.");
+    notify({ title: "Copiato!", message: "La caption è negli appunti." });
   };
 
   const downloadAndShare = async (target: "telegram" | "instagram" | "share") => {
     if (!image) {
-      if (Platform.OS === "web" && typeof window !== "undefined") window.alert("Nessuna immagine selezionata");
+      if (Platform.OS === "web" && typeof window !== "undefined") { notify({ title: "Nessuna immagine selezionata" }); }
+      else { notify({ title: "Nessuna immagine selezionata" }); }
       return;
     }
 
@@ -331,16 +328,16 @@ export default function Studio() {
         });
         const msg = `Foto pubblicata sul canale (id ${res.channel_message_id}).\n\nQuando un cliente preme "RICHIEDI INFO" riceverai una notifica.`;
         if (Platform.OS === "web" && typeof window !== "undefined") {
-          window.alert("Pubblicato su Telegram\n\n" + msg);
+          notify({ title: "Pubblicato su Telegram ✅", message: msg });
         } else {
-          Alert.alert("Pubblicato su Telegram", msg);
+          notify({ title: "Pubblicato su Telegram", message: msg });
         }
       } catch (e: any) {
         const errMsg = e?.message || "Impossibile pubblicare";
         if (Platform.OS === "web" && typeof window !== "undefined") {
-          window.alert("Errore Telegram\n\n" + errMsg);
+          notify({ title: "Errore Telegram", message: errMsg });
         } else {
-          Alert.alert("Errore Telegram", errMsg);
+          notify({ title: "Errore Telegram", message: errMsg });
         }
       } finally {
         setBusy(false);
@@ -360,7 +357,7 @@ export default function Studio() {
         await shareGeneric(opts);
       }
     } catch (e: any) {
-      Alert.alert("Errore", e?.message || "Impossibile condividere");
+      notify({ title: "Errore", message: e?.message || "Impossibile condividere" });
     }
   };
 

@@ -9,20 +9,36 @@ type ConfirmOptions = {
   cancelText?: string;
 };
 
+type NotifyOptions = {
+  title: string;
+  message?: string;
+  okText?: string;
+};
+
 type ConfirmCtx = {
   confirm: (opts: ConfirmOptions) => Promise<boolean>;
+  notify: (opts: NotifyOptions) => Promise<void>;
 };
 
 const Ctx = createContext<ConfirmCtx | undefined>(undefined);
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [opts, setOpts] = useState<ConfirmOptions | null>(null);
+  const [notifyOpts, setNotifyOpts] = useState<NotifyOptions | null>(null);
   const resolverRef = useRef<((b: boolean) => void) | null>(null);
+  const notifyResolverRef = useRef<(() => void) | null>(null);
 
   const confirm = useCallback((options: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
       resolverRef.current = resolve;
       setOpts(options);
+    });
+  }, []);
+
+  const notify = useCallback((options: NotifyOptions) => {
+    return new Promise<void>((resolve) => {
+      notifyResolverRef.current = resolve;
+      setNotifyOpts(options);
     });
   }, []);
 
@@ -33,8 +49,15 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     if (r) r(b);
   };
 
+  const onNotifyClose = () => {
+    const r = notifyResolverRef.current;
+    notifyResolverRef.current = null;
+    setNotifyOpts(null);
+    if (r) r();
+  };
+
   return (
-    <Ctx.Provider value={{ confirm }}>
+    <Ctx.Provider value={{ confirm, notify }}>
       {children}
       <Modal
         visible={!!opts}
@@ -67,6 +90,34 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           </View>
         </View>
       </Modal>
+
+      {/* Notify modal — single-button info dialog used as a reliable
+          replacement for Alert.alert / window.alert. Critical inside the
+          Emergent preview iframe where the browser silently blocks native
+          alert() calls (no allow-modals sandbox flag). */}
+      <Modal
+        visible={!!notifyOpts}
+        transparent
+        animationType="fade"
+        onRequestClose={onNotifyClose}
+      >
+        <View style={s.overlay}>
+          <View style={s.box}>
+            <Text style={s.title} testID="notify-title">{notifyOpts?.title}</Text>
+            {notifyOpts?.message ? <Text style={s.message}>{notifyOpts.message}</Text> : null}
+            <View style={[s.actions, { justifyContent: "flex-end" }]}>
+              <TouchableOpacity
+                onPress={onNotifyClose}
+                style={[s.btn, s.okBtn]}
+                testID="notify-ok"
+                activeOpacity={0.85}
+              >
+                <Text style={s.okText}>{notifyOpts?.okText || "OK"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Ctx.Provider>
   );
 }
@@ -75,6 +126,12 @@ export function useConfirm() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("ConfirmProvider missing in tree");
   return ctx.confirm;
+}
+
+export function useNotify() {
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error("ConfirmProvider missing in tree");
+  return ctx.notify;
 }
 
 const s = StyleSheet.create({
@@ -102,4 +159,6 @@ const s = StyleSheet.create({
   cancelText: { color: theme.colors.text, fontWeight: "500", letterSpacing: 0.3 },
   dangerBtn: { borderColor: theme.colors.error, backgroundColor: theme.colors.error },
   dangerText: { color: "#fff", fontWeight: "700", letterSpacing: 0.3 },
+  okBtn: { borderColor: theme.colors.text, backgroundColor: theme.colors.text, paddingHorizontal: 28 },
+  okText: { color: theme.colors.primaryFg, fontWeight: "700", letterSpacing: 0.3 },
 });
