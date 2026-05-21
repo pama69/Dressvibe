@@ -119,7 +119,7 @@ export default function History() {
                 testID={`history-delete-${item.id}`}
                 hitSlop={8}
               >
-                <Ionicons name="trash-outline" size={16} color={theme.colors.textMuted} />
+                <Text style={styles.deleteEmoji}>🗑️</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -150,6 +150,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, alignItems: "center", justifyContent: "center",
     borderLeftWidth: 1, borderLeftColor: theme.colors.border,
   },
+  deleteEmoji: { fontSize: 20, lineHeight: 24 },
   thumb: { width: 64, height: 80, backgroundColor: theme.colors.surfaceAlt },
   thumbEmpty: { alignItems: "center", justifyContent: "center" },
   rowTitle: { color: theme.colors.text, fontSize: 14, fontWeight: "500" },
