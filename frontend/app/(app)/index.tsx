@@ -209,32 +209,46 @@ export default function Galleria() {
               tintColor={theme.colors.text}
             />
           }
-          renderItem={({ item }) => (
-            <View style={[styles.card, { width: tileW, height: tileH }]} testID={`garment-card-${item.id}`}>
-              <Image
-                source={{ uri: `data:image/png;base64,${item.image_base64}` }}
-                style={styles.cardImg}
-              />
+          renderItem={({ item }) => {
+            // Hide auto-generated "Cap NNNN" placeholders in the tile label
+            // so the gallery stays visually clean. Real shop descriptions
+            // (e.g. "Vestito €59, pantalone €67") are shown normally.
+            const isAutoName = /^Cap\s+\d{3,5}$/i.test((item.name || "").trim());
+            const displayName = isAutoName ? "" : (item.name || "");
+            return (
               <TouchableOpacity
-                onPress={() => handleDelete(item)}
-                style={styles.deleteBtn}
-                testID={`garment-delete-${item.id}`}
-                activeOpacity={0.7}
-                hitSlop={8}
+                style={[styles.card, { width: tileW, height: tileH }]}
+                testID={`garment-card-${item.id}`}
+                activeOpacity={0.85}
+                onPress={() => router.push(`/(app)/garment/${item.id}`)}
               >
-                <Ionicons name="close" size={14} color={theme.colors.text} />
+                <Image
+                  source={{ uri: `data:image/png;base64,${item.image_base64}` }}
+                  style={styles.cardImg}
+                />
+                <TouchableOpacity
+                  onPress={() => handleDelete(item)}
+                  style={styles.deleteBtn}
+                  testID={`garment-delete-${item.id}`}
+                  activeOpacity={0.7}
+                  hitSlop={8}
+                >
+                  <Ionicons name="close" size={14} color={theme.colors.text} />
+                </TouchableOpacity>
+                <View style={styles.cardOverlay}>
+                  {displayName ? (
+                    <Text style={styles.cardName} numberOfLines={1}>
+                      {displayName}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.cardMeta}>
+                    {item.category}
+                    {item.price ? ` · €${item.price}` : ""}
+                  </Text>
+                </View>
               </TouchableOpacity>
-              <View style={styles.cardOverlay}>
-                <Text style={styles.cardName} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Text style={styles.cardMeta}>
-                  {item.category}
-                  {item.price ? ` · €${item.price}` : ""}
-                </Text>
-              </View>
-            </View>
-          )}
+            );
+          }}
         />
       )}
 

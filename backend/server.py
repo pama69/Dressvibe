@@ -328,6 +328,39 @@ async def get_garment(garment_id: str, authorization: Optional[str] = Header(Non
     return item
 
 
+class GarmentUpdate(BaseModel):
+    """Partial update payload — only the description/name can be edited from
+    the gallery detail screen for now. We DO NOT allow editing the image."""
+    name: Optional[str] = None  # "Descrizione e prezzi"
+
+
+@api_router.patch("/garments/{garment_id}")
+async def update_garment(
+    garment_id: str,
+    payload: GarmentUpdate,
+    authorization: Optional[str] = Header(None),
+):
+    user = await get_current_user(authorization)
+    update_doc = {}
+    if payload.name is not None:
+        # Same convention used by the upload form: when the field is left
+        # blank we fall back to an auto-generated "Cap NNNN" placeholder so
+        # the price-tags logic on the backend correctly skips it.
+        trimmed = (payload.name or "").strip()
+        final_name = trimmed or f"Cap {str(int.from_bytes(uuid.uuid4().bytes[:2], 'big') % 9000 + 1000)}"
+        update_doc["name"] = final_name
+    if not update_doc:
+        return {"updated": 0}
+    update_doc["updated_at"] = datetime.now(timezone.utc)
+    res = await db.garments.update_one(
+        {"id": garment_id, "user_id": user["user_id"]},
+        {"$set": update_doc},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Garment not found")
+    return {"updated": res.modified_count, "name": update_doc["name"]}
+
+
 @api_router.delete("/garments/{garment_id}")
 async def delete_garment(garment_id: str, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)

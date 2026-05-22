@@ -76,8 +76,14 @@ export const api = {
 
   // garments
   listGarments: () => request<any[]>("/garments"),
+  getGarment: (id: string) => request<any>(`/garments/${id}`),
   createGarment: (g: any) =>
     request<any>("/garments", { method: "POST", body: g }),
+  updateGarment: (id: string, patch: { name?: string }) =>
+    request<{ updated: number; name?: string }>(`/garments/${id}`, {
+      method: "PATCH",
+      body: patch,
+    }),
   deleteGarment: (id: string) =>
     request<any>(`/garments/${id}`, { method: "DELETE" }),
 

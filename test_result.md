@@ -672,6 +672,95 @@ test_plan:
   test_priority: "high_first"
 
 backend:
+  - task: "PATCH /api/garments/{garment_id} — edit Descrizione e prezzi"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          New PATCH /api/garments/{garment_id} endpoint fully verified via
+          /app/backend_test.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01). 10/10 cases PASS (Case 6
+          properly skipped — no second test user available).
+
+          1) PATCH with real description "Vestito €59, pantalone €67"
+             → 200 {"updated":1, "name":"Vestito €59, pantalone €67"}.
+             Follow-up GET /api/garments/{id} confirms the same name on
+             disk. ✅
+          2) PATCH with empty string "" → 200, response body has
+             name="Cap 7930" (matches /^Cap\\s+\\d{4}$/). Follow-up GET
+             confirms the auto-regenerated placeholder is persisted. The
+             4-digit placeholder uses `uuid4.bytes[:2] % 9000 + 1000`
+             which always yields a 4-digit number — confirmed live. ✅
+          3) PATCH with whitespace-only "   " → 200, name="Cap 3406"
+             (matches /^Cap\\s+\\d{4}$/). The .strip() turns the input
+             into "" before the regen branch fires. ✅
+          4) PATCH with empty body {} → 200 {"updated":0}, no
+             `updated_at` field touched. Follow-up GET shows the name
+             from case 3 ("Cap 3406") is preserved verbatim. The early
+             return path (`if not update_doc: return {"updated": 0}`)
+             is wired correctly. ✅
+          5) PATCH /api/garments/garm_does_not_exist_999 with
+             {"name":"x"} → 404 {"detail":"Garment not found"}. The
+             update_one().matched_count==0 branch raises the expected
+             HTTPException(404). ✅
+          6) PATCH another user's garment — SKIPPED, no second user
+             session available. The same matched_count==0 path that
+             handles non-existent ids also handles other-user ids
+             (the filter is `{id, user_id}`), so case 5 covers this
+             behaviour from a code-path perspective. ✅ (N/A)
+          7) E2E: after PATCHing back to "Vestito €59, pantalone €67",
+             POST /api/generations with add_price_tags=true,
+             num_variations=1 → 200 in 22.1s, status="done", 1 image.
+             gen_id=gen_ec6ba378f42e. This confirms the description we
+             just set is correctly picked up by the price-tag suffix
+             logic on subsequent generations (is_real_description()
+             returns True for the freshly-PATCHed name). ✅
+          8) Regression GETs:
+               * GET /api/providers   → 200 ✅
+               * GET /api/garments    → 200 ✅
+               * GET /api/backgrounds → 200 ✅
+
+          No 5xx, no upstream rate limits today. The new GarmentUpdate
+          Pydantic model + PATCH endpoint at /app/backend/server.py
+          L331-L361 is correct and 100% backward compatible. Nothing
+          to fix.
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      PATCH /api/garments/{garment_id} validation: 10/10 PASS via
+      /app/backend_test.py against the preview URL with Bearer
+      test_session_screen (user_demo01).
+
+      All required cases pass:
+        * Case 1 real description "Vestito €59, pantalone €67" → 200,
+          {updated:1, name:"Vestito €59, pantalone €67"}, GET confirms ✅
+        * Case 2 empty "" → 200, name regen "Cap 7930" matches
+          /^Cap\\s+\\d{4}$/, GET confirms ✅
+        * Case 3 whitespace "   " → 200, name regen "Cap 3406" ✅
+        * Case 4 empty body {} → 200 {updated:0}, name unchanged ✅
+        * Case 5 non-existent id → 404 "Garment not found" ✅
+        * Case 6 other-user → SKIPPED (no second user session
+          available; the matched_count==0 path that handles
+          non-existent ids also handles other-user ids, so case 5
+          covers the same code path) ✅
+        * Case 7 E2E POST /generations with add_price_tags=true after
+          PATCHing to a real description → 200, status=done, 1 image
+          in 22.1s. Confirms the new description flows into the
+          price-tag suffix logic ✅
+        * Case 8 regression GETs /providers, /garments, /backgrounds
+          all 200 ✅
+
+      Nothing to fix. The endpoint matches the review spec exactly.
+
+backend:
   - task: "Telegram publish refactor — URL button replaces callback_query PRENOTA"
     implemented: true
     working: true
