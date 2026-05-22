@@ -666,8 +666,7 @@ backend:
           new toggle is explicitly enabled. Nothing to fix.
 
 test_plan:
-  current_focus:
-    - "Telegram publish refactor — URL button replaces callback_query PRENOTA"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -675,12 +674,40 @@ test_plan:
 backend:
   - task: "Telegram publish refactor — URL button replaces callback_query PRENOTA"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/server.py"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          RE-TEST after reply_markup fix: 14/14 cases PASS. Case 4 (publish
+          without gen_id/image_index) now returns **200** with
+          channel_message_id=23 — the previous 502 "object expected as
+          reply markup" is gone. Backend logs confirm the expected warning
+          still emits:
+            "[TG-PUB] could not mint landing URL for gen=None idx=None
+             — publishing without inline button"
+          and the Telegram sendPhoto call succeeds (no inline button
+          attached, plain post).
+
+          The fix is correctly applied at /app/backend/server.py L1598-L1653:
+            * reply_markup_str computed ONCE as
+              `_json.dumps(keyboard) if keyboard is not None else None`
+            * Each call site (sendVideo URL-mode L1612, sendVideo multipart
+              fallback L1628, sendPhoto L1652) now guards with
+              `if reply_markup_str: data["reply_markup"] = reply_markup_str`
+              so the key is OMITTED (not set to "null") when no landing
+              URL could be minted.
+
+          Regression: Cases 2 (publish with gen_id+idx → 200,
+          channel_message_id=21, token=f8d68ec346c041, short_id=KNBg6o
+          minted), 3 (idempotency: re-publish same gen_id/idx → 200,
+          db.short_links count stayed at 1, short_id KNBg6o reused), and 5
+          (fake legacy callback_query webhook → 200 {"ok":true}) all still
+          pass. Regression GETs /providers, /garments, /generations all 200.
       - working: false
         agent: "testing"
         comment: |
@@ -893,3 +920,26 @@ agent_communication:
       Every call returned 200 with a real non-empty base64 PNG. No 4xx,
       no 5xx, no upstream rate limits. The new field + helper wiring is
       correct and 100% backward compatible. Nothing to fix.
+
+  - agent: "testing"
+    message: |
+      RE-TEST after reply_markup fix: 14/14 PASS. The previously-failing
+      Case 4 (POST /api/telegram/publish without gen_id/image_index) now
+      returns 200 with a valid channel_message_id (=23) and token. Backend
+      logs confirm the expected warning still fires
+      ("[TG-PUB] could not mint landing URL for gen=None idx=None —
+      publishing without inline button") and Telegram sendPhoto returns 200
+      (no more "object expected as reply markup" 400). The fix is
+      correctly applied at /app/backend/server.py L1598-L1653 — single
+      `reply_markup_str` computed once, guarded inject at the 3 call sites.
+
+      Regression confirmed:
+        * Case 2 (publish with gen_id+image_index) → 200, channel_message_id=21,
+          token=f8d68ec346c041, short_id=KNBg6o minted ✅
+        * Case 3 (idempotency: re-publish same gen_id/idx) → 200,
+          db.short_links count unchanged (==1), short_id KNBg6o reused ✅
+        * Case 5 (fake legacy callback_query webhook) → 200 {"ok":true} ✅
+        * Case 6 regression GETs /providers, /garments, /generations → 200 ✅
+
+      Telegram publish refactor task moved from working:false → working:true,
+      stuck_count reset to 0, current_focus cleared. Nothing else to fix.

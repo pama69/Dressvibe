@@ -1597,6 +1597,9 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
 
     import json as _json
     file_id: Optional[str] = None
+    # Telegram rejects reply_markup="null" — only include the key when we
+    # actually have a keyboard object to attach.
+    reply_markup_str: Optional[str] = _json.dumps(keyboard) if keyboard is not None else None
 
     if media_type == "video":
         # Try URL-mode first. Telegram itself downloads from the URL.
@@ -1604,9 +1607,10 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
             "chat_id": channel_id,
             "video": payload.video_url,
             "caption": caption,
-            "reply_markup": _json.dumps(keyboard),
             "supports_streaming": True,
         }
+        if reply_markup_str:
+            data["reply_markup"] = reply_markup_str
         status, body = await tg_api("sendVideo", data)
         if status != 200 or not body.get("ok"):
             # Fallback: download the video and upload as multipart.
@@ -1619,9 +1623,10 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
                 up_data = {
                     "chat_id": channel_id,
                     "caption": caption,
-                    "reply_markup": _json.dumps(keyboard),
                     "supports_streaming": "true",
                 }
+                if reply_markup_str:
+                    up_data["reply_markup"] = reply_markup_str
                 status, body = await tg_api("sendVideo", up_data, files=files)
             except HTTPException:
                 raise
@@ -1643,8 +1648,9 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
         data = {
             "chat_id": channel_id,
             "caption": caption,
-            "reply_markup": _json.dumps(keyboard),
         }
+        if reply_markup_str:
+            data["reply_markup"] = reply_markup_str
         status, body = await tg_api("sendPhoto", data, files=files)
         if status != 200 or not body.get("ok"):
             logger.error(f"Telegram sendPhoto error {status}: {body}")
