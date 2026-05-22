@@ -44,7 +44,10 @@ EMERGENT_AUTH_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/o
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '')
-TELEGRAM_ADMIN_CHAT_ID = os.environ.get('TELEGRAM_ADMIN_CHAT_ID', '')
+# TELEGRAM_ADMIN_CHAT_ID was used to forward callback_query "PRENOTA" clicks
+# to a single global admin chat. The flow has been replaced with an inline
+# URL button that opens the public landing page directly, so this variable
+# is no longer used anywhere in the code.
 TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
 PUBLIC_BASE_URL = os.environ.get('PUBLIC_BASE_URL', '')
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
@@ -1530,11 +1533,67 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
     if len(caption) > 1000:
         caption = caption[:1000] + "…"
 
-    keyboard = {
-        "inline_keyboard": [[
-            {"text": "RICHIEDI INFO", "callback_data": f"book:{token}"}
-        ]]
-    }
+    # Build (or reuse) the public landing-page URL for this photo. Pressing
+    # the "RICHIEDI INFO" button on Telegram now opens the SAME landing page
+    # used by the WhatsApp share flow — the customer can then either contact
+    # the shop owner on WhatsApp (number configured in the owner's profile)
+    # or submit an in-app info request. The previous callback_query/PRENOTA
+    # flow has been removed.
+    landing_url: Optional[str] = None
+    if payload.gen_id is not None and payload.image_index is not None:
+        # Validate ownership before generating a link
+        owner_gen = await db.generations.find_one(
+            {"id": payload.gen_id, "user_id": user["user_id"]},
+            {"_id": 0, "images": 1, "title": 1},
+        )
+        if owner_gen:
+            existing_sl = await db.short_links.find_one(
+                {"user_id": user["user_id"], "gen_id": payload.gen_id, "image_index": payload.image_index},
+                {"_id": 0, "short_id": 1, "tiny_url": 1},
+            )
+            if existing_sl:
+                short_id_for_url = existing_sl["short_id"]
+            else:
+                # Mint a fresh short id (retry on extremely unlikely collision)
+                short_id_for_url = ""
+                for _ in range(8):
+                    cand = _gen_short_id(6)
+                    if not await db.short_links.find_one({"short_id": cand}):
+                        short_id_for_url = cand
+                        break
+                if short_id_for_url:
+                    await db.short_links.insert_one({
+                        "short_id": short_id_for_url,
+                        "user_id": user["user_id"],
+                        "gen_id": payload.gen_id,
+                        "image_index": payload.image_index,
+                        "look_name": (owner_gen.get("title") or "Look").strip()[:120],
+                        "tiny_url": None,
+                        "created_at": datetime.now(timezone.utc),
+                    })
+            if short_id_for_url:
+                base = (PUBLIC_BASE_URL or "").rstrip("/")
+                if base:
+                    landing_url = f"{base}/api/r/{short_id_for_url}"
+
+    # Compose the inline keyboard. We prefer a URL button (opens the landing
+    # page directly in the customer's browser) over the legacy callback_data
+    # button, so no Telegram webhook round-trip is needed any more.
+    if landing_url:
+        keyboard = {
+            "inline_keyboard": [[
+                {"text": "RICHIEDI INFO", "url": landing_url}
+            ]]
+        }
+    else:
+        # Fallback: if we couldn't mint a landing URL (e.g. PUBLIC_BASE_URL
+        # missing in env), publish without an inline button rather than
+        # falling back to the deprecated callback flow.
+        logger.warning(
+            f"[TG-PUB] could not mint landing URL for gen={payload.gen_id} "
+            f"idx={payload.image_index} — publishing without inline button"
+        )
+        keyboard = None
 
     import json as _json
     file_id: Optional[str] = None
@@ -1708,100 +1767,19 @@ async def telegram_webhook(secret: str, request: Request):
 
     cq = update.get("callback_query")
     if cq:
-        data = cq.get("data", "")
-        from_user = cq.get("from", {}) or {}
-        user_id_tg = from_user.get("id")
-        username = from_user.get("username")
-        first = from_user.get("first_name", "")
-        last = from_user.get("last_name", "")
-        full_name = (first + " " + last).strip() or "Cliente"
-        handle = f"@{username}" if username else (f"id:{user_id_tg}" if user_id_tg else "anonimo")
-
-        if data.startswith("book:"):
-            token = data.split(":", 1)[1]
-            pub = await db.tg_publications.find_one({"token": token}, {"_id": 0})
-            logger.info(
-                f"[TG-CB] click token={token} user_tg={user_id_tg} handle={handle} "
-                f"pub_found={bool(pub)} admin_set={bool(TELEGRAM_ADMIN_CHAT_ID)}"
-            )
-
-            # 1. Acknowledge the tap (always shows a Telegram-native toast)
-            try:
-                await tg_api("answerCallbackQuery", {
-                    "callback_query_id": cq["id"],
-                    "text": "✓ Richiesta inviata! Sarai ricontattata a breve.",
-                    "show_alert": True,
-                })
-            except Exception as e:
-                logger.warning(f"[TG-CB] answerCallbackQuery failed: {e}")
-
-            # 2. Try to DM the user a private confirmation. This almost always
-            # fails for users who haven't started the bot first (Telegram safety
-            # rule). We wrap in try/except so it never breaks the rest of the flow.
-            if user_id_tg:
-                try:
-                    s, b = await tg_api("sendMessage", {
-                        "chat_id": user_id_tg,
-                        "text": "Grazie per l'interesse! Sarai ricontattata a breve!",
-                    })
-                    if s != 200 or not b.get("ok"):
-                        logger.info(
-                            f"[TG-CB] DM to user {user_id_tg} skipped (probably never "
-                            f"started the bot): {b.get('description')}"
-                        )
-                except Exception as e:
-                    logger.warning(f"[TG-CB] DM exception: {e}")
-
-            # 3. Notify the admin (always, even if pub is None for some reason)
-            if TELEGRAM_ADMIN_CHAT_ID:
-                now = fmt_rome("%d/%m/%Y %H:%M") + " (Roma)"
-                admin_text = (
-                    f"🔔 *Nuova richiesta info*\n"
-                    f"👤 Cliente: {full_name} ({handle})\n"
-                    f"🕒 Orario: {now}\n"
-                )
-                if pub and pub.get("caption"):
-                    admin_text += f"📝 Capo: {pub['caption'][:200]}\n"
-                else:
-                    admin_text += (
-                        f"⚠️ Pubblicazione non trovata nel database "
-                        f"(token={token[:6]}…). "
-                        f"Probabile mismatch tra ambiente di pubblicazione e webhook.\n"
-                    )
-                try:
-                    if pub and pub.get("file_id"):
-                        s, b = await tg_api("sendPhoto", {
-                            "chat_id": TELEGRAM_ADMIN_CHAT_ID,
-                            "photo": pub["file_id"],
-                            "caption": admin_text,
-                            "parse_mode": "Markdown",
-                        })
-                    else:
-                        s, b = await tg_api("sendMessage", {
-                            "chat_id": TELEGRAM_ADMIN_CHAT_ID,
-                            "text": admin_text,
-                            "parse_mode": "Markdown",
-                        })
-                    if s != 200 or not b.get("ok"):
-                        logger.error(f"[TG-CB] admin notify failed status={s} body={b}")
-                except Exception as e:
-                    logger.exception(f"[TG-CB] admin notify exception: {e}")
-            else:
-                logger.warning("[TG-CB] TELEGRAM_ADMIN_CHAT_ID not configured — cannot notify admin")
-
-            # 4. Log the booking
-            try:
-                await db.tg_bookings.insert_one({
-                    "token": token,
-                    "tg_user_id": user_id_tg,
-                    "tg_username": username,
-                    "tg_name": full_name,
-                    "created_at": datetime.now(timezone.utc),
-                })
-            except Exception as e:
-                logger.warning(f"[TG-CB] booking log failed: {e}")
-        else:
-            await tg_api("answerCallbackQuery", {"callback_query_id": cq["id"]})
+        # Legacy callback_query handler ("book:<token>" / "PRENOTA") has been
+        # removed. Newly published posts use a direct URL inline button that
+        # opens the public landing page, so no callback round-trip is needed.
+        # We still ack any stray callback to avoid the Telegram client showing
+        # a perpetual loading spinner on old posts.
+        try:
+            await tg_api("answerCallbackQuery", {
+                "callback_query_id": cq["id"],
+                "text": "Apri il link 'RICHIEDI INFO' aggiornato per continuare.",
+                "show_alert": False,
+            })
+        except Exception as e:
+            logger.warning(f"[TG-CB] legacy ack failed: {e}")
     return {"ok": True}
 
 

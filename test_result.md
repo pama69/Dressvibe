@@ -666,10 +666,126 @@ backend:
           new toggle is explicitly enabled. Nothing to fix.
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Telegram publish refactor — URL button replaces callback_query PRENOTA"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+backend:
+  - task: "Telegram publish refactor — URL button replaces callback_query PRENOTA"
+    implemented: true
+    working: false
+    file: "/app/backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: |
+          Tested via /app/backend_test.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01). 13/14 cases PASS, 1 CRITICAL
+          FAIL on the "no gen_id" fallback path.
+
+          PASSING:
+            1a) ast.parse(server.py) → OK ✅
+            1b) GET /api/providers → 200 ✅
+            (setup) POST /api/garments + POST /api/generations
+                    → gen_e120fb68cd32, status=done, 1 image ✅
+            2)  POST /api/telegram/publish with image_base64, media_type=photo,
+                gen_id=gen_e120fb68cd32, image_index=0 → 200,
+                channel_message_id=19, token=46d6767287ff45 ✅
+            2b) db.short_links has exactly 1 row for
+                (user_demo01, gen_e120fb68cd32, 0) with short_id="PA0I93"
+                and look_name="Test post via new URL button" ✅
+            3)  Idempotency — second publish with same (gen_id, image_index)
+                → 200; db.short_links count stayed at 1 (no new row) ✅
+            3c) short_id reused (PA0I93 == PA0I93) ✅
+            5)  POST /api/telegram/webhook/dressvibe_tg_hook_2026 with a
+                fake legacy callback_query (data="book:legacy_token_abc")
+                → 200 {"ok": true}. The handler ack'd the stray callback
+                without crashing ✅
+            6)  Regression GET /providers, /garments, /generations → all 200 ✅
+
+          FAILING — case 4 (the "publish without gen_id" fallback path):
+            4)  POST /api/telegram/publish with body
+                  {"image_base64": "...", "media_type": "photo",
+                   "caption": "Test post WITHOUT gen_id"}
+                (gen_id and image_index omitted)
+                → **502** with detail
+                  "Telegram error: Bad Request: object expected as reply markup"
+
+          ROOT CAUSE: in telegram_publish() at /app/backend/server.py
+          lines 1582-1596, when no landing URL can be minted the code
+          correctly sets `keyboard = None` and logs the warning. But the
+          downstream sendPhoto/sendVideo calls then unconditionally send
+          `"reply_markup": _json.dumps(keyboard)` (line 1646 for photo,
+          lines 1607 and 1622 for video). `_json.dumps(None)` yields the
+          string `"null"`, which Telegram's Bot API rejects:
+              {"ok": false, "error_code": 400,
+               "description": "Bad Request: object expected as reply markup"}
+          The fix is to OMIT the reply_markup key entirely (or pass
+          {"inline_keyboard": []}) when keyboard is None. Suggested patch:
+              if keyboard is not None:
+                  data["reply_markup"] = _json.dumps(keyboard)
+          applied to both the photo branch and both video branches.
+
+          IMPACT: per the review spec, "If for any reason no landing URL
+          can be minted... publishes WITHOUT the inline button (no
+          fallback to deprecated callback flow)." Today this fallback is
+          unreachable — anything that publishes without gen_id (or with
+          PUBLIC_BASE_URL missing) returns 502 instead of 200. The
+          frontend currently always passes gen_id+image_index so this
+          isn't user-visible YET, but the contract documented in the
+          review request is violated.
+
+          All other refactor goals are met: the legacy "book:<token>"
+          callback handler is gone, the new URL inline-button path with
+          short_link idempotency works correctly, and the webhook
+          continues to gracefully ack stray legacy callbacks.
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      Telegram publish refactor validation: 13/14 cases PASS, 1 CRITICAL
+      FAIL.
+
+      WORKING:
+        * Smoke + reachability ✅
+        * POST /api/telegram/publish (photo + gen_id + image_index) →
+          200 with channel_message_id and token; db.short_links row
+          minted with a non-empty 6-char short_id ✅
+        * Idempotency: re-publish same (gen_id, image_index) reuses
+          the same short_id — db.short_links collection does NOT grow ✅
+        * Webhook /api/telegram/webhook/{secret} with a legacy
+          "book:<token>" callback_query → 200 {"ok": true}; the new
+          handler just ack's the stray callback (answerCallbackQuery
+          fails for the fake id but is swallowed in try/except — the
+          endpoint returns cleanly) ✅
+        * Regression GET /api/providers, /api/garments, /api/generations
+          all 200 ✅
+
+      FAILING — case 4 (publish without gen_id/image_index):
+        * Expected: 200, post published WITHOUT inline button, warning
+          logged. Per the review spec.
+        * Actual: 502 "Telegram error: Bad Request: object expected as
+          reply markup".
+        * Root cause: when no landing URL can be minted, the code sets
+          keyboard=None but the downstream sendPhoto/sendVideo payload
+          still ships "reply_markup": _json.dumps(keyboard) which is
+          the string "null". Telegram rejects this.
+        * Fix: conditionally inject reply_markup only when keyboard is
+          not None. Affects 3 sites in /app/backend/server.py
+          (lines 1607, 1622, 1646). I did NOT touch the code per the
+          testing-agent rules — please apply the fix and we can re-run
+          case 4.
+
+      Other than this single fallback path, the refactor is solid:
+      legacy callback path removed cleanly, URL-button path with short
+      link reuse works end-to-end, and the webhook handles stray legacy
+      callbacks gracefully without crashing.
 
 agent_communication:
   - agent: "main"
