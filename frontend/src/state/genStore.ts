@@ -12,6 +12,7 @@ type GenParams = {
   provider?: string;
   custom_background_id?: string;
   look_styles?: string[];
+  add_price_tags?: boolean;
 };
 
 let _params: GenParams | null = null;

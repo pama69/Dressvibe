@@ -93,6 +93,7 @@ export default function Generate() {
   const [shoes, setShoes] = useState("comoda_fashion");
   const [variations, setVariations] = useState(4);
   const [lookStyles, setLookStyles] = useState<string[]>([]);
+  const [addPriceTags, setAddPriceTags] = useState(false);
   const [providers, setProviders] = useState<any[]>([]);
   const [aiProvider, setAiProvider] = useState<string>("gemini_nano_banana");
   const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
@@ -140,6 +141,7 @@ export default function Generate() {
       provider: aiProvider,
       custom_background_id: customBgId || undefined,
       look_styles: lookStyles.length > 0 ? lookStyles : undefined,
+      add_price_tags: addPriceTags || undefined,
     });
     router.push("/generating");
   };
@@ -286,6 +288,29 @@ export default function Generate() {
               );
             })}
           </View>
+        </View>
+
+        {/* Inserisci prezzi nell'immagine — opt-in toggle. When ON, the
+            backend reads the "Descrizione e prezzi" of each selected garment
+            (non-auto-placeholder names) and tells Gemini to render price
+            tags next to the matching garments. */}
+        <View style={styles.step}>
+          <TouchableOpacity
+            onPress={() => setAddPriceTags((v) => !v)}
+            activeOpacity={0.8}
+            style={styles.priceToggleRow}
+            testID="generate-toggle-prices"
+          >
+            <View style={[styles.checkbox, addPriceTags && styles.checkboxOn]}>
+              {addPriceTags ? <Text style={styles.checkboxMark}>✓</Text> : null}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.priceToggleLabel}>Inserisci prezzi nell'immagine</Text>
+              <Text style={styles.priceToggleHint}>
+                Aggiunge cartellini con i prezzi (presi dalla "Descrizione e prezzi" del capo) accanto ai capi corrispondenti nella foto generata.
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* Step 5 — Variations */}
@@ -445,6 +470,40 @@ const styles = StyleSheet.create({
     color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.3,
   },
   lookLabelActive: { color: theme.colors.primaryFg },
+  // Price-tags toggle (matches Studio styling)
+  priceToggleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  checkbox: {
+    width: 22, height: 22,
+    borderWidth: 1.5,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.bg,
+    alignItems: "center", justifyContent: "center",
+    marginTop: 2,
+  },
+  checkboxOn: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  checkboxMark: {
+    color: theme.colors.primaryFg,
+    fontSize: 14,
+    fontWeight: "900",
+    lineHeight: 16,
+  },
+  priceToggleLabel: {
+    color: theme.colors.text, fontSize: 14, fontWeight: "600",
+  },
+  priceToggleHint: {
+    color: theme.colors.textMuted, fontSize: 11, lineHeight: 15, marginTop: 3,
+  },
   providerChip: {
     padding: 14, borderWidth: 1, borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface, minWidth: 200, gap: 6,

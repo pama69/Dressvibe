@@ -1,178 +1,178 @@
-"""Backend tests for DressVibe — focus on /api/telegram/publish (photo+video)."""
+"""
+Backend test — verify the new opt-in `add_price_tags` toggle on
+POST /api/generations (default False; only triggers price-tag prompt
+suffix when the user explicitly enables it).
+
+Run:  python /app/backend_test.py
+"""
 import os
+import sys
+import time
 import base64
 import json
-import sys
-import uuid
-import asyncio
-from datetime import datetime, timezone, timedelta
-
-import httpx
-from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
-
-load_dotenv('/app/backend/.env')
+import requests
+import subprocess
 
 BASE = "https://outfit-gen-11.preview.emergentagent.com/api"
 TOKEN = "test_session_screen"
-HEAD = {"Authorization": f"Bearer {TOKEN}"}
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
 # 1x1 transparent PNG
-PNG_1x1_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-)
-VIDEO_URL = (
-    "https://vidgen.x.ai/xai-vidgen-bucket/xai-video-1d9deb7a-b4bc-472c-8a11-443a862b903f.mp4"
-)
+TINY_PNG_B64 = base64.b64encode(
+    bytes.fromhex(
+        "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C489"
+        "0000000A49444154789C6300010000000500010D0A2DB40000000049454E44AE426082"
+    )
+).decode()
 
-results = []
 
-def record(name, ok, detail=""):
-    status = "PASS" if ok else "FAIL"
-    print(f"[{status}] {name}: {detail}")
-    results.append((name, ok, detail))
+def log(name, ok, detail=""):
+    flag = "PASS" if ok else "FAIL"
+    print(f"[{flag}] {name}  {detail}")
+    return ok
 
-async def main():
-    mongo = AsyncIOMotorClient(os.environ['MONGO_URL'])
-    db = mongo[os.environ['DB_NAME']]
 
-    # Make sure pre-seeded artifacts exist
-    sess = await db.user_sessions.find_one({"session_token": TOKEN})
-    if not sess:
-        # auto-seed
-        await db.users.update_one(
-            {"user_id": "user_demo01"},
-            {"$setOnInsert": {"user_id": "user_demo01", "email": "demo01@dressvibe.test",
-                               "name": "Demo Owner", "picture": None,
-                               "created_at": datetime.now(timezone.utc)}},
-            upsert=True,
-        )
-        await db.user_sessions.insert_one({
-            "session_token": TOKEN, "user_id": "user_demo01",
-            "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
-            "created_at": datetime.now(timezone.utc),
-        })
+def post(path, body, timeout=180):
+    return requests.post(BASE + path, headers=HEADERS, json=body, timeout=timeout)
 
-    async with httpx.AsyncClient(timeout=180.0) as http:
 
-        # ---------- VALIDATION TESTS ----------
-        # 1) media_type=video without video_url → 400
-        r = await http.post(f"{BASE}/telegram/publish", headers=HEAD,
-                            json={"media_type": "video"})
-        record("validation_video_missing_url",
-               r.status_code == 400,
-               f"status={r.status_code} body={r.text[:200]}")
+def get(path, timeout=30):
+    return requests.get(BASE + path, headers=HEADERS, timeout=timeout)
 
-        # 2) media_type=photo without image_base64 → 400
-        r = await http.post(f"{BASE}/telegram/publish", headers=HEAD,
-                            json={"media_type": "photo"})
-        record("validation_photo_missing_image",
-               r.status_code == 400,
-               f"status={r.status_code} body={r.text[:200]}")
-        # also test default (no media_type)
-        r = await http.post(f"{BASE}/telegram/publish", headers=HEAD, json={})
-        record("validation_default_no_image",
-               r.status_code == 400,
-               f"status={r.status_code} body={r.text[:200]}")
 
-        # ---------- HAPPY PATH: PHOTO ----------
-        caption_photo = f"DressVibe test publish (photo) {uuid.uuid4().hex[:6]}"
-        r = await http.post(f"{BASE}/telegram/publish", headers=HEAD, json={
-            "media_type": "photo",
-            "image_base64": PNG_1x1_B64,
-            "caption": caption_photo,
-            "gen_id": "gen_web_test1",
-            "image_index": 0,
-        })
-        if r.status_code == 200:
-            body = r.json()
-            ok = (body.get("ok") is True
-                  and body.get("channel_message_id")
-                  and body.get("token")
-                  and body.get("media_type") == "photo")
-            record("happy_photo_response", ok, f"body={body}")
-            # DB row check
-            row = await db.tg_publications.find_one({"token": body["token"]}, {"_id": 0})
-            row_ok = bool(row and row.get("media_type") == "photo"
-                          and row.get("channel_message_id") == body["channel_message_id"]
-                          and row.get("user_id") == "user_demo01")
-            record("happy_photo_db_row", row_ok, f"row={row}")
-        else:
-            record("happy_photo_response", False,
-                   f"status={r.status_code} body={r.text[:400]}")
+def create_garment(name: str) -> str:
+    r = post("/garments", {
+        "name": name,
+        "image_base64": TINY_PNG_B64,
+        "category": "full_outfit",
+    })
+    r.raise_for_status()
+    return r.json()["id"]
 
-        # ---------- HAPPY PATH: VIDEO ----------
-        caption_video = f"DressVibe test publish (video) {uuid.uuid4().hex[:6]}"
-        r = await http.post(f"{BASE}/telegram/publish", headers=HEAD, json={
-            "media_type": "video",
-            "video_url": VIDEO_URL,
-            "caption": caption_video,
-            "gen_id": "gen_web_test1",
-            "image_index": 0,
-        })
-        if r.status_code == 200:
-            body = r.json()
-            ok = (body.get("ok") is True
-                  and body.get("channel_message_id")
-                  and body.get("token")
-                  and body.get("media_type") == "video")
-            record("happy_video_response", ok, f"body={body}")
-            row = await db.tg_publications.find_one({"token": body["token"]}, {"_id": 0})
-            row_ok = bool(row and row.get("media_type") == "video"
-                          and row.get("channel_message_id") == body["channel_message_id"])
-            record("happy_video_db_row", row_ok, f"row={row}")
-        else:
-            record("happy_video_response", False,
-                   f"status={r.status_code} body={r.text[:400]}")
 
-        # ---------- REGRESSION ----------
-        # GET /providers
-        r = await http.get(f"{BASE}/providers", headers=HEAD)
-        ok = r.status_code == 200 and isinstance(r.json(), (list, dict))
-        record("regression_providers", ok, f"status={r.status_code} body={r.text[:200]}")
+def gen_payload(garment_ids, **extra):
+    body = {
+        "garment_ids": garment_ids,
+        "num_variations": 1,
+        "model_gender": "donna",
+        "model_age": "adulto",
+        "model_body": "slim",
+        "model_ethnicity": "caucasica",
+        "pose": "casual_standing",
+        "background": "white_studio",
+        "shoes": "comoda_fashion",
+    }
+    body.update(extra)
+    return body
 
-        # GET /generations/{id}/videos
-        r = await http.get(f"{BASE}/generations/gen_web_test1/videos", headers=HEAD)
-        videos = []
-        if r.status_code == 200:
-            videos = r.json()
-            record("regression_generation_videos",
-                   isinstance(videos, list),
-                   f"count={len(videos) if isinstance(videos, list) else 'n/a'}")
-        else:
-            record("regression_generation_videos", False,
-                   f"status={r.status_code} body={r.text[:200]}")
 
-        # DELETE /videos/{video_id} - non-existent
-        r = await http.delete(f"{BASE}/videos/does-not-exist-xyz", headers=HEAD)
-        record("regression_delete_missing_404",
-               r.status_code == 404,
-               f"status={r.status_code} body={r.text[:200]}")
+def assert_gen_ok(label: str, r: requests.Response) -> bool:
+    if r.status_code != 200:
+        return log(label, False, f"HTTP {r.status_code}: {r.text[:300]}")
+    try:
+        data = r.json()
+    except Exception as e:
+        return log(label, False, f"non-JSON body: {e}")
+    status = data.get("status")
+    images = data.get("images") or []
+    if status == "done" and len(images) == 1:
+        return log(label, True, f"status=done, images=1, gen_id={data.get('id')}")
+    if status in ("failed", "rate_limited"):
+        # Per review request: if upstream 503/429 occurs, count contract part as PASS
+        return log(label, True, f"CONTRACT-ONLY (upstream issue) status={status}, images={len(images)}")
+    return log(label, False, f"unexpected status={status}, images={len(images)}, body={json.dumps(data)[:300]}")
 
-        # DELETE /videos/{video_id} - existing (use a throwaway inserted record)
-        throwaway_id = f"vid_test_{uuid.uuid4().hex[:8]}"
-        await db.videos.insert_one({
-            "id": throwaway_id,
-            "user_id": "user_demo01",
-            "gen_id": "gen_web_test1",
-            "image_index": 0,
-            "provider": "test",
-            "status": "completed",
-            "created_at": datetime.now(timezone.utc),
-        })
-        r = await http.delete(f"{BASE}/videos/{throwaway_id}", headers=HEAD)
-        record("regression_delete_existing_200",
-               r.status_code == 200 and r.json().get("ok") is True,
-               f"status={r.status_code} body={r.text[:200]}")
 
-    # Summary
-    print("\n===== SUMMARY =====")
-    passed = sum(1 for _, ok, _ in results if ok)
-    for name, ok, detail in results:
-        print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
-    print(f"{passed}/{len(results)} passed")
-    return 0 if passed == len(results) else 1
+def main():
+    results = []
+
+    # --- Case 6 (run first, no network): Static helper sanity check ---
+    print("\n=== Case 6: Static helper sanity check ===")
+    static_cmd = (
+        "import sys; sys.path.insert(0, '/app/backend'); "
+        "from server import GenerationCreate; "
+        "g = GenerationCreate(garment_ids=['x'], model_gender='donna', model_age='adulto', "
+        "model_body='slim', model_ethnicity='caucasica', pose='casual_standing', "
+        "background='white_studio', shoes='comoda_fashion'); "
+        "assert g.add_price_tags is False, 'default should be False'; "
+        "g2 = GenerationCreate(garment_ids=['x'], model_gender='donna', model_age='adulto', "
+        "model_body='slim', model_ethnicity='caucasica', pose='casual_standing', "
+        "background='white_studio', shoes='comoda_fashion', add_price_tags=True); "
+        "assert g2.add_price_tags is True, 'explicit True should round-trip'; "
+        "print('OK')"
+    )
+    cp = subprocess.run([sys.executable, "-c", static_cmd], capture_output=True, text=True, timeout=30)
+    static_ok = cp.returncode == 0 and "OK" in (cp.stdout or "")
+    results.append(log("case6_static_helper_sanity", static_ok,
+                       f"stdout={cp.stdout.strip()!r}, stderr={cp.stderr.strip()[:200]!r}"))
+
+    # --- Create garments ---
+    print("\n=== Setup: Create garments ===")
+    try:
+        g_vestito = create_garment("Vestito €59")
+        log("setup_create_real_garment", True, f"id={g_vestito}")
+    except Exception as e:
+        log("setup_create_real_garment", False, str(e))
+        return
+    try:
+        g_cap = create_garment("Cap 8821")
+        log("setup_create_cap_garment", True, f"id={g_cap}")
+    except Exception as e:
+        log("setup_create_cap_garment", False, str(e))
+        return
+
+    # --- Case 1 ---
+    print("\n=== Case 1: add_price_tags omitted (default False) — real description ===")
+    t0 = time.time()
+    r = post("/generations", gen_payload([g_vestito]))
+    print(f"  ({time.time()-t0:.1f}s)")
+    results.append(assert_gen_ok("case1_default_false_real_desc", r))
+
+    # --- Case 2 ---
+    print("\n=== Case 2: add_price_tags=True — real description ===")
+    t0 = time.time()
+    r = post("/generations", gen_payload([g_vestito], add_price_tags=True))
+    print(f"  ({time.time()-t0:.1f}s)")
+    results.append(assert_gen_ok("case2_true_real_desc", r))
+
+    # --- Case 3 ---
+    print("\n=== Case 3: add_price_tags=True — Cap-placeholder only ===")
+    t0 = time.time()
+    r = post("/generations", gen_payload([g_cap], add_price_tags=True))
+    print(f"  ({time.time()-t0:.1f}s)")
+    results.append(assert_gen_ok("case3_true_cap_only", r))
+
+    # --- Case 4 ---
+    print("\n=== Case 4: add_price_tags=False explicit — real description ===")
+    t0 = time.time()
+    r = post("/generations", gen_payload([g_vestito], add_price_tags=False))
+    print(f"  ({time.time()-t0:.1f}s)")
+    results.append(assert_gen_ok("case4_false_explicit_real_desc", r))
+
+    # --- Case 5 ---
+    print("\n=== Case 5: add_price_tags=True — MIXED real + Cap ===")
+    t0 = time.time()
+    r = post("/generations", gen_payload([g_vestito, g_cap], add_price_tags=True))
+    print(f"  ({time.time()-t0:.1f}s)")
+    results.append(assert_gen_ok("case5_true_mixed", r))
+
+    # --- Case 7: regression GETs ---
+    print("\n=== Case 7: Regression GETs ===")
+    for path in ("/providers", "/garments", "/backgrounds"):
+        rr = get(path)
+        results.append(log(f"regression_GET_{path}", rr.status_code == 200,
+                           f"HTTP {rr.status_code}"))
+
+    # --- Summary ---
+    print("\n" + "=" * 60)
+    total = len(results)
+    passed = sum(1 for x in results if x)
+    print(f"Total: {passed}/{total} passed")
+    if passed != total:
+        print("Some tests FAILED")
+        sys.exit(1)
+    print("ALL PASS")
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    main()

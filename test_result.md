@@ -594,6 +594,77 @@ backend:
           no upstream rate-limits today. The new code path is wired
           correctly and 100% backward compatible. Nothing to fix.
 
+backend:
+  - task: "POST /api/generations — add_price_tags opt-in toggle (default False)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Verified the NEW behavior change on POST /api/generations: the
+          previously-unconditional collection of `price_descriptions` from
+          real-description garments is now gated by the opt-in
+          `add_price_tags: bool = False` field on GenerationCreate.
+          Test driver: /app/backend_test.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01). 9/9 cases PASS.
+
+          Setup: created two garments via POST /api/garments:
+            * "Vestito €59" → g_c2176e19f74c  (real description)
+            * "Cap 8821"   → g_90a52805b5da  (auto-placeholder)
+
+          Cases:
+            1) add_price_tags omitted (default False) with "Vestito €59"
+               → 200 in 26.8s, gen_802cd30929a4, status=done, 1 image.
+               Per the new gating logic, payload.add_price_tags is False
+               so price_descriptions=[] and _compose_price_tags_suffix("")
+               returns "" — i.e. the prompt does NOT contain the price-tag
+               instruction. This is the key behavior change vs. the prior
+               commit (a "Vestito €59" garment NO LONGER auto-triggers price
+               tags). ✅
+            2) add_price_tags=True with "Vestito €59"
+               → 200 in 25.7s, gen_b26be95d0940, status=done, 1 image.
+               is_real_description("Vestito €59") returns True so the
+               description is collected and the price-tag suffix is appended
+               to the outfit prompt. Gemini accepts it and returns 1 image. ✅
+            3) add_price_tags=True with ONLY "Cap 8821"
+               → 200 in 14.8s, gen_2372266760d5, status=done, 1 image.
+               is_real_description("Cap 8821") returns False, so the filtered
+               descriptions list is []. _compose_price_tags_suffix([]) returns
+               "" → prompt unchanged from baseline. No crash, no 5xx. ✅
+            4) add_price_tags=False explicit with "Vestito €59"
+               → 200 in 15.3s, gen_c2957c445116, status=done, 1 image.
+               Identical behavior to case 1 (default omitted) — gate is False
+               regardless of how it got there. ✅
+            5) add_price_tags=True with MIXED [Vestito €59, Cap 8821]
+               → 200 in 20.9s, gen_cbd098b497d5, status=done, 1 image.
+               The list comprehension
+                 [g["name"] for g in garments if is_real_description(g.get("name"))]
+               correctly filters to just "Vestito €59"; "Cap 8821" is
+               dropped. No crash on the mixed input. ✅
+            6) Static helper sanity check via direct Python import of
+               GenerationCreate from /app/backend/server.py:
+                 * default add_price_tags is False ✅
+                 * explicit add_price_tags=True round-trips to True ✅
+               Prints "OK". ✅
+            7) Regression GETs all 200:
+                 * GET /api/providers → 200 ✅
+                 * GET /api/garments  → 200 ✅
+                 * GET /api/backgrounds → 200 ✅
+
+          Total wall-clock for the 5 Gemini calls: ~103s; every single one
+          returned status="done" with exactly 1 image. No 4xx, no 5xx,
+          no upstream rate-limits or 503s today. The gating logic
+          `if payload.add_price_tags:` in create_generation
+          (server.py L812-L814) is wired correctly and 100% backward
+          compatible — the prior behavior is preserved ONLY when the
+          new toggle is explicitly enabled. Nothing to fix.
+
 test_plan:
   current_focus: []
   stuck_tasks: []

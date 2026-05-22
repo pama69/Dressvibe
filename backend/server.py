@@ -142,6 +142,7 @@ class GenerationCreate(BaseModel):
     provider: Optional[str] = None  # image_gen provider id; None = default
     custom_background_id: Optional[str] = None  # if set, overrides `background`
     look_styles: Optional[List[str]] = None  # optional aesthetic modifiers (warm/depth/vivid/dynamic/premium)
+    add_price_tags: bool = False  # opt-in: when True, garment "Descrizione e prezzi" names are used to overlay price tags in the photo
 
 
 class Generation(BaseModel):
@@ -804,11 +805,14 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     refs = [g["image_base64"] for g in garments]
 
     # Collect real (non-auto-placeholder) descriptions from the selected
-    # garments. When at least one is present, the AI is instructed to overlay
-    # tasteful price tags next to each matching garment in the final photo.
-    price_descriptions: List[str] = [
-        g["name"] for g in garments if is_real_description(g.get("name"))
-    ]
+    # garments — but ONLY if the user explicitly opted in via the
+    # "Inserisci prezzi nell'immagine" checkbox. Without the opt-in,
+    # the prompt is unchanged and no price tags are rendered.
+    price_descriptions: List[str] = []
+    if payload.add_price_tags:
+        price_descriptions = [
+            g["name"] for g in garments if is_real_description(g.get("name"))
+        ]
 
     # Custom background: append its image as the LAST reference and pass label to prompt.
     custom_bg_label: Optional[str] = None
