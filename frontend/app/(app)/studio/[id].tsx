@@ -90,6 +90,10 @@ export default function Studio() {
   // add_price_tags=true so the backend looks up the source generation's
   // garment descriptions and tells Gemini to overlay price tags.
   const [addPriceTags, setAddPriceTags] = useState(false);
+  // Selected aesthetic preset (from the "Cambia look" 5-button row).
+  // Tapping a chip only SELECTS it visually — the user must then press
+  // "Applica modifica" to actually run the edit.
+  const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
 
   /** When the user taps the Instagram button we immediately save the active
    * image into the device gallery so they don't have to wait until the
@@ -259,10 +263,15 @@ export default function Studio() {
   }, []);
 
   const applyEdit = async (prompt: string) => {
+    // The studio_edit backend requires a non-empty edit_prompt. When the
+    // user is only toggling "Inserisci prezzi nell'immagine" (no custom
+    // text and no look selected) we send a neutral instruction so the
+    // backend's price-tags suffix is the only meaningful change.
+    const finalPrompt = (prompt && prompt.trim()) || "Keep the photo unchanged.";
     if (!image) return;
     setBusy(true);
     try {
-      const res = await api.studioEdit(image, prompt, id, addPriceTags);
+      const res = await api.studioEdit(image, finalPrompt, id, addPriceTags);
       setImage(res.image_base64);
       setEdited(true);
     } catch (e: any) {
@@ -271,6 +280,27 @@ export default function Studio() {
       setBusy(false);
     }
   };
+
+  /**
+   * Build the final edit prompt by combining the user's custom text and the
+   * selected "Cambia look" preset (if any), then call applyEdit.
+   * Triggered ONLY by the manual "Applica modifica" button — the 5 look
+   * chips and the price-tags checkbox no longer auto-fire generations.
+   */
+  const runManualEdit = () => {
+    const textPart = (editPrompt || "").trim();
+    const lookPart = selectedLookId
+      ? (LOOK_PRESETS.find((lp) => lp.id === selectedLookId)?.prompt || "")
+      : "";
+    // Compose: text first (the user's specific intent), then the look prompt
+    // (which already contains "KEEP the model / outfit unchanged" guards).
+    const combined = [textPart, lookPart].filter((p) => p && p.length > 0).join("\n\n");
+    applyEdit(combined);
+  };
+
+  // Manual-apply button is enabled when ANY of the three sources is set:
+  // user typed text, user picked a look, or user ticked "metti i prezzi".
+  const canApplyManual = !!(editPrompt.trim() || selectedLookId || addPriceTags);
 
   const handleGenerateVideo = async (providerId: string) => {
     if (!image) return;
@@ -554,47 +584,56 @@ export default function Studio() {
                 </View>
               ) : null}
             </View>
+          </View>
 
+          {/* Cambia look — 5 preset estetici che ri-renderizzano la foto
+              mantenendo modello e outfit. Tap = SELEZIONE only (no auto-run).
+              The actual edit fires when the user presses "Applica modifica"
+              at the bottom of the section. */}
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>✨ Cambia look</Text>
+            <Text style={s.lookHint}>
+              Cinque stili pronti per ri-renderizzare la foto. Modello e outfit restano identici — cambia solo l'estetica. Selezionane uno e poi premi "Applica modifica" in fondo.
+            </Text>
+            <View style={s.lookGrid}>
+              {LOOK_PRESETS.map((lp) => {
+                const active = selectedLookId === lp.id;
+                return (
+                  <TouchableOpacity
+                    key={lp.id}
+                    onPress={() => {
+                      setSelectedLookId((curr) => (curr === lp.id ? null : lp.id));
+                    }}
+                    disabled={busy}
+                    style={[s.lookBtn, active && s.lookBtnActive, busy && { opacity: 0.45 }]}
+                    activeOpacity={0.85}
+                    testID={`studio-look-${lp.id}`}
+                  >
+                    <Text style={s.lookEmoji}>{lp.emoji}</Text>
+                    <Text style={[s.lookLabel, active && s.lookLabelActive]}>{lp.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Manual "Applica modifica" button — fires only on press, and
+                combines: free text + selected look preset + add_price_tags. */}
             <TouchableOpacity
-              onPress={() => editPrompt && applyEdit(editPrompt)}
-              disabled={!editPrompt || busy}
+              onPress={runManualEdit}
+              disabled={!canApplyManual || busy}
               activeOpacity={0.85}
               testID="studio-apply"
+              style={{ marginTop: 12 }}
             >
               <LinearGradient
                 colors={MAGIC_GRADIENT}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                style={[s.applyBtn, (!editPrompt || busy) && { opacity: 0.45 }]}
+                style={[s.applyBtn, (!canApplyManual || busy) && { opacity: 0.45 }]}
               >
                 <Ionicons name="sparkles" size={16} color="#fff" />
                 <Text style={s.applyText}>Applica modifica</Text>
               </LinearGradient>
             </TouchableOpacity>
-          </View>
-
-          {/* Cambia look — 5 preset estetici che ri-renderizzano la foto
-              mantenendo modello e outfit. Stesso set di stili offerto nel
-              pannello di generazione, ma riformulato come edit prompts. */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>✨ Cambia look</Text>
-            <Text style={s.lookHint}>
-              Cinque stili pronti per ri-renderizzare la foto. Modello e outfit restano identici — cambia solo l'estetica (luce, colore, prospettiva, atmosfera).
-            </Text>
-            <View style={s.lookGrid}>
-              {LOOK_PRESETS.map((lp) => (
-                <TouchableOpacity
-                  key={lp.id}
-                  onPress={() => applyEdit(lp.prompt)}
-                  disabled={busy}
-                  style={[s.lookBtn, busy && { opacity: 0.45 }]}
-                  activeOpacity={0.85}
-                  testID={`studio-look-${lp.id}`}
-                >
-                  <Text style={s.lookEmoji}>{lp.emoji}</Text>
-                  <Text style={s.lookLabel}>{lp.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
           </View>
 
           {/* Descrizione Post — usata sia per Telegram che per WhatsApp */}
@@ -799,9 +838,18 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "center", gap: 4,
     minWidth: 90,
   },
+  lookBtnActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: "rgba(225,29,72,0.12)", // soft brand-red tint
+    borderWidth: 2,
+  },
   lookEmoji: { fontSize: 22 },
   lookLabel: {
     color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.3,
+  },
+  lookLabelActive: {
+    color: theme.colors.primary,
+    fontWeight: "700",
   },
   // Price-tags toggle
   priceToggleRow: {
