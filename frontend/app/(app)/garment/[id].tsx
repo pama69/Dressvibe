@@ -72,18 +72,22 @@ export default function GarmentDetail() {
     load();
   }, [load]);
 
-  const handleSave = async () => {
+  const handleSave = async (opts?: { thenGenerate?: boolean }) => {
     if (!id) return;
     setSaving(true);
     try {
-      // The backend treats `name=""` as "regenerate placeholder", so we
-      // can simply forward the trimmed value as-is.
       const trimmed = description.trim();
       const res = await api.updateGarment(id, { name: trimmed });
-      // Reflect server-side normalization (e.g. fresh Cap NNNN) in local state
       if (res && typeof res.name === "string") {
         const updatedName = res.name;
         setGarment((g: any) => (g ? { ...g, name: updatedName } : g));
+      }
+      if (opts?.thenGenerate) {
+        // Jump straight to the Magic Generator with this capo pre-selected.
+        // The /(app)/generate screen reads the ?preselect=<id> param and
+        // ticks the right tile as soon as the gallery list loads.
+        router.replace(`/(app)/generate?preselect=${id}`);
+        return;
       }
       notify({
         title: trimmed ? "Informazioni salvate ✓" : "Informazioni rimosse",
@@ -202,26 +206,43 @@ export default function GarmentDetail() {
             <Text style={s.charCounter}>{description.length} / 300</Text>
           </View>
 
-          {/* Save button */}
-          <TouchableOpacity
-            onPress={handleSave}
-            disabled={saving}
-            activeOpacity={0.85}
-            testID="garment-save"
-          >
-            <LinearGradient
-              colors={MAGIC_GRADIENT}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[s.saveBtn, saving && { opacity: 0.5 }]}
+          {/* Action buttons — two side-by-side: pure save, save & generate. */}
+          <View style={s.actionsRow}>
+            <TouchableOpacity
+              onPress={() => handleSave()}
+              disabled={saving}
+              activeOpacity={0.85}
+              style={[s.saveSecondaryBtn, saving && { opacity: 0.5 }]}
+              testID="garment-save"
             >
               {saving ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.colors.text} />
               ) : (
-                <Text style={s.saveBtnText}>💾  Salva informazioni</Text>
+                <Text style={s.saveSecondaryText}>💾  Salva</Text>
               )}
-            </LinearGradient>
-          </TouchableOpacity>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => handleSave({ thenGenerate: true })}
+              disabled={saving}
+              activeOpacity={0.85}
+              style={{ flex: 1.4 }}
+              testID="garment-save-generate"
+            >
+              <LinearGradient
+                colors={MAGIC_GRADIENT}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[s.saveBtn, saving && { opacity: 0.5 }]}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={s.saveBtnText}>✨  Salva e genera</Text>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
 
           {/* Delete button */}
           <TouchableOpacity
@@ -339,6 +360,26 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
   // Buttons
+  actionsRow: {
+    width: "100%",
+    flexDirection: "row",
+    gap: 10,
+  },
+  saveSecondaryBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  saveSecondaryText: {
+    color: theme.colors.text,
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+  },
   saveBtn: {
     paddingVertical: 16,
     alignItems: "center",

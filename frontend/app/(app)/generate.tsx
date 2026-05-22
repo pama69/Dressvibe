@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -81,6 +81,11 @@ function ChipRow({
 
 export default function Generate() {
   const router = useRouter();
+  // Optional ?preselect=<garment_id> in the URL — when present, that garment
+  // is automatically marked as selected the first time the list loads.
+  // Used by the gallery → garment detail → "Salva e genera" flow.
+  const { preselect } = useLocalSearchParams<{ preselect?: string }>();
+  const preselectAppliedRef = useRef(false);
   const [garments, setGarments] = useState<Garment[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -118,6 +123,19 @@ export default function Generate() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
   useEffect(() => { load(); }, [load]);
+
+  // Apply ?preselect=<garment_id> once after the garment list loads.
+  // This makes the "Salva e genera" button on the garment detail screen
+  // land here with the right capo already ticked, so the shop owner can
+  // continue immediately with model / scene / look choices.
+  useEffect(() => {
+    if (preselectAppliedRef.current) return;
+    if (!preselect || garments.length === 0) return;
+    const exists = garments.some((g) => g.id === preselect);
+    if (!exists) return;
+    setSelected((curr) => (curr.includes(preselect) ? curr : [...curr, preselect]));
+    preselectAppliedRef.current = true;
+  }, [garments, preselect]);
 
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
