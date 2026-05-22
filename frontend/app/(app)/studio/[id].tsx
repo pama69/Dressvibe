@@ -86,6 +86,10 @@ export default function Studio() {
   const [videoBusy, setVideoBusy] = useState(false);
   const [igSheet, setIgSheet] = useState<{ image?: string; video?: string; skipSave?: boolean } | null>(null);
   const [waBusy, setWaBusy] = useState(false);
+  // "Inserisci prezzi nell'immagine" — when ON, every edit/look call passes
+  // add_price_tags=true so the backend looks up the source generation's
+  // garment descriptions and tells Gemini to overlay price tags.
+  const [addPriceTags, setAddPriceTags] = useState(false);
 
   /** When the user taps the Instagram button we immediately save the active
    * image into the device gallery so they don't have to wait until the
@@ -258,7 +262,7 @@ export default function Studio() {
     if (!image) return;
     setBusy(true);
     try {
-      const res = await api.studioEdit(image, prompt, id);
+      const res = await api.studioEdit(image, prompt, id, addPriceTags);
       setImage(res.image_base64);
       setEdited(true);
     } catch (e: any) {
@@ -462,6 +466,30 @@ export default function Studio() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          </View>
+
+          {/* "Inserisci prezzi nell'immagine" toggle — when ON, every
+              edit/look call (quick-edits, custom edit, Cambia look)
+              passes add_price_tags=true to the backend so Gemini
+              overlays price tags using the descriptions provided in the
+              garment "Descrizione e prezzi" field. */}
+          <View style={s.section}>
+            <TouchableOpacity
+              onPress={() => setAddPriceTags((v) => !v)}
+              activeOpacity={0.8}
+              style={s.priceToggleRow}
+              testID="studio-toggle-prices"
+            >
+              <View style={[s.checkbox, addPriceTags && s.checkboxOn]}>
+                {addPriceTags ? <Text style={s.checkboxMark}>✓</Text> : null}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.priceToggleLabel}>Inserisci prezzi nell'immagine</Text>
+                <Text style={s.priceToggleHint}>
+                  Aggiunge cartellini con i prezzi (presi dalla descrizione del capo) accanto ai capi corrispondenti, durante le modifiche.
+                </Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           {/* Custom edit */}
@@ -774,6 +802,40 @@ const s = StyleSheet.create({
   lookEmoji: { fontSize: 22 },
   lookLabel: {
     color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.3,
+  },
+  // Price-tags toggle
+  priceToggleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  checkbox: {
+    width: 22, height: 22,
+    borderWidth: 1.5,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.bg,
+    alignItems: "center", justifyContent: "center",
+    marginTop: 2,
+  },
+  checkboxOn: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  checkboxMark: {
+    color: theme.colors.primaryFg,
+    fontSize: 14,
+    fontWeight: "900",
+    lineHeight: 16,
+  },
+  priceToggleLabel: {
+    color: theme.colors.text, fontSize: 14, fontWeight: "600",
+  },
+  priceToggleHint: {
+    color: theme.colors.textMuted, fontSize: 11, lineHeight: 15, marginTop: 3,
   },
 });
 

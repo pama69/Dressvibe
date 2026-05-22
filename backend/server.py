@@ -160,6 +160,7 @@ class StudioEditRequest(BaseModel):
     edit_prompt: str  # what to do (change background to beach, add price text, etc.)
     gen_id: Optional[str] = None  # if provided, append the edited image to that generation's gallery
     provider: Optional[str] = None  # image_edit provider id; None = default
+    add_price_tags: bool = False  # if True, append price tag instruction using descriptions from the source generation's garments
 
 
 class VideoGenerateRequest(BaseModel):
@@ -518,13 +519,16 @@ def _compose_price_tags_suffix(descriptions: Optional[List[str]]) -> str:
     joined = " | ".join(real)
     return (
         f" Garment descriptions and prices provided by the shop owner: {joined}. "
-        f"Render small, clean price tags (like discreet boutique price labels) inside the photo, "
+        f"Render clear, well-visible price tags (like boutique price labels) inside the photo, "
         f"placed close to the corresponding garment they refer to (price for the dress next to the dress, "
         f"price for the trousers near the trousers, etc.). "
         f"Each tag must show the EXACT prices listed above, with a clean modern sans-serif font, "
-        f"high-contrast color against the surrounding background (so the price is always readable), "
-        f"a size that is clear but NOT intrusive, no logos, no watermarks. "
-        f"Position the tags so they do not cover the model's face or hands."
+        f"bold and easy to read at a glance, with a strongly contrasting color against the surrounding background "
+        f"(e.g. white tag with dark text on dark fabric, or dark tag with white text on light fabric). "
+        f"Make the tags noticeably visible — bigger than a discreet boutique label but NOT oversized "
+        f"or intrusive: they should cover at most ~6-8% of the photo width each. "
+        f"Use a clean rectangular shape with subtle rounded corners, no logos, no watermarks, no extra graphics. "
+        f"Position the tags so they do NOT cover the model's face, hands, or the key parts of the outfit."
     )
 
 
@@ -940,11 +944,31 @@ async def delete_generation_image(gen_id: str, index: int, authorization: Option
 async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     session_id = f"studio_{user['user_id']}_{uuid.uuid4().hex[:6]}"
+
+    # Optional: if the shop owner ticked "Inserisci prezzi nell'immagine" in
+    # the Studio, look up the source generation's garments to find real
+    # descriptions (e.g. "Vestito €59, pantalone €67") and append a price-tag
+    # instruction to the prompt.
+    price_suffix = ""
+    if payload.add_price_tags and payload.gen_id:
+        gen = await db.generations.find_one(
+            {"id": payload.gen_id, "user_id": user["user_id"]},
+            {"_id": 0, "garment_ids": 1},
+        )
+        if gen and gen.get("garment_ids"):
+            garments = await db.garments.find(
+                {"id": {"$in": gen["garment_ids"]}, "user_id": user["user_id"]},
+                {"_id": 0, "name": 1},
+            ).to_list(50)
+            descriptions = [g["name"] for g in garments if is_real_description(g.get("name"))]
+            price_suffix = _compose_price_tags_suffix(descriptions)
+
     prompt = (
         f"Edit the provided photograph as requested while keeping the model, outfit, and overall composition identical. "
         f"Preserve the full-body framing (head to feet) and the 4:5 vertical aspect ratio (Instagram feed). "
         f"Request: {payload.edit_prompt}. "
         f"Keep photorealistic quality, high-end fashion photography aesthetic."
+        f"{price_suffix}"
     )
     result = await generate_single_image(prompt, [payload.image_base64], session_id)
     if not result:

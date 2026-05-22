@@ -530,6 +530,70 @@ backend:
           /api/telegram/publish and /api/studio/edit were intentionally not
           touched per the review request.
 
+backend:
+  - task: "POST /api/studio/edit — add_price_tags toggle"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Verified the new `add_price_tags: bool = False` field on
+          StudioEditRequest via /app/backend_test_studio_edit_price_tags.py
+          against https://outfit-gen-11.preview.emergentagent.com/api with
+          Bearer test_session_screen (user_demo01). 5/5 review-request
+          cases PASS, every /studio/edit call returned 200 with a real
+          non-empty base64 PNG (lengths 1.0M–2.5M chars).
+
+          Setup:
+            * POST /api/garments name="Vestito €59" → 200, id=g_881af9350aad
+            * POST /api/garments name="Cap 4521"    → 200, id=g_724ad71b0ed7
+            * POST /api/generations [Vestito €59 + Cap 4521], num_variations=1
+              → 200, gen_5f9e2bec9c79, status=done, 1 image (20.3s)
+            * POST /api/generations [Cap 4521 only], num_variations=1
+              → 200, gen_f66b17eba987, status=done, 1 image (21.0s)
+
+          Cases:
+            1) add_price_tags omitted (default False), gen_id=gen_5f9e..,
+               edit_prompt="Change the background to a beach at golden hour"
+               → 200 in 18.8s, image_base64 length=2,521,000 ✅
+               Code path: payload.add_price_tags is False → price_suffix=""
+               → backward-compatible original prompt verified.
+            2) add_price_tags=True with mixed real + Cap garments
+               (gen_5f9e..), edit_prompt="Add subtle warm light"
+               → 200 in 20.6s, image_base64 length=2,168,744 ✅
+               The list comprehension
+                 [g["name"] for g in garments if is_real_description(...)]
+               filters to just "Vestito €59", which is then joined and
+               passed to _compose_price_tags_suffix. Suffix is appended
+               to the edit prompt, Gemini accepts it and returns a real
+               image.
+            3) add_price_tags=True with ONLY Cap-placeholder garment
+               (gen_f66b..), edit_prompt="Make colors slightly more vivid"
+               → 200 in 26.5s, image_base64 length=2,283,676 ✅
+               is_real_description("Cap 4521") returns False → filtered
+               descriptions=[] → _compose_price_tags_suffix([]) returns ""
+               → prompt unchanged. Endpoint still produces a normal edited
+               image (no crash, no 5xx).
+            4) add_price_tags=True with no gen_id (None),
+               edit_prompt="Remove background"
+               → 200 in 18.2s, image_base64 length=1,009,552 ✅
+               Guard `if payload.add_price_tags and payload.gen_id:`
+               short-circuits because gen_id is falsy → no DB lookup,
+               no suffix, request handled identically to the plain edit
+               flow. No 500s.
+            5) Regression — plain /studio/edit (no add_price_tags field,
+               no gen_id), edit_prompt="Slightly enhance contrast..."
+               → 200 in 18.2s, image_base64 length=1,826,008 ✅
+
+          Total wall-clock for all 5 Gemini calls: ~102s. No 4xx, no 5xx,
+          no upstream rate-limits today. The new code path is wired
+          correctly and 100% backward compatible. Nothing to fix.
+
 test_plan:
   current_focus: []
   stuck_tasks: []
@@ -620,3 +684,25 @@ agent_communication:
         6) GET /providers (3 keys), /garments (1 item), /backgrounds (2)
            all 200 ✅
       No 5xx, no mocks, no integration issues. Nothing to fix.
+  - agent: "testing"
+    message: |
+      add_price_tags toggle on POST /api/studio/edit verified end-to-end
+      via /app/backend_test_studio_edit_price_tags.py against the preview
+      URL with Bearer test_session_screen (user_demo01). 5/5 review-request
+      cases PASS:
+        1) add_price_tags omitted (default False) + gen_id → 200 in 18.8s,
+           image_base64 len=2.5M. Backward-compatible code path verified ✅
+        2) add_price_tags=True with mixed real ("Vestito €59") + Cap
+           garments → 200 in 20.6s, image_base64 len=2.17M. The
+           is_real_description filter keeps only "Vestito €59" and the
+           price-tag suffix is appended to the edit prompt ✅
+        3) add_price_tags=True with ONLY "Cap NNNN" → 200 in 26.5s,
+           image_base64 len=2.28M. Filtered descriptions=[] →
+           _compose_price_tags_suffix("") → prompt unchanged. No crash ✅
+        4) add_price_tags=True + no gen_id → 200 in 18.2s, image_base64
+           len=1.0M. Guard short-circuits (no DB lookup, no suffix) ✅
+        5) Regression — plain /studio/edit (no new field, no gen_id) →
+           200 in 18.2s, image_base64 len=1.83M ✅
+      Every call returned 200 with a real non-empty base64 PNG. No 4xx,
+      no 5xx, no upstream rate limits. The new field + helper wiring is
+      correct and 100% backward compatible. Nothing to fix.
