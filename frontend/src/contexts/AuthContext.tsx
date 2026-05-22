@@ -22,6 +22,9 @@ type AuthState = {
   user: User | null;
   loading: boolean;
   signIn: () => Promise<void>;
+  /** Used by the email/password flow: after a successful POST /api/auth/email/*
+   *  the screen stores the returned session_token here and we hydrate user. */
+  signInWithToken: (sessionToken: string, user: User) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -140,6 +143,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [processSessionId]);
 
+  const signInWithToken = useCallback(async (sessionToken: string, u: User) => {
+    await setToken(sessionToken);
+    setUser(u);
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       await api.logout();
@@ -149,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, refresh }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signInWithToken, signOut, refresh }}>
       {children}
     </AuthContext.Provider>
   );

@@ -339,6 +339,7 @@ export default function Studio() {
 
   const handlePublishVideoTelegram = async (video: any) => {
     if (!video?.video_url) return;
+    if (!(await ensureTelegramConfigured())) return;
     setPublishingTgVideoId(video.id);
     try {
       const captionText =
@@ -386,6 +387,30 @@ export default function Studio() {
     notify({ title: "Copiato!", message: "La caption è negli appunti." });
   };
 
+  /** Pre-flight check shared by every Telegram action.
+   *
+   * We hit GET /api/settings first so the user gets an instant, friendly
+   * notify ("Canale Telegram non inserito") instead of having to wait for
+   * the full publish payload (with the heavy base64 image) to be uploaded
+   * and rejected with a 400 by the backend. Returns true when ready.
+   */
+  const ensureTelegramConfigured = async (): Promise<boolean> => {
+    try {
+      const s = await api.getUserSettings();
+      const ch = (s?.telegram_channel || "").trim();
+      if (!ch) {
+        notify({
+          title: "⚠️ Canale Telegram non inserito",
+          message: "Vai su Profilo → Impostazioni e inserisci il tuo canale Telegram prima di pubblicare.",
+        });
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
   const downloadAndShare = async (target: "telegram" | "instagram" | "share") => {
     if (!image) {
       if (Platform.OS === "web" && typeof window !== "undefined") { notify({ title: "Nessuna immagine selezionata" }); }
@@ -395,6 +420,9 @@ export default function Studio() {
 
     // Publish to the configured Telegram channel with a booking button
     if (target === "telegram") {
+      // Pre-flight: refuse early with a friendly notify if the user
+      // forgot to configure their channel.
+      if (!(await ensureTelegramConfigured())) return;
       try {
         setBusy(true);
         const captionText =
@@ -434,6 +462,19 @@ export default function Studio() {
         fileBaseName: `dressvibe_${id}_${idx}`,
       };
       if (target === "instagram") {
+        // Instagram app handover only works reliably on native (iOS/Android)
+        // — on web the browser can't pop the Instagram app, and on the
+        // Emergent preview iframe the system share sheet is also blocked.
+        // Give the user a clear "what to do" message instead of failing
+        // silently.
+        if (Platform.OS === "web") {
+          notify({
+            title: "⚠️ Instagram disponibile solo su cellulare",
+            message:
+              "Apri DressVibe dal telefono per pubblicare direttamente su Instagram. Da qui puoi solo scaricare la foto col pulsante 'Scarica' e poi caricarla manualmente.",
+          });
+          return;
+        }
         await shareToInstagram(opts);
       } else {
         await shareGeneric(opts);

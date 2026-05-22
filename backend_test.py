@@ -1,614 +1,374 @@
-"""
-DressVibe — Performance / Thumbnail Optimisations test suite.
+"""DressVibe — Email/Password Auth + Telegram strict tests.
 
-Scope (per the review request):
-  1) List endpoints leanness:
-     - GET /api/garments returns thumb_base64 and NO image_base64.
-     - GET /api/generations returns thumbnail + image_count, NO images[].
-  2) Detail endpoints unchanged:
-     - GET /api/garments/{id} keeps image_base64.
-     - GET /api/generations/{id} keeps images[] and thumbs[].
-  3) Garment thumb generated on POST.
-  4) POST /api/generations produces thumbs[] aligned with images[].
-  5) POST /api/studio/edit appends both image + thumb.
-  6) DELETE /api/generations/{id} sweeps short_links/videos/tg_publications.
-  7) DELETE /api/generations/{id}/images/{idx} keeps thumbs aligned.
-  8) Background backfill ran.
+Runs against the live backend (localhost:8001) per the review request.
+Reads OTPs directly from MongoDB `users` collection (fields
+`verification_code`, `reset_code`).
 """
 
-from __future__ import annotations
-
-import base64
-import io
-import json
+import asyncio
 import os
 import sys
-import time
-from typing import Any, Dict, List, Optional
+import uuid
+from pathlib import Path
 
-import requests
+import httpx
+from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorClient
 
-BASE = "https://outfit-gen-11.preview.emergentagent.com/api"
-TOKEN = "test_session_screen"
-HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
-USER_ID = "user_demo01"
+ROOT = Path("/app/backend")
+load_dotenv(ROOT / ".env")
 
-PASS: List[str] = []
-FAIL: List[str] = []
+API_BASE = "http://localhost:8001/api"
+BEARER = "Bearer test_session_screen"  # user_demo01
+HEADERS_AUTH = {"Authorization": BEARER}
 
+MONGO_URL = os.environ["MONGO_URL"]
+DB_NAME = os.environ["DB_NAME"]
 
-def _ok(label: str, extra: str = "") -> None:
-    print(f"[PASS] {label}" + (f"  ({extra})" if extra else ""))
-    PASS.append(label)
-
-
-def _bad(label: str, why: str) -> None:
-    print(f"[FAIL] {label}  ->  {why}")
-    FAIL.append(f"{label} :: {why}")
+results = []
 
 
-# -------------- helpers --------------------------------------------------------
-def make_tiny_png_b64() -> str:
-    """Return a real ~64×64 PNG base64 (without prefix) so make_thumb_b64
-    can actually decode it and Gemini can accept it in the worst case."""
-    try:
-        from PIL import Image  # type: ignore
-        img = Image.new("RGB", (64, 64), (200, 120, 60))
-        for x in range(64):
-            for y in range(64):
-                img.putpixel((x, y), ((x * 4) & 0xFF, (y * 4) & 0xFF, 120))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
-        return (
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE"
-            "QVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII="
+def record(name: str, ok: bool, info: str = ""):
+    flag = "PASS" if ok else "FAIL"
+    line = f"[{flag}] {name}" + (f" -- {info}" if info else "")
+    print(line)
+    results.append((name, ok, info))
+
+
+async def find_user(db, email: str):
+    return await db.users.find_one({"email": email.lower().strip()}, {"_id": 0})
+
+
+async def main():
+    mclient = AsyncIOMotorClient(MONGO_URL)
+    db = mclient[DB_NAME]
+
+    async with httpx.AsyncClient(base_url=API_BASE, timeout=30.0) as cx:
+        # =========== EMAIL/PASSWORD AUTH ===========
+
+        # CASE 1: Register new email — happy path
+        email1 = f"test+{uuid.uuid4().hex[:8]}@example.it"
+        pwd1 = "MyStr0ngPass!"
+        r = await cx.post(
+            "/auth/email/register",
+            json={"email": email1, "password": pwd1, "name": "Anna Rossi"},
+        )
+        ok = r.status_code == 200 and r.json().get("ok") is True
+        record("Case 1: register happy path", ok, f"status={r.status_code}")
+        u = await find_user(db, email1)
+        otp1 = u.get("verification_code") if u else None
+        record(
+            "Case 1b: user row created with verification_code, is_verified=False",
+            bool(u) and bool(otp1) and u.get("is_verified") is False,
+            f"is_verified={u.get('is_verified') if u else None} otp_len={len(otp1) if otp1 else 0}",
         )
 
-
-def http_get(path: str) -> requests.Response:
-    return requests.get(f"{BASE}{path}", headers=HEADERS, timeout=120)
-
-
-def http_post(path: str, payload: Dict[str, Any], timeout: int = 180) -> requests.Response:
-    return requests.post(f"{BASE}{path}", headers=HEADERS, data=json.dumps(payload), timeout=timeout)
-
-
-def http_delete(path: str) -> requests.Response:
-    return requests.delete(f"{BASE}{path}", headers=HEADERS, timeout=60)
-
-
-def run_mongosh(script: str) -> str:
-    """Run a mongosh script via a temp file to avoid shell-quoting issues."""
-    import tempfile
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
-        f.write(script)
-        path = f.name
-    try:
-        return os.popen(f"mongosh --quiet --file {path}").read()
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-
-
-# -------------- 1) list endpoint leanness --------------------------------------
-def test_1_list_endpoints_lean() -> None:
-    label_g = "1a) GET /api/garments lean (no image_base64, thumb_base64 present)"
-    label_x = "1b) GET /api/generations lean (no images[], thumbnail+image_count present)"
-
-    r = http_get("/garments")
-    if r.status_code != 200:
-        _bad(label_g, f"status={r.status_code} body={r.text[:200]}")
-    else:
-        items = r.json()
-        body_kb = len(r.content) / 1024.0
-        if not isinstance(items, list):
-            _bad(label_g, f"unexpected body type: {type(items)}")
-        else:
-            has_img = [it for it in items if "image_base64" in it]
-            missing_thumb = [it for it in items if not it.get("thumb_base64")]
-            if has_img:
-                _bad(label_g, f"{len(has_img)} items still contain image_base64")
-            elif missing_thumb and items:
-                _bad(label_g, f"{len(missing_thumb)}/{len(items)} items missing thumb_base64")
-            elif body_kb > 500:
-                _bad(label_g, f"response {body_kb:.1f} KB exceeds 500 KB budget")
-            else:
-                _ok(label_g, extra=f"{len(items)} items, body={body_kb:.1f} KB, no image_base64")
-
-    r = http_get("/generations")
-    if r.status_code != 200:
-        _bad(label_x, f"status={r.status_code} body={r.text[:200]}")
-    else:
-        items = r.json()
-        body_kb = len(r.content) / 1024.0
-        bad_with_images = [it for it in items if "images" in it]
-        missing_meta = [
-            it for it in items
-            if "image_count" not in it or "thumbnail" not in it
-        ]
-        if bad_with_images:
-            _bad(label_x, f"{len(bad_with_images)} items still contain images[]")
-        elif missing_meta:
-            _bad(label_x, f"{len(missing_meta)} items missing thumbnail/image_count")
-        elif body_kb > 1024:
-            _bad(label_x, f"response {body_kb:.1f} KB exceeds 1 MB budget")
-        else:
-            _ok(label_x, extra=f"{len(items)} items, body={body_kb:.1f} KB")
-
-
-# -------------- 2) detail endpoints unchanged ----------------------------------
-def test_2_detail_endpoints() -> Optional[Dict[str, Any]]:
-    label_g = "2a) GET /api/garments/{id} returns full image_base64"
-    label_x = "2b) GET /api/generations/{id} returns full images[] AND thumbs[]"
-
-    rl = http_get("/garments")
-    g_id = None
-    if rl.status_code == 200 and rl.json():
-        g_id = rl.json()[0]["id"]
-    if not g_id:
-        _bad(label_g, "no garments available")
-    else:
-        r = http_get(f"/garments/{g_id}")
-        if r.status_code != 200:
-            _bad(label_g, f"status={r.status_code}")
-        else:
-            d = r.json()
-            if not d.get("image_base64"):
-                _bad(label_g, "image_base64 missing or empty in detail response")
-            else:
-                _ok(label_g, extra=f"id={g_id} image_base64 length={len(d['image_base64'])}")
-
-    rl2 = http_get("/generations")
-    gen_id_with_images: Optional[str] = None
-    if rl2.status_code == 200:
-        for it in rl2.json():
-            if it.get("image_count", 0) >= 1:
-                gen_id_with_images = it["id"]
-                break
-    if not gen_id_with_images:
-        _bad(label_x, "no generation with images available")
-        return None
-
-    r = http_get(f"/generations/{gen_id_with_images}")
-    if r.status_code != 200:
-        _bad(label_x, f"status={r.status_code}")
-        return None
-    d = r.json()
-    imgs = d.get("images") or []
-    thumbs = d.get("thumbs")
-    if not imgs:
-        _bad(label_x, "images[] empty or missing in detail")
-    elif thumbs is None:
-        _bad(label_x, "thumbs[] missing in detail")
-    else:
-        _ok(
-            label_x,
-            extra=f"gen={gen_id_with_images} images={len(imgs)} thumbs={len(thumbs)}",
+        # CASE 2: Register with weak password → 400
+        r = await cx.post(
+            "/auth/email/register",
+            json={"email": f"test+{uuid.uuid4().hex[:8]}@example.it", "password": "short"},
         )
-    return {"gen_id": gen_id_with_images, "images": imgs, "thumbs": thumbs}
-
-
-# -------------- 3) garment thumb on POST ---------------------------------------
-def test_3_garment_thumb_post() -> Optional[str]:
-    label = "3) POST /api/garments produces image_base64 + thumb_base64 (thumb < image)"
-    label_b = "3b) New garment appears in GET /api/garments without image_base64"
-
-    # Use the existing demo garment's actual image so this is realistic
-    src = http_get("/garments/g_test_demo01")
-    if src.status_code == 200 and src.json().get("image_base64"):
-        b64 = src.json()["image_base64"]
-    else:
-        b64 = make_tiny_png_b64()
-
-    r = http_post(
-        "/garments",
-        {
-            "name": "Maglione test thumb",
-            "image_base64": b64,
-            "category": "maglione",
-            "color": "blu",
-            "season": "inverno",
-            "gender": "donna",
-        },
-    )
-    if r.status_code != 200:
-        _bad(label, f"status={r.status_code} body={r.text[:200]}")
-        return None
-    d = r.json()
-    if not d.get("image_base64") or not d.get("thumb_base64"):
-        _bad(label, f"missing fields: image_base64={bool(d.get('image_base64'))}, thumb_base64={bool(d.get('thumb_base64'))}")
-        return None
-    if len(d["thumb_base64"]) >= len(d["image_base64"]):
-        _bad(label, f"thumb not smaller than image (thumb={len(d['thumb_base64'])} vs img={len(d['image_base64'])})")
-    else:
-        _ok(label, extra=f"id={d['id']} img={len(d['image_base64'])}B thumb={len(d['thumb_base64'])}B")
-
-    r2 = http_get("/garments")
-    if r2.status_code != 200:
-        _bad(label_b, f"status={r2.status_code}")
-        return d["id"]
-    items = r2.json()
-    new_item = next((it for it in items if it.get("id") == d["id"]), None)
-    if not new_item:
-        _bad(label_b, "new garment not present in list")
-    elif "image_base64" in new_item:
-        _bad(label_b, "image_base64 leaked into list response")
-    elif not new_item.get("thumb_base64"):
-        _bad(label_b, "thumb_base64 missing in list response")
-    else:
-        _ok(label_b, extra=f"id={d['id']}")
-    return d["id"]
-
-
-# -------------- 4) generation produces thumbs[] aligned ------------------------
-def test_4_generation_thumbs(garment_id: Optional[str]) -> Optional[str]:
-    label = "4) POST /api/generations stores thumbs[] aligned with images[] (status=done)"
-    label_b = "4b) GET /api/generations list shows thumbnail populated for new gen"
-    label_c = "4c) GET /api/generations/{id} returns images[] and thumbs[] with equal length"
-
-    target_garment = None
-    rl = http_get("/garments")
-    if rl.status_code == 200:
-        items = rl.json()
-        for it in items:
-            if it["id"] == "g_test_demo01":
-                target_garment = it["id"]
-                break
-        if not target_garment:
-            target_garment = garment_id or (items[0]["id"] if items else None)
-    if not target_garment:
-        _bad(label, "no garment available for generation")
-        return None
-
-    payload = {
-        "garment_ids": [target_garment],
-        "num_variations": 1,
-        "model_gender": "donna",
-        "model_age": "giovane",
-        "model_body": "slim",
-        "model_ethnicity": "caucasica",
-        "pose": "casual_standing",
-        "background": "white_studio",
-    }
-    t0 = time.time()
-    r = http_post("/generations", payload, timeout=120)
-    dt = time.time() - t0
-    if r.status_code == 429:
-        print(f"[SKIP] {label}  (Gemini rate limited, code 429)")
-        return None
-    if r.status_code == 502:
-        print(f"[SKIP] {label}  (Gemini 502: {r.text[:150]})")
-        return None
-    if r.status_code != 200:
-        _bad(label, f"status={r.status_code} body={r.text[:200]}")
-        return None
-    d = r.json()
-    gen_id = d.get("id")
-    if not gen_id:
-        _bad(label, "no gen id in response")
-        return None
-    if d.get("status") != "done":
-        print(f"[NOTE] generation status={d.get('status')} (took {dt:.1f}s)")
-
-    rd = http_get(f"/generations/{gen_id}")
-    if rd.status_code != 200:
-        _bad(label_c, f"detail status={rd.status_code}")
-        return gen_id
-    det = rd.json()
-    imgs = det.get("images") or []
-    thumbs = det.get("thumbs") or []
-    if not imgs:
-        print(f"[NOTE] gen has no images (status={det.get('status')}); skipping alignment check")
-    else:
-        if len(thumbs) != len(imgs):
-            _bad(label_c, f"thumbs len={len(thumbs)} != images len={len(imgs)}")
-        elif any(not t for t in thumbs):
-            _bad(label_c, f"one or more thumbs are empty: {[bool(t) for t in thumbs]}")
-        else:
-            _ok(label_c, extra=f"gen={gen_id} images={len(imgs)} thumbs={len(thumbs)}")
-        _ok(label, extra=f"gen={gen_id} status={det.get('status')} dt={dt:.1f}s")
-
-    rl2 = http_get("/generations")
-    if rl2.status_code != 200:
-        _bad(label_b, f"status={rl2.status_code}")
-        return gen_id
-    items = rl2.json()
-    row = next((it for it in items if it["id"] == gen_id), None)
-    if not row:
-        _bad(label_b, f"gen {gen_id} not in list")
-    else:
-        if "images" in row:
-            _bad(label_b, "list row leaks images[]")
-        elif row.get("thumbnail") is None and imgs:
-            _bad(label_b, "thumbnail is None despite gen having images")
-        else:
-            _ok(label_b, extra=f"image_count={row.get('image_count')} thumbnail={'present' if row.get('thumbnail') else 'none'}")
-    return gen_id
-
-
-# -------------- 5) studio edit appends both ------------------------------------
-def test_5_studio_edit_appends_both(gen_id: Optional[str]) -> None:
-    label = "5) POST /api/studio/edit appends image AND thumb to gen (lengths +1)"
-    if not gen_id:
-        print(f"[SKIP] {label}  (no gen_id available)")
-        return
-
-    rd = http_get(f"/generations/{gen_id}")
-    if rd.status_code != 200:
-        print(f"[SKIP] {label}  (detail status={rd.status_code})")
-        return
-    before = rd.json()
-    imgs_before = before.get("images") or []
-    thumbs_before = before.get("thumbs") or []
-    if not imgs_before:
-        print(f"[SKIP] {label}  (gen has no images to edit)")
-        return
-
-    payload = {
-        "image_base64": imgs_before[0],
-        "edit_prompt": "Subtle warm tone, no other changes.",
-        "gen_id": gen_id,
-    }
-    t0 = time.time()
-    r = http_post("/studio/edit", payload, timeout=120)
-    dt = time.time() - t0
-    if r.status_code in (429, 502):
-        print(f"[SKIP] {label}  (Gemini {r.status_code}: {r.text[:140]})")
-        return
-    if r.status_code != 200:
-        _bad(label, f"status={r.status_code} body={r.text[:200]}")
-        return
-
-    rd2 = http_get(f"/generations/{gen_id}")
-    if rd2.status_code != 200:
-        _bad(label, f"detail status={rd2.status_code}")
-        return
-    after = rd2.json()
-    imgs_after = after.get("images") or []
-    thumbs_after = after.get("thumbs") or []
-    if len(imgs_after) != len(imgs_before) + 1:
-        _bad(label, f"images grew {len(imgs_before)}→{len(imgs_after)}; expected +1")
-    elif len(thumbs_after) != len(thumbs_before) + 1:
-        _bad(label, f"thumbs grew {len(thumbs_before)}→{len(thumbs_after)}; expected +1")
-    elif not thumbs_after[-1]:
-        _bad(label, "appended thumb is empty")
-    else:
-        _ok(label, extra=f"gen={gen_id} images={len(imgs_before)}→{len(imgs_after)} thumbs={len(thumbs_before)}→{len(thumbs_after)} dt={dt:.1f}s")
-
-
-# -------------- 6) orphan cleanup on delete ------------------------------------
-def test_6_orphan_cleanup() -> None:
-    label = "6) DELETE /api/generations/{id} sweeps short_links/videos/tg_publications"
-
-    # Need a gen that has at least one image so POST /short-links accepts it.
-    # We'll trigger a fresh single-variation generation specifically for this
-    # test so we don't destroy any existing demo data.
-    rl_g = http_get("/garments")
-    real = None
-    if rl_g.status_code == 200:
-        real = next((g for g in rl_g.json() if g["id"] == "g_test_demo01"), None) or (
-            rl_g.json()[0] if rl_g.json() else None
+        record(
+            "Case 2: register weak password rejected (400)",
+            r.status_code == 400 and "almeno 8 caratteri" in r.text,
+            f"status={r.status_code} body={r.text[:200]}",
         )
-    if not real:
-        _bad(label, "no garment available")
-        return
-    gr = http_post(
-        "/generations",
-        {
-            "garment_ids": [real["id"]],
-            "num_variations": 1,
-            "model_gender": "donna",
-            "model_age": "giovane",
-            "model_body": "slim",
-            "model_ethnicity": "caucasica",
-            "pose": "casual_standing",
-            "background": "white_studio",
-        },
-        timeout=180,
-    )
-    if gr.status_code != 200 or not (gr.json().get("images") or []):
-        print(f"[SKIP] {label}  (Gemini didn't produce an image: status={gr.status_code} body={gr.text[:120]})")
-        return
-    gen_id = gr.json()["id"]
 
-    # 1) mint a short_link
-    sl = http_post("/short-links", {"gen_id": gen_id, "image_index": 0, "look_name": "Orphan test"})
-    if sl.status_code != 200:
-        _bad(label, f"POST /short-links failed: {sl.status_code} {sl.text[:120]}")
-        return
+        # CASE 3: Register with invalid email → 422
+        r = await cx.post(
+            "/auth/email/register",
+            json={"email": "not-an-email", "password": "Whatever1234"},
+        )
+        record(
+            "Case 3: register invalid email rejected",
+            r.status_code in (400, 422),
+            f"status={r.status_code}",
+        )
 
-    # 2) seed a fake video and a fake tg_publication referencing the gen
-    token_uniq = f"tok_orphan_test_xx_{int(time.time())}"
-    js_payload = f"""
-db = db.getSiblingDB("dressvibe");
-db.videos.insertOne({{id: "vid_orphan_test_xx_{int(time.time())}", user_id: "user_demo01", gen_id: "{gen_id}", created_at: new Date()}});
-db.tg_publications.insertOne({{token: "{token_uniq}", user_id: "user_demo01", gen_id: "{gen_id}", created_at: new Date()}});
-print("seeded-sl:" + db.short_links.countDocuments({{gen_id:"{gen_id}"}}));
-print("seeded-vid:" + db.videos.countDocuments({{gen_id:"{gen_id}"}}));
-print("seeded-tg:" + db.tg_publications.countDocuments({{gen_id:"{gen_id}"}}));
-"""
-    seed = run_mongosh(js_payload)
-    print(f"[SEED] {seed.strip()}")
+        # CASE 4: Verify with WRONG code → 400
+        r = await cx.post("/auth/email/verify", json={"email": email1, "code": "000000"})
+        record(
+            "Case 4: verify wrong code → 400",
+            r.status_code == 400 and "non valido" in r.text.lower(),
+            f"status={r.status_code} body={r.text[:200]}",
+        )
 
-    # Pre-counts should all be > 0
-    pre = {}
-    for line in seed.strip().splitlines():
-        k, _, v = line.partition(":")
-        try:
-            pre[k.strip()] = int(v.strip())
-        except ValueError:
-            pass
-    if not pre or any(v < 1 for v in pre.values()):
-        _bad(label, f"seed failed, pre-counts: {pre} raw={seed!r}")
-        return
+        # CASE 5: Verify with CORRECT code → 200 + session_token
+        r = await cx.post("/auth/email/verify", json={"email": email1, "code": otp1})
+        body = r.json() if r.status_code == 200 else {}
+        session_token_email1 = body.get("session_token")
+        record(
+            "Case 5: verify correct code returns session_token",
+            r.status_code == 200
+            and bool(session_token_email1)
+            and body.get("user", {}).get("email") == email1.lower(),
+            f"status={r.status_code} token_present={bool(session_token_email1)}",
+        )
+        u2 = await find_user(db, email1)
+        record(
+            "Case 5b: DB row is_verified=True + verification_code unset",
+            bool(u2) and u2.get("is_verified") is True and "verification_code" not in u2,
+            f"is_verified={u2.get('is_verified') if u2 else None} "
+            f"has_vc={'verification_code' in (u2 or {})}",
+        )
 
-    # 3) DELETE the gen
-    d = http_delete(f"/generations/{gen_id}")
-    if d.status_code != 200:
-        _bad(label, f"DELETE /generations status={d.status_code}")
-        return
+        # CASE 6: Register DUPLICATE verified email → 409
+        r = await cx.post(
+            "/auth/email/register",
+            json={"email": email1, "password": "AnotherPass1!"},
+        )
+        record(
+            "Case 6: re-register verified email → 409",
+            r.status_code == 409,
+            f"status={r.status_code} body={r.text[:200]}",
+        )
 
-    # 4) verify sweep
-    js_check = f"""
-db = db.getSiblingDB("dressvibe");
-print("post-sl:" + db.short_links.countDocuments({{gen_id:"{gen_id}"}}));
-print("post-vid:" + db.videos.countDocuments({{gen_id:"{gen_id}"}}));
-print("post-tg:" + db.tg_publications.countDocuments({{gen_id:"{gen_id}"}}));
-print("post-gen:" + db.generations.countDocuments({{id:"{gen_id}"}}));
-"""
-    out = run_mongosh(js_check)
-    print(f"[CHECK] {out.strip()}")
-    counts = {}
-    for line in out.strip().splitlines():
-        k, _, v = line.partition(":")
-        try:
-            counts[k.strip()] = int(v.strip())
-        except ValueError:
-            pass
-    failures = [k for k, v in counts.items() if v != 0]
-    if failures:
-        _bad(label, f"orphans remain: {counts}")
-    else:
-        _ok(label, extra=f"gen={gen_id} pre={pre} post={counts}")
-
-
-# -------------- 7) image delete keeps thumbs aligned ---------------------------
-def test_7_image_delete_keeps_aligned() -> None:
-    label = "7) DELETE /generations/{id}/images/0 keeps thumbs aligned (both -1)"
-
-    rl = http_get("/generations")
-    target_gen = None
-    if rl.status_code == 200:
-        for it in rl.json():
-            if it.get("image_count", 0) >= 2:
-                target_gen = it["id"]
-                break
-
-    if not target_gen:
-        # Try to manufacture by running a 2-variation gen on g_test_demo01
-        rl_g = http_get("/garments")
-        if rl_g.status_code == 200:
-            real = next((g for g in rl_g.json() if g["id"] == "g_test_demo01"), None) or (
-                rl_g.json()[0] if rl_g.json() else None
+        # CASE 7: Login with correct password → 200
+        r = await cx.post("/auth/email/login", json={"email": email1, "password": pwd1})
+        body = r.json() if r.status_code == 200 else {}
+        login_token = body.get("session_token")
+        record(
+            "Case 7: login happy path returns session_token",
+            r.status_code == 200 and bool(login_token),
+            f"status={r.status_code}",
+        )
+        if login_token:
+            rme = await cx.get(
+                "/auth/me", headers={"Authorization": f"Bearer {login_token}"}
             )
-            if real:
-                gr = http_post(
-                    "/generations",
-                    {
-                        "garment_ids": [real["id"]],
-                        "num_variations": 2,
-                        "model_gender": "donna",
-                        "model_age": "giovane",
-                        "model_body": "slim",
-                        "model_ethnicity": "caucasica",
-                        "pose": "casual_standing",
-                        "background": "white_studio",
-                    },
-                    timeout=180,
-                )
-                if gr.status_code == 200 and len(gr.json().get("images") or []) >= 2:
-                    target_gen = gr.json()["id"]
+            record(
+                "Case 7b: returned session_token works on /auth/me",
+                rme.status_code == 200 and rme.json().get("email") == email1.lower(),
+                f"status={rme.status_code}",
+            )
 
-    if not target_gen:
-        print(f"[SKIP] {label}  (no gen with ≥2 images available)")
-        return
+        # CASE 8: Login with WRONG password → 401
+        r = await cx.post(
+            "/auth/email/login", json={"email": email1, "password": "WrongPass1234"}
+        )
+        record(
+            "Case 8: login wrong password → 401",
+            r.status_code == 401,
+            f"status={r.status_code}",
+        )
 
-    rd = http_get(f"/generations/{target_gen}")
-    if rd.status_code != 200:
-        _bad(label, f"detail status={rd.status_code}")
-        return
-    before = rd.json()
-    n_imgs = len(before.get("images") or [])
-    n_thumbs = len(before.get("thumbs") or [])
-    if n_imgs != n_thumbs:
-        _bad(label, f"pre-condition violated: images={n_imgs} thumbs={n_thumbs}")
-        return
-    if n_imgs < 2:
-        print(f"[SKIP] {label}  (gen now has {n_imgs} images)")
-        return
+        # CASE 9: Login UNVERIFIED user → 403
+        email_unv = f"test+{uuid.uuid4().hex[:8]}@example.it"
+        pwd_unv = "UnverifiedPass1!"
+        r = await cx.post(
+            "/auth/email/register", json={"email": email_unv, "password": pwd_unv}
+        )
+        record("Case 9a: register unverified user", r.status_code == 200, f"status={r.status_code}")
+        r = await cx.post(
+            "/auth/email/login", json={"email": email_unv, "password": pwd_unv}
+        )
+        record(
+            "Case 9b: login unverified → 403",
+            r.status_code == 403 and "non ancora verificato" in r.text.lower(),
+            f"status={r.status_code} body={r.text[:200]}",
+        )
 
-    di = http_delete(f"/generations/{target_gen}/images/0")
-    if di.status_code != 200:
-        _bad(label, f"DELETE image status={di.status_code} body={di.text[:120]}")
-        return
+        # CASE 10: Forgot password
+        r = await cx.post("/auth/email/forgot", json={"email": email1})
+        record(
+            "Case 10: forgot password returns 200",
+            r.status_code == 200 and r.json().get("ok") is True,
+            f"status={r.status_code}",
+        )
+        u3 = await find_user(db, email1)
+        reset_otp = u3.get("reset_code") if u3 else None
+        record(
+            "Case 10b: reset_code stored in DB (6-digit)",
+            bool(reset_otp) and len(reset_otp) == 6 and reset_otp.isdigit(),
+            f"present={bool(reset_otp)}",
+        )
+        r = await cx.post(
+            "/auth/email/forgot",
+            json={"email": f"nobody+{uuid.uuid4().hex[:6]}@example.it"},
+        )
+        record(
+            "Case 10c: forgot unknown email still 200 (no enumeration)",
+            r.status_code == 200 and r.json().get("ok") is True,
+            f"status={r.status_code}",
+        )
 
-    rd2 = http_get(f"/generations/{target_gen}")
-    if rd2.status_code != 200:
-        _bad(label, f"post-detail status={rd2.status_code}")
-        return
-    after = rd2.json()
-    n_imgs2 = len(after.get("images") or [])
-    n_thumbs2 = len(after.get("thumbs") or [])
-    if n_imgs2 != n_imgs - 1:
-        _bad(label, f"images expected {n_imgs-1}, got {n_imgs2}")
-    elif n_thumbs2 != n_thumbs - 1:
-        _bad(label, f"thumbs expected {n_thumbs-1}, got {n_thumbs2}")
-    elif n_imgs2 != n_thumbs2:
-        _bad(label, f"misaligned after delete: images={n_imgs2} thumbs={n_thumbs2}")
-    else:
-        _ok(label, extra=f"gen={target_gen} {n_imgs}→{n_imgs2} (images), {n_thumbs}→{n_thumbs2} (thumbs)")
+        # CASE 11: Reset password
+        r = await cx.post(
+            "/auth/email/reset",
+            json={"email": email1, "code": "999999", "password": "BrandNewPass1!"},
+        )
+        record(
+            "Case 11a: reset wrong code → 400",
+            r.status_code == 400,
+            f"status={r.status_code}",
+        )
+        new_pwd = "BrandNewPass1!"
+        r = await cx.post(
+            "/auth/email/reset",
+            json={"email": email1, "code": reset_otp, "password": new_pwd},
+        )
+        record(
+            "Case 11b: reset correct code → 200",
+            r.status_code == 200 and r.json().get("ok") is True,
+            f"status={r.status_code}",
+        )
+        r = await cx.post("/auth/email/login", json={"email": email1, "password": pwd1})
+        record(
+            "Case 11c: old password no longer works (401)",
+            r.status_code == 401,
+            f"status={r.status_code}",
+        )
+        r = await cx.post(
+            "/auth/email/login", json={"email": email1, "password": new_pwd}
+        )
+        record(
+            "Case 11d: new password works",
+            r.status_code == 200 and bool(r.json().get("session_token")),
+            f"status={r.status_code}",
+        )
 
+        # CASE 12: Resend code (with cooldown)
+        email_re = f"test+{uuid.uuid4().hex[:8]}@example.it"
+        await cx.post(
+            "/auth/email/register",
+            json={"email": email_re, "password": "ResendTest1!"},
+        )
+        r = await cx.post(
+            "/auth/email/resend-code", json={"email": email_re, "purpose": "verify"}
+        )
+        record(
+            "Case 12a: resend immediately after register → 429",
+            r.status_code == 429 and "secondi" in r.text.lower(),
+            f"status={r.status_code} body={r.text[:200]}",
+        )
+        r = await cx.post(
+            "/auth/email/resend-code", json={"email": email_re, "purpose": "bogus"}
+        )
+        record(
+            "Case 12b: resend invalid purpose → 400",
+            r.status_code == 400,
+            f"status={r.status_code} body={r.text[:160]}",
+        )
+        r = await cx.post(
+            "/auth/email/resend-code",
+            json={
+                "email": f"ghost+{uuid.uuid4().hex[:6]}@example.it",
+                "purpose": "verify",
+            },
+        )
+        record(
+            "Case 12c: resend unknown email → 200 (no enumeration)",
+            r.status_code == 200,
+            f"status={r.status_code}",
+        )
+        await db.users.update_one(
+            {"email": email_re},
+            {"$unset": {"verification_sent_at": "", "reset_sent_at": ""}},
+        )
+        prev = await find_user(db, email_re)
+        prev_otp = prev.get("verification_code") if prev else None
+        r = await cx.post(
+            "/auth/email/resend-code", json={"email": email_re, "purpose": "verify"}
+        )
+        post = await find_user(db, email_re)
+        new_otp = post.get("verification_code") if post else None
+        record(
+            "Case 12d: resend after cooldown clear → 200 + new OTP",
+            r.status_code == 200 and bool(new_otp) and new_otp != prev_otp,
+            f"status={r.status_code} otp_changed={new_otp != prev_otp}",
+        )
 
-# -------------- 8) backfill ran on startup -------------------------------------
-def test_8_backfill() -> None:
-    label_l = "8a) backend log contains '[backfill] thumbnail sweep complete'"
-    label_c = "8b) db.garments has at least one thumb_base64 populated"
+        # =========== TELEGRAM STRICT ===========
 
-    out = os.popen("grep -l 'thumbnail sweep complete' /var/log/supervisor/backend.*.log 2>/dev/null").read().strip()
-    if not out:
-        _bad(label_l, "log marker not found")
-    else:
-        _ok(label_l, extra=out.splitlines()[0])
+        # Ensure no telegram_channel for user_demo01
+        await db.user_settings.update_one(
+            {"user_id": "user_demo01"},
+            {"$set": {"telegram_channel": ""}, "$setOnInsert": {"user_id": "user_demo01"}},
+            upsert=True,
+        )
 
-    js = '''
-db = db.getSiblingDB("dressvibe");
-print(db.garments.countDocuments({thumb_base64: {$exists: true, $ne: null}}));
-'''
-    raw = run_mongosh(js).strip()
-    try:
-        n = int(raw.splitlines()[-1])
-    except Exception:
-        n = -1
-    if n <= 0:
-        _bad(label_c, f"count={raw}")
-    else:
-        _ok(label_c, extra=f"garments_with_thumb={n}")
+        # CASE 13a: /telegram/status reports channel_source="none"
+        r = await cx.get("/telegram/status", headers=HEADERS_AUTH)
+        body = r.json() if r.status_code == 200 else {}
+        record(
+            "Case 13a: /telegram/status channel_source='none' when no channel",
+            r.status_code == 200
+            and body.get("channel_source") == "none"
+            and body.get("configured") is False,
+            f"status={r.status_code} body={body}",
+        )
 
+        # CASE 13b: /telegram/publish without channel → 400
+        tiny_png_b64 = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEX/AAAZ4gk3"
+            "AAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
+        )
+        r = await cx.post(
+            "/telegram/publish",
+            headers=HEADERS_AUTH,
+            json={
+                "image_base64": tiny_png_b64,
+                "media_type": "photo",
+                "caption": "test",
+            },
+        )
+        record(
+            "Case 13b: /telegram/publish without channel → 400 'Canale Telegram non inserito'",
+            r.status_code == 400 and "Canale Telegram non inserito" in r.text,
+            f"status={r.status_code} body={r.text[:240]}",
+        )
 
-# -------------- entry ----------------------------------------------------------
-def main() -> int:
-    print(f"BASE={BASE}")
-    print(f"USER={USER_ID} TOKEN=test_session_screen")
-    print("-" * 72)
+        # CASE 14a: PUT /user-settings with telegram channel
+        r = await cx.put(
+            "/user-settings",
+            headers=HEADERS_AUTH,
+            json={"telegram_channel": "@frammenti_pe"},
+        )
+        record(
+            "Case 14a: PUT /user-settings telegram_channel='@frammenti_pe' → 200",
+            r.status_code == 200 and r.json().get("telegram_channel") == "@frammenti_pe",
+            f"status={r.status_code} body={r.text[:240]}",
+        )
 
-    test_1_list_endpoints_lean()
-    print()
-    info = test_2_detail_endpoints()
-    print()
-    new_garment_id = test_3_garment_thumb_post()
-    print()
-    new_gen_id = test_4_generation_thumbs(new_garment_id)
-    print()
-    test_5_studio_edit_appends_both(new_gen_id or (info.get("gen_id") if info else None))
-    print()
-    test_6_orphan_cleanup()
-    print()
-    test_7_image_delete_keeps_aligned()
-    print()
-    test_8_backfill()
+        # CASE 14b: /telegram/status now reports 'user'
+        r = await cx.get("/telegram/status", headers=HEADERS_AUTH)
+        body = r.json() if r.status_code == 200 else {}
+        record(
+            "Case 14b: /telegram/status channel_source='user' after set",
+            r.status_code == 200
+            and body.get("channel_source") == "user"
+            and body.get("configured") is True
+            and body.get("channel_id") == "@frammenti_pe",
+            f"status={r.status_code} body={body}",
+        )
 
-    print()
-    print("=" * 72)
-    print(f"PASS: {len(PASS)}")
-    print(f"FAIL: {len(FAIL)}")
-    for f in FAIL:
-        print(f"  - {f}")
-    return 0 if not FAIL else 1
+        # Cleanup: revert telegram_channel to empty for downstream tests
+        await db.user_settings.update_one(
+            {"user_id": "user_demo01"},
+            {"$set": {"telegram_channel": ""}},
+        )
+        r = await cx.get("/telegram/status", headers=HEADERS_AUTH)
+        body = r.json() if r.status_code == 200 else {}
+        record(
+            "Case 14c: cleanup — /telegram/status back to 'none'",
+            r.status_code == 200 and body.get("channel_source") == "none",
+            f"status={r.status_code} body={body}",
+        )
+
+    # =========== Summary ===========
+    print("\n" + "=" * 70)
+    total = len(results)
+    passed = sum(1 for _, ok, _ in results if ok)
+    failed = total - passed
+    print(f"TOTAL: {total}  PASS: {passed}  FAIL: {failed}")
+    if failed:
+        print("\nFailed cases:")
+        for name, ok, info in results:
+            if not ok:
+                print(f"  - {name}: {info}")
+    print("=" * 70)
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))

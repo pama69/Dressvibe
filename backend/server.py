@@ -7,7 +7,7 @@ import os
 import logging
 import asyncio
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -49,6 +49,20 @@ TELEGRAM_CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '')
 # URL button that opens the public landing page directly, so this variable
 # is no longer used anywhere in the code.
 TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET', '')
+
+# Resend email integration — used for email/password registration verification
+# and password reset OTPs. The key is loaded from .env (RESEND_API_KEY).
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+# Default mittente: free Resend sandbox domain. No DNS setup required for
+# development; for production a custom domain (dressvibe.app) should be
+# verified in the Resend dashboard.
+RESEND_FROM = os.environ.get('RESEND_FROM', 'DressVibe <onboarding@resend.dev>')
+if RESEND_API_KEY:
+    try:
+        import resend as _resend_lib
+        _resend_lib.api_key = RESEND_API_KEY
+    except Exception as _e:
+        logging.getLogger("server").warning(f"resend SDK init failed: {_e}")
 PUBLIC_BASE_URL = os.environ.get('PUBLIC_BASE_URL', '')
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
@@ -283,6 +297,341 @@ async def logout(authorization: Optional[str] = Header(None)):
     if authorization and authorization.startswith("Bearer "):
         token = authorization.replace("Bearer ", "", 1).strip()
         await db.user_sessions.delete_one({"session_token": token})
+    return {"ok": True}
+
+
+# ---------- Email / password authentication ----------
+# In parallel to the Emergent-managed Google OAuth, shop owners can also
+# register with any email address. The flow:
+#   1) POST /auth/email/register {email, password, name?} → 6-digit OTP
+#      mailed via Resend, user row created with is_verified=False.
+#   2) POST /auth/email/verify {email, code}             → activates the
+#      account and returns a session_token (same shape as Google flow).
+#   3) POST /auth/email/login {email, password}          → returns a fresh
+#      session_token. Refuses unverified users.
+#   4) POST /auth/email/forgot {email}                   → mails a reset code.
+#   5) POST /auth/email/reset {email, code, password}    → sets new password.
+#   6) POST /auth/email/resend-code {email, purpose}     → re-issues an OTP.
+
+import bcrypt as _bcrypt
+import secrets as _secrets
+
+_OTP_TTL = timedelta(minutes=15)
+_OTP_RESEND_COOLDOWN = timedelta(seconds=60)
+
+
+def _hash_password(p: str) -> str:
+    return _bcrypt.hashpw(p.encode("utf-8"), _bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def _verify_password(p: str, hashed: str) -> bool:
+    try:
+        return _bcrypt.checkpw(p.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def _generate_otp() -> str:
+    # 6-digit, zero-padded, cryptographically strong source
+    return f"{_secrets.randbelow(1_000_000):06d}"
+
+
+def _is_valid_email(s: str) -> bool:
+    import re as _re
+    if not s or len(s) > 254:
+        return False
+    return bool(_re.match(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$", s))
+
+
+def _is_strong_enough_password(p: str) -> bool:
+    # Light-touch: ≥8 chars. We keep MVP friction low — bcrypt cost handles
+    # offline brute force, server-side rate limiting handles online.
+    return isinstance(p, str) and len(p) >= 8
+
+
+def _send_email_sync(to: str, subject: str, html: str, text: str) -> bool:
+    """Call Resend in a blocking thread. Returns True on success."""
+    if not RESEND_API_KEY:
+        logger.warning(f"[email] RESEND_API_KEY not set — pretending to send to {to}: {subject}")
+        return False
+    try:
+        import resend as _r
+        _r.Emails.send({
+            "from": RESEND_FROM,
+            "to": [to],
+            "subject": subject,
+            "html": html,
+            "text": text,
+        })
+        return True
+    except Exception as e:
+        logger.error(f"[email] Resend send failed for {to}: {e}")
+        return False
+
+
+async def _send_email(to: str, subject: str, html: str, text: str) -> bool:
+    """Async wrapper so we don't block the event loop on Resend HTTP calls."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _send_email_sync, to, subject, html, text)
+
+
+def _otp_email_html(purpose_title: str, code: str, intro: str, expires_minutes: int = 15) -> tuple[str, str]:
+    """Return (html, plain_text) tuple for an OTP email — Italian copy."""
+    html = f"""<!doctype html>
+<html lang="it"><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#0b0b0b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;">
+  <div style="max-width:480px;margin:0 auto;padding:48px 28px;">
+    <div style="text-align:center;margin-bottom:36px;">
+      <div style="display:inline-block;width:48px;height:48px;border-radius:24px;background:linear-gradient(135deg,#E11D48,#9333EA);"></div>
+      <h1 style="margin:18px 0 4px;font-weight:300;font-size:28px;letter-spacing:1.5px;">DressVibe</h1>
+      <div style="width:48px;height:1px;background:#E11D48;margin:0 auto;"></div>
+    </div>
+    <h2 style="font-size:18px;font-weight:600;text-align:center;margin:0 0 12px;">{purpose_title}</h2>
+    <p style="font-size:14px;line-height:1.6;color:#cbd5e1;text-align:center;margin:0 0 24px;">{intro}</p>
+    <div style="background:#1a1a1a;border:1px solid #2a2a2a;padding:24px;text-align:center;margin:24px 0;">
+      <div style="font-size:11px;letter-spacing:2px;color:#9ca3af;text-transform:uppercase;margin-bottom:10px;">Codice di verifica</div>
+      <div style="font-size:40px;font-weight:700;letter-spacing:10px;color:#fff;font-family:'SF Mono',Menlo,Consolas,monospace;">{code}</div>
+    </div>
+    <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0;">Il codice è valido per {expires_minutes} minuti.</p>
+    <p style="font-size:11px;color:#64748b;text-align:center;margin:36px 0 0;">Se non hai richiesto questo codice, ignora questa email.</p>
+  </div>
+</body></html>"""
+    text = (
+        f"{purpose_title}\n\n"
+        f"{intro}\n\n"
+        f"Il tuo codice di verifica: {code}\n"
+        f"Valido per {expires_minutes} minuti.\n\n"
+        f"Se non hai richiesto questo codice, ignora questa email."
+    )
+    return html, text
+
+
+class _EmailRegisterPayload(BaseModel):
+    email: EmailStr
+    password: str
+    name: Optional[str] = None
+
+
+class _EmailVerifyPayload(BaseModel):
+    email: EmailStr
+    code: str
+
+
+class _EmailLoginPayload(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class _EmailForgotPayload(BaseModel):
+    email: EmailStr
+
+
+class _EmailResetPayload(BaseModel):
+    email: EmailStr
+    code: str
+    password: str
+
+
+class _EmailResendPayload(BaseModel):
+    email: EmailStr
+    purpose: str  # "verify" or "reset"
+
+
+async def _issue_session(user_id: str) -> str:
+    """Create a fresh session token bound to user_id and return it."""
+    token = _secrets.token_urlsafe(32)
+    await db.user_sessions.insert_one({
+        "session_token": token,
+        "user_id": user_id,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+        "created_at": datetime.now(timezone.utc),
+    })
+    return token
+
+
+@api_router.post("/auth/email/register")
+async def email_register(payload: _EmailRegisterPayload):
+    email = payload.email.lower().strip()
+    if not _is_valid_email(email):
+        raise HTTPException(status_code=400, detail="Indirizzo email non valido")
+    if not _is_strong_enough_password(payload.password):
+        raise HTTPException(status_code=400, detail="La password deve essere di almeno 8 caratteri")
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing and existing.get("is_verified"):
+        raise HTTPException(status_code=409, detail="Esiste già un account verificato per questa email. Accedi.")
+    # Either a new user or one whose previous verification expired. Re-issue
+    # a fresh OTP and a fresh password hash.
+    otp = _generate_otp()
+    now = datetime.now(timezone.utc)
+    expires = now + _OTP_TTL
+    pwd_hash = _hash_password(payload.password)
+    user_doc = {
+        "user_id": existing["user_id"] if existing else f"user_{uuid.uuid4().hex[:12]}",
+        "email": email,
+        "name": (payload.name or email.split("@")[0]).strip()[:80],
+        "picture": None,
+        "auth_provider": "email",
+        "password_hash": pwd_hash,
+        "is_verified": False,
+        "verification_code": otp,
+        "verification_expires_at": expires,
+        "verification_sent_at": now,
+        "created_at": existing.get("created_at") if existing else now,
+        "updated_at": now,
+    }
+    if existing:
+        await db.users.update_one({"email": email}, {"$set": user_doc})
+    else:
+        await db.users.insert_one(user_doc)
+    html, text = _otp_email_html(
+        "Conferma il tuo account",
+        otp,
+        "Benvenuto su DressVibe! Inserisci il codice qui sotto nell'app per attivare il tuo account.",
+    )
+    sent = await _send_email(email, "Conferma il tuo account DressVibe", html, text)
+    if not sent and not RESEND_API_KEY:
+        # Dev / staging without Resend — surface the OTP in the response so
+        # the developer can complete the flow without an inbox.
+        return {"ok": True, "dev_otp": otp, "note": "RESEND_API_KEY non configurato — OTP in response (solo dev)"}
+    return {"ok": True}
+
+
+@api_router.post("/auth/email/verify")
+async def email_verify(payload: _EmailVerifyPayload):
+    email = payload.email.lower().strip()
+    code = (payload.code or "").strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Email non registrata")
+    if user.get("is_verified"):
+        # Idempotent: produce a fresh session so the client can proceed.
+        token = await _issue_session(user["user_id"])
+        return {"session_token": token, "user": {"user_id": user["user_id"], "email": user["email"], "name": user.get("name"), "picture": user.get("picture")}}
+    if user.get("verification_code") != code:
+        raise HTTPException(status_code=400, detail="Codice non valido")
+    expires = user.get("verification_expires_at")
+    if expires and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if not expires or expires < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Codice scaduto. Richiedine uno nuovo.")
+    await db.users.update_one(
+        {"email": email},
+        {"$set": {"is_verified": True, "verified_at": datetime.now(timezone.utc)},
+         "$unset": {"verification_code": "", "verification_expires_at": "", "verification_sent_at": ""}},
+    )
+    token = await _issue_session(user["user_id"])
+    return {"session_token": token, "user": {"user_id": user["user_id"], "email": user["email"], "name": user.get("name"), "picture": user.get("picture")}}
+
+
+@api_router.post("/auth/email/login")
+async def email_login(payload: _EmailLoginPayload):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Email o password non corretti")
+    if not _verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Email o password non corretti")
+    if not user.get("is_verified"):
+        raise HTTPException(status_code=403, detail="Account non ancora verificato. Controlla la tua email.")
+    token = await _issue_session(user["user_id"])
+    return {"session_token": token, "user": {"user_id": user["user_id"], "email": user["email"], "name": user.get("name"), "picture": user.get("picture")}}
+
+
+@api_router.post("/auth/email/forgot")
+async def email_forgot(payload: _EmailForgotPayload):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    # Do NOT leak whether the email exists.
+    if user and user.get("password_hash"):
+        otp = _generate_otp()
+        now = datetime.now(timezone.utc)
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {
+                "reset_code": otp,
+                "reset_expires_at": now + _OTP_TTL,
+                "reset_sent_at": now,
+            }},
+        )
+        html, text = _otp_email_html(
+            "Reimposta la password",
+            otp,
+            "Hai richiesto di reimpostare la password. Inserisci il codice qui sotto nell'app per scegliere una nuova password.",
+        )
+        await _send_email(email, "Reimposta la tua password DressVibe", html, text)
+    return {"ok": True}
+
+
+@api_router.post("/auth/email/reset")
+async def email_reset(payload: _EmailResetPayload):
+    email = payload.email.lower().strip()
+    code = (payload.code or "").strip()
+    if not _is_strong_enough_password(payload.password):
+        raise HTTPException(status_code=400, detail="La password deve essere di almeno 8 caratteri")
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user or user.get("reset_code") != code:
+        raise HTTPException(status_code=400, detail="Codice non valido")
+    expires = user.get("reset_expires_at")
+    if expires and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if not expires or expires < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Codice scaduto. Richiedi un nuovo reset.")
+    await db.users.update_one(
+        {"email": email},
+        {"$set": {"password_hash": _hash_password(payload.password),
+                  "is_verified": True,
+                  "updated_at": datetime.now(timezone.utc)},
+         "$unset": {"reset_code": "", "reset_expires_at": "", "reset_sent_at": ""}},
+    )
+    return {"ok": True}
+
+
+@api_router.post("/auth/email/resend-code")
+async def email_resend_code(payload: _EmailResendPayload):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        # Don't leak existence — pretend success.
+        return {"ok": True}
+    now = datetime.now(timezone.utc)
+    # Cooldown to avoid spamming Resend.
+    cooldown_field = "verification_sent_at" if payload.purpose == "verify" else "reset_sent_at"
+    last = user.get(cooldown_field)
+    if last:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if now - last < _OTP_RESEND_COOLDOWN:
+            wait = int((_OTP_RESEND_COOLDOWN - (now - last)).total_seconds())
+            raise HTTPException(status_code=429, detail=f"Attendi {wait} secondi prima di richiedere un altro codice.")
+    otp = _generate_otp()
+    if payload.purpose == "verify":
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"verification_code": otp,
+                      "verification_expires_at": now + _OTP_TTL,
+                      "verification_sent_at": now}},
+        )
+        html, text = _otp_email_html(
+            "Conferma il tuo account",
+            otp,
+            "Ecco il nuovo codice per attivare il tuo account DressVibe.",
+        )
+        await _send_email(email, "Conferma il tuo account DressVibe", html, text)
+    elif payload.purpose == "reset":
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"reset_code": otp,
+                      "reset_expires_at": now + _OTP_TTL,
+                      "reset_sent_at": now}},
+        )
+        html, text = _otp_email_html(
+            "Reimposta la password",
+            otp,
+            "Ecco il nuovo codice per reimpostare la tua password DressVibe.",
+        )
+        await _send_email(email, "Reimposta la tua password DressVibe", html, text)
+    else:
+        raise HTTPException(status_code=400, detail="Purpose non valido")
     return {"ok": True}
 
 
@@ -1669,11 +2018,16 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
     if not TELEGRAM_BOT_TOKEN:
         raise HTTPException(status_code=503, detail="Telegram non configurato (token mancante)")
 
-    # Per-user channel override; falls back to the env default
+    # Per-user channel ONLY — the env-level default is intentionally NOT
+    # used as fallback any more: every shop owner must configure their own
+    # channel before they can publish.
     us = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
-    channel_id = (us.get("telegram_channel") or "").strip() or TELEGRAM_CHANNEL_ID
+    channel_id = (us.get("telegram_channel") or "").strip()
     if not channel_id:
-        raise HTTPException(status_code=503, detail="Nessun canale Telegram configurato. Imposta il canale nel Profilo.")
+        raise HTTPException(
+            status_code=400,
+            detail="Canale Telegram non inserito. Vai su Profilo → Impostazioni per configurare il tuo canale Telegram.",
+        )
 
     media_type = (payload.media_type or "photo").lower()
     if media_type == "video":
@@ -1948,10 +2302,12 @@ async def telegram_webhook(secret: str, request: Request):
 async def telegram_status(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    user_channel = (settings.get("telegram_channel") or "").strip()
     return {
-        "configured": bool(TELEGRAM_BOT_TOKEN and (settings.get("telegram_channel") or TELEGRAM_CHANNEL_ID)),
-        "channel_id": settings.get("telegram_channel") or TELEGRAM_CHANNEL_ID if TELEGRAM_BOT_TOKEN else None,
-        "channel_source": "user" if settings.get("telegram_channel") else "default",
+        # Now strictly per-user: every shop owner must set their own channel.
+        "configured": bool(TELEGRAM_BOT_TOKEN and user_channel),
+        "channel_id": user_channel if TELEGRAM_BOT_TOKEN else None,
+        "channel_source": "user" if user_channel else "none",
     }
 
 

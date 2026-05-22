@@ -74,6 +74,20 @@ export const api = {
   me: () => request<any>("/auth/me"),
   logout: () => request<any>("/auth/logout", { method: "POST" }),
 
+  // email/password auth
+  emailRegister: (body: { email: string; password: string; name?: string }) =>
+    request<{ ok: boolean; dev_otp?: string }>("/auth/email/register", { method: "POST", body }),
+  emailVerify: (body: { email: string; code: string }) =>
+    request<{ session_token: string; user: any }>("/auth/email/verify", { method: "POST", body }),
+  emailLogin: (body: { email: string; password: string }) =>
+    request<{ session_token: string; user: any }>("/auth/email/login", { method: "POST", body }),
+  emailForgot: (body: { email: string }) =>
+    request<{ ok: boolean }>("/auth/email/forgot", { method: "POST", body }),
+  emailReset: (body: { email: string; code: string; password: string }) =>
+    request<{ ok: boolean }>("/auth/email/reset", { method: "POST", body }),
+  emailResendCode: (body: { email: string; purpose: "verify" | "reset" }) =>
+    request<{ ok: boolean }>("/auth/email/resend-code", { method: "POST", body }),
+
   // garments
   listGarments: () => request<any[]>("/garments"),
   getGarment: (id: string) => request<any>(`/garments/${id}`),

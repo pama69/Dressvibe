@@ -12,6 +12,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 
@@ -20,6 +21,7 @@ const HERO_BG =
 
 export default function Login() {
   const { signIn } = useAuth();
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
 
   const handleSignIn = async () => {
@@ -75,6 +77,33 @@ export default function Login() {
                 <Text style={styles.googleText}>Accedi con Google</Text>
               </>
             )}
+          </TouchableOpacity>
+
+          {/* OR divider */}
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>oppure</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push("/email-auth")}
+            testID="login-email-button"
+            style={styles.emailBtn}
+          >
+            <Ionicons name="mail-outline" size={18} color={theme.colors.text} />
+            <Text style={styles.emailBtnText}>Accedi con Email</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => router.push("/email-auth?mode=register")}
+            testID="login-register-link"
+          >
+            <Text style={styles.registerLink}>
+              Non hai un account?  <Text style={styles.registerLinkBold}>Registrati</Text>
+            </Text>
           </TouchableOpacity>
 
           <View style={styles.magicHint}>
@@ -145,6 +174,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     letterSpacing: 0.3,
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginVertical: 6,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.15)",
+  },
+  dividerText: {
+    color: theme.colors.textMuted,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+  },
+  emailBtn: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  emailBtnText: {
+    color: theme.colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  registerLink: {
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    textAlign: "center",
+    letterSpacing: 0.3,
+  },
+  registerLinkBold: {
+    color: theme.colors.primary,
+    fontWeight: "700",
   },
   magicHint: { flexDirection: "row", alignItems: "center", gap: 8 },
   dot: { width: 8, height: 8, borderRadius: 999 },

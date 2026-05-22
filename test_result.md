@@ -672,6 +672,134 @@ test_plan:
   test_priority: "high_first"
 
 backend:
+  - task: "Email/password auth (register/verify/login/forgot/reset/resend-code)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Full email/password auth flow verified via /app/backend_test.py
+          against http://localhost:8001/api. OTPs read directly from
+          MongoDB users collection (verification_code / reset_code). 25/25
+          email-auth-related cases PASS.
+
+          Cases:
+            1)  POST /auth/email/register {email,password,name} → 200 {ok:true}.
+                Row created with is_verified=False, 6-digit verification_code,
+                verification_expires_at, verification_sent_at, password_hash. ✅
+            2)  Weak password (<8 chars) → 400 "La password deve essere di
+                almeno 8 caratteri" ✅
+            3)  Invalid email "not-an-email" → 422 (Pydantic EmailStr) ✅
+            4)  POST /auth/email/verify wrong code → 400 "Codice non valido" ✅
+            5)  POST /auth/email/verify correct code → 200 with session_token
+                + user payload. DB row updated: is_verified=True,
+                verification_code unset. session_token works on /auth/me. ✅
+            6)  Re-register a verified email → 409 "Esiste già un account
+                verificato..." ✅
+            7)  POST /auth/email/login correct creds → 200 + session_token,
+                token works on /auth/me ✅
+            8)  Login wrong password → 401 "Email o password non corretti" ✅
+            9)  Login unverified user → 403 "Account non ancora verificato" ✅
+           10)  POST /auth/email/forgot known email → 200; reset_code (6
+                digits) stored in DB with reset_expires_at + reset_sent_at.
+                Unknown email also returns 200 (no enumeration). ✅
+           11)  POST /auth/email/reset wrong code → 400; correct code → 200.
+                Old password no longer works (401), new password works (200
+                + session_token). ✅
+           12)  POST /auth/email/resend-code:
+                   * immediately after register → 429 "Attendi NN secondi..."
+                     (60-second cooldown verified) ✅
+                   * invalid purpose → 400 "Purpose non valido" ✅
+                   * unknown email → 200 (no enumeration) ✅
+                   * after clearing verification_sent_at in DB → 200 and
+                     verification_code field rotates to a new value ✅
+
+          Notes:
+            * RESEND_API_KEY is configured but only verified for
+              pama69@gmail.com — Resend rejected the test+UUID@example.it
+              addresses with "You can only send testing emails to your own
+              email address". The endpoints still return 200 because the
+              send is best-effort; OTPs were read from MongoDB as
+              instructed. This is expected behaviour for dev/testing
+              environments without a verified Resend domain.
+            * bcrypt rounds=12, sessions issued via secrets.token_urlsafe(32)
+              with 30-day expiry. All session tokens returned by verify/
+              login were accepted by get_current_user on /auth/me.
+
+  - task: "Telegram strict per-user channel (publish 400 / status channel_source)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Verified the new strict per-user telegram_channel behaviour via
+          /app/backend_test.py against http://localhost:8001/api with
+          Bearer test_session_screen (user_demo01). 4/4 Telegram strict
+          cases PASS.
+
+          Setup: forced db.user_settings.telegram_channel="" for user_demo01.
+
+          Cases:
+           13a) GET /api/telegram/status → 200 with
+                  {"configured": false, "channel_id": "",
+                   "channel_source": "none"}
+                — no more "default" source (env-level default is no longer
+                used as fallback). ✅
+           13b) POST /api/telegram/publish {image_base64, media_type:"photo",
+                caption:"test"} (no channel set) → 400 with detail
+                  "Canale Telegram non inserito. Vai su Profilo →
+                   Impostazioni per configurare il tuo canale Telegram."
+                The check at server.py L2024-L2030 correctly fires BEFORE
+                any other validation (no more env fallback). ✅
+           14a) PUT /api/user-settings {"telegram_channel":"@frammenti_pe"}
+                → 200, normalized and stored as "@frammenti_pe" ✅
+           14b) GET /api/telegram/status → 200 with
+                  {"configured": true, "channel_id": "@frammenti_pe",
+                   "channel_source": "user"} ✅
+           14c) Cleanup: reset telegram_channel to "" and re-verify
+                channel_source flips back to "none" ✅
+
+          The L2304-L2311 status endpoint correctly emits "user"/"none"
+          (never "default"), matching the new strict spec.
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      Email/password auth + Telegram strict validation: 29/29 PASS via
+      /app/backend_test.py against http://localhost:8001/api. Test runner
+      reads OTPs directly from MongoDB users collection
+      (verification_code / reset_code) as specified.
+
+      Email auth (25 cases): register / verify / login / forgot / reset /
+      resend-code all work as documented. Validation errors (weak password,
+      invalid email, wrong code, wrong password, unverified login, duplicate
+      verified email) return the correct status codes and Italian messages.
+      Cooldown on resend-code enforces 60s. No email-existence leakage on
+      forgot/resend (unknown emails return 200). Session tokens returned
+      by verify/login work on /auth/me.
+
+      Telegram strict (4 cases): /api/telegram/status now reports
+      channel_source="none" when no per-user channel is set, and "user"
+      once one is configured — env-level default is no longer used as
+      fallback. /api/telegram/publish without a channel returns 400
+      "Canale Telegram non inserito" before any other validation.
+
+      Note: Resend rejected the sandbox test+UUID@example.it addresses
+      ("You can only send testing emails to your own email address"); the
+      backend handles this gracefully (returns 200, swallows the error).
+      In production a verified Resend domain is required. Nothing to fix.
+
+backend:
   - task: "Performance: thumbnails + lean list endpoints + orphan cleanup + backfill"
     implemented: true
     working: true
