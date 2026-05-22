@@ -99,7 +99,7 @@ export default function History() {
                 style={styles.rowInner}
               >
                 {item.thumbnail ? (
-                  <Image source={{ uri: `data:image/png;base64,${item.thumbnail}` }} style={styles.thumb} />
+                  <Image source={{ uri: `data:image/jpeg;base64,${item.thumbnail}` }} style={styles.thumb} />
                 ) : (
                   <View style={[styles.thumb, styles.thumbEmpty]}>
                     <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />

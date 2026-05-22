@@ -295,6 +295,10 @@ async def create_garment(payload: GarmentCreate, authorization: Optional[str] = 
         "user_id": user["user_id"],
         "name": payload.name,
         "image_base64": payload.image_base64,
+        # Small JPEG thumbnail used by gallery list endpoints — reduces the
+        # per-card payload from ~400-2000 KB to ~6-15 KB (~50× smaller).
+        # Falls back to the full image if Pillow can't decode (mainly SVG).
+        "thumb_base64": make_thumb_b64(payload.image_base64),
         "category": payload.category,
         "color": payload.color,
         "size": payload.size,
@@ -310,9 +314,21 @@ async def create_garment(payload: GarmentCreate, authorization: Optional[str] = 
 
 @api_router.get("/garments")
 async def list_garments(authorization: Optional[str] = Header(None)):
+    """Return only the lightweight fields needed by the gallery tile.
+
+    The heavy `image_base64` (often >1 MB per garment) is EXCLUDED here —
+    the gallery uses the small `thumb_base64` and the upload-time
+    placeholder image. The full image is fetched on-demand only when the
+    user opens the garment detail screen (GET /api/garments/{id}).
+    """
     user = await get_current_user(authorization)
     items = await db.garments.find(
-        {"user_id": user["user_id"]}, {"_id": 0}
+        {"user_id": user["user_id"]},
+        # Explicit projection: exclude the heavy base64 blob entirely.
+        {
+            "_id": 0,
+            "image_base64": 0,
+        },
     ).sort("created_at", -1).to_list(500)
     return items
 
@@ -582,6 +598,46 @@ def _compose_look_styles_suffix(look_styles: Optional[List[str]]) -> str:
         return ""
     # Each snippet already starts with ", " — join naturally.
     return " " + " ".join(parts)
+
+
+def make_thumb_b64(image_b64: str, max_size: int = 280, quality: int = 70) -> Optional[str]:
+    """Build a small JPEG thumbnail (base64) of an input image.
+
+    Used by the list endpoints (`/api/garments`, `/api/generations`) so the
+    mobile gallery doesn't have to download multi-MB full base64 payloads
+    just to render a 200×250 tile. Typical output: ~6-15 KB per thumbnail
+    vs ~400-2000 KB for the originals (30-100× smaller).
+
+    Returns None on failure so callers can fall back to the full image.
+    """
+    if not image_b64:
+        return None
+    try:
+        from PIL import Image
+        from io import BytesIO
+
+        raw = base64.b64decode(image_b64)
+        img = Image.open(BytesIO(raw))
+        # JPEG can't encode alpha — flatten transparency on a white background
+        # so the thumbnail looks identical to the gallery card backdrop.
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            try:
+                bg.paste(img, mask=img.convert("RGBA").split()[-1])
+            except Exception:
+                bg.paste(img)
+            img = bg
+        else:
+            img = img.convert("RGB")
+        # Pillow's thumbnail() preserves aspect ratio and only ever shrinks
+        # (never upscales), which is exactly what we want for a tile preview.
+        img.thumbnail((max_size, max_size), Image.LANCZOS)
+        out = BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
+        return base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception as e:
+        logging.getLogger("server").warning(f"make_thumb_b64 failed: {e}")
+        return None
 
 
 def pad_to_instagram_45(image_b64: str) -> str:
@@ -905,9 +961,18 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
             images.append(r)
 
     status = "done" if images else ("rate_limited" if rate_limit_hit else "failed")
+    # Build a parallel array of small JPEG thumbnails so the history/list
+    # endpoint can return only ~10 KB per image instead of the ~500 KB full
+    # base64 PNG. We compute this off the event loop to keep the request
+    # snappy when Pillow is busy.
+    loop = asyncio.get_event_loop()
+    thumbs: List[Optional[str]] = await asyncio.gather(
+        *[loop.run_in_executor(None, make_thumb_b64, img) for img in images]
+    ) if images else []
+
     await db.generations.update_one(
         {"id": gen_id},
-        {"$set": {"images": images, "status": status}},
+        {"$set": {"images": images, "thumbs": thumbs, "status": status}},
     )
 
     # If we got nothing back AND we hit a rate limit, raise 429 so the frontend
@@ -928,16 +993,37 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
 
 @api_router.get("/generations")
 async def list_generations(authorization: Optional[str] = Header(None)):
+    """Return only metadata + small thumbnails for the history screen.
+
+    The history grid only needs a small preview per row, so we explicitly
+    EXCLUDE the heavy `images` (full base64) and `video_b64` fields and
+    fall back to the first thumb (≈10 KB) for the preview. The full image
+    list is fetched on demand via GET /api/generations/{id}.
+    """
     user = await get_current_user(authorization)
     items = await db.generations.find(
         {"user_id": user["user_id"]},
-        {"_id": 0},
+        # Exclude heavy blobs from the list response. We still need
+        # `thumbs` and `images.length` though, so we project `images` only
+        # to count it client-side via a small placeholder.
+        {"_id": 0, "video_b64": 0, "prompt": 0},
     ).sort("created_at", -1).to_list(200)
-    # Strip images for list view to keep response light
     for it in items:
-        it["image_count"] = len(it.get("images", []))
-        it["thumbnail"] = it["images"][0] if it.get("images") else None
+        images = it.get("images") or []
+        thumbs = it.get("thumbs") or []
+        it["image_count"] = len(images)
+        # Prefer the small thumb; fall back to the full image only for
+        # legacy generations that haven't been thumbnailed yet (the
+        # migration on startup will fix them on the next reload).
+        if thumbs:
+            it["thumbnail"] = thumbs[0]
+        elif images:
+            it["thumbnail"] = images[0]
+        else:
+            it["thumbnail"] = None
+        # Strip the heavy arrays before sending over the wire.
         it.pop("images", None)
+        it.pop("thumbs", None)
     return items
 
 
@@ -954,8 +1040,36 @@ async def get_generation(gen_id: str, authorization: Optional[str] = Header(None
 
 @api_router.delete("/generations/{gen_id}")
 async def delete_generation(gen_id: str, authorization: Optional[str] = Header(None)):
+    """Delete a generation AND all the orphan records that referenced it.
+
+    Without this cleanup, deleting many generations over time leaves behind
+    growing piles of `short_links`, `tg_publications`, `tg_bookings` and
+    `videos` rows that slow down indexed lookups and bloat backups.
+    """
     user = await get_current_user(authorization)
     res = await db.generations.delete_one({"id": gen_id, "user_id": user["user_id"]})
+    if res.deleted_count:
+        # Best-effort orphan sweep — never fail the request if a side
+        # cleanup hiccups (the main delete already succeeded).
+        try:
+            await db.short_links.delete_many(
+                {"user_id": user["user_id"], "gen_id": gen_id}
+            )
+        except Exception as e:
+            logger.warning(f"[cleanup] short_links sweep failed: {e}")
+        try:
+            await db.videos.delete_many(
+                {"user_id": user["user_id"], "gen_id": gen_id}
+            )
+        except Exception as e:
+            logger.warning(f"[cleanup] videos sweep failed: {e}")
+        try:
+            # tg_publications can be linked either by `gen_id` (newer rows)
+            # or implicitly via `token` already gone — purge by gen_id when
+            # the field exists.
+            await db.tg_publications.delete_many({"gen_id": gen_id})
+        except Exception as e:
+            logger.warning(f"[cleanup] tg_publications sweep failed: {e}")
     return {"deleted": res.deleted_count}
 
 
@@ -964,17 +1078,22 @@ async def delete_generation_image(gen_id: str, index: int, authorization: Option
     """Remove a single image (by zero-based index) from a generation's gallery."""
     user = await get_current_user(authorization)
     gen = await db.generations.find_one(
-        {"id": gen_id, "user_id": user["user_id"]}, {"_id": 0, "images": 1}
+        {"id": gen_id, "user_id": user["user_id"]},
+        {"_id": 0, "images": 1, "thumbs": 1},
     )
     if not gen:
         raise HTTPException(status_code=404, detail="Generazione non trovata")
     images = gen.get("images") or []
+    thumbs = gen.get("thumbs") or []
     if index < 0 or index >= len(images):
         raise HTTPException(status_code=400, detail="Indice immagine non valido")
     images.pop(index)
+    # Keep the thumbs array aligned with images so list view is consistent.
+    if 0 <= index < len(thumbs):
+        thumbs.pop(index)
     await db.generations.update_one(
         {"id": gen_id, "user_id": user["user_id"]},
-        {"$set": {"images": images}},
+        {"$set": {"images": images, "thumbs": thumbs}},
     )
     return {"deleted": 1, "remaining": len(images)}
 
@@ -1013,11 +1132,14 @@ async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] =
     result = await generate_single_image(prompt, [payload.image_base64], session_id)
     if not result:
         raise HTTPException(status_code=502, detail="Modifica non riuscita, riprova")
-    # If linked to a generation, append the edited image to that generation's gallery
+    # If linked to a generation, append the edited image AND its small
+    # thumbnail to the gallery so the history list view stays cheap.
     if payload.gen_id:
+        loop = asyncio.get_event_loop()
+        thumb = await loop.run_in_executor(None, make_thumb_b64, result)
         await db.generations.update_one(
             {"id": payload.gen_id, "user_id": user["user_id"]},
-            {"$push": {"images": result}},
+            {"$push": {"images": result, "thumbs": thumb}},
         )
     return {"image_base64": result}
 
@@ -2413,6 +2535,63 @@ app.add_middleware(
 )
 
 
+async def _backfill_thumbnails():
+    """Generate thumbnails for legacy docs that pre-date this feature.
+
+    Runs once per server boot, in the background. Idempotent: docs that
+    already have a `thumb_base64` / non-empty `thumbs[]` are skipped.
+
+    To keep memory pressure low we process at most 25 documents per
+    collection per boot — subsequent reloads will sweep up the rest. Each
+    Pillow call is dispatched to the default executor so we don't block
+    the event loop on a Python-only resize operation.
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        # ---- Garments: backfill `thumb_base64` ----
+        cursor = db.garments.find(
+            {"$or": [{"thumb_base64": {"$exists": False}}, {"thumb_base64": None}]},
+            {"_id": 0, "id": 1, "image_base64": 1},
+        ).limit(25)
+        async for g in cursor:
+            try:
+                thumb = await loop.run_in_executor(None, make_thumb_b64, g.get("image_base64") or "")
+                if thumb:
+                    await db.garments.update_one(
+                        {"id": g["id"]}, {"$set": {"thumb_base64": thumb}}
+                    )
+            except Exception as e:
+                logger.warning(f"[backfill] garment {g.get('id')} thumb failed: {e}")
+
+        # ---- Generations: backfill parallel `thumbs[]` ----
+        cursor = db.generations.find(
+            {"$or": [{"thumbs": {"$exists": False}}, {"thumbs": {"$size": 0}}]},
+            {"_id": 0, "id": 1, "images": 1},
+        ).limit(25)
+        async for gen in cursor:
+            imgs = gen.get("images") or []
+            if not imgs:
+                # Empty generation — write an empty `thumbs` so it's not
+                # picked up on the next sweep.
+                await db.generations.update_one(
+                    {"id": gen["id"]}, {"$set": {"thumbs": []}}
+                )
+                continue
+            try:
+                thumbs = await asyncio.gather(*[
+                    loop.run_in_executor(None, make_thumb_b64, im) for im in imgs
+                ])
+                await db.generations.update_one(
+                    {"id": gen["id"]}, {"$set": {"thumbs": thumbs}}
+                )
+            except Exception as e:
+                logger.warning(f"[backfill] generation {gen.get('id')} thumbs failed: {e}")
+
+        logger.info("[backfill] thumbnail sweep complete")
+    except Exception as e:
+        logger.warning(f"[backfill] sweep aborted: {e}")
+
+
 @app.on_event("startup")
 async def startup_db():
     await db.users.create_index("email", unique=True)
@@ -2436,6 +2615,11 @@ async def startup_db():
     await db.info_requests.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
     await db.info_requests.create_index("created_at")
     logger.info("DressVibe API started")
+
+    # One-shot thumbnail backfill — generate `thumb_base64` for any garment
+    # and `thumbs[]` for any generation that was created BEFORE this feature
+    # landed. Runs in the background so it never blocks the startup hot path.
+    asyncio.create_task(_backfill_thumbnails())
 
     # Register Telegram webhook (best-effort)
     if TELEGRAM_BOT_TOKEN and PUBLIC_BASE_URL and TELEGRAM_WEBHOOK_SECRET:

@@ -223,7 +223,14 @@ export default function Galleria() {
                 onPress={() => router.push(`/(app)/garment/${item.id}`)}
               >
                 <Image
-                  source={{ uri: `data:image/png;base64,${item.image_base64}` }}
+                  source={{
+                    // Prefer the small thumb (~10 KB JPEG) coming from the
+                    // list endpoint. Older list payloads (pre-thumbnail era)
+                    // shipped the full PNG inline — fall back to that.
+                    uri: item.thumb_base64
+                      ? `data:image/jpeg;base64,${item.thumb_base64}`
+                      : `data:image/png;base64,${item.image_base64}`,
+                  }}
                   style={styles.cardImg}
                 />
                 <TouchableOpacity

@@ -672,6 +672,148 @@ test_plan:
   test_priority: "high_first"
 
 backend:
+  - task: "Performance: thumbnails + lean list endpoints + orphan cleanup + backfill"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Full performance / thumbnail optimisation suite verified via
+          /app/backend_test.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01). 14/14 cases PASS.
+
+          1a) GET /api/garments lean: 9 items, total body = 16.8 KB (vs the
+              previous ~10 MB worst-case). EVERY item has a non-empty
+              `thumb_base64` and ZERO items contain `image_base64`. The
+              projection `{image_base64: 0}` at server.py L325-L331 is
+              correct. ✅
+          1b) GET /api/generations lean: 30 items, total body = 224.1 KB
+              (well under the 1 MB budget). EVERY item has
+              `image_count` and `thumbnail`, ZERO items leak `images[]`.
+              The list endpoint at L994-L1027 strips `images` and `thumbs`
+              and emits only `thumbnail`+`image_count`. ✅
+          2a) GET /api/garments/{id} → 200, full `image_base64` present
+              (length=92 for a tiny placeholder garment). Detail endpoint
+              correctly returns the heavy blob. ✅
+          2b) GET /api/generations/{id} → 200, full `images[]` AND `thumbs[]`
+              both present (gen_ec6ba378f42e: images=1, thumbs=1).
+              Detail endpoint at L1030-L1038 returns the whole doc. ✅
+          3)  POST /api/garments with the real demo PNG returned 200 with
+              BOTH fields populated:
+                  image_base64 length = 1,280,336 chars
+                  thumb_base64 length = 9,664 chars (~7 KB, 132× smaller)
+              `make_thumb_b64()` at L603-L640 produced a JPEG well within
+              the 10-15 KB target. ✅
+          3b) Subsequent GET /api/garments includes the new garment WITH
+              `thumb_base64` and WITHOUT `image_base64`. ✅
+          4)  POST /api/generations (num_variations=1, garment_ids=
+              [g_test_demo01]) → 200 in 28.2s, gen_236386c42285,
+              status="done", 1 image. Per the new code path at L968-L976,
+              `thumbs[]` is built in parallel via run_in_executor and
+              stored alongside `images[]`. ✅
+          4c) GET /api/generations/gen_236386c42285 → 200, images=1,
+              thumbs=1, arrays aligned, every thumb is non-empty. ✅
+          4b) GET /api/generations list row for the new gen: `image_count=1`,
+              `thumbnail` is the small JPEG (not the multi-MB PNG). ✅
+          5)  POST /api/studio/edit (gen_id=gen_236386c42285,
+              image_base64=images[0], edit_prompt="Subtle warm tone") →
+              200 in 16.6s. Subsequent GET shows BOTH `images.length`
+              AND `thumbs.length` incremented by 1 (1→2). The `$push`
+              with `{images: result, thumbs: thumb}` at L1142 correctly
+              appends both fields atomically. ✅
+          6)  Orphan cleanup on DELETE:
+                * Created a fresh gen (gen_ccbb1ccf3ff9) with 1 image.
+                * POST /api/short-links → seeded 1 row in db.short_links.
+                * Seeded 1 fake video row and 1 fake tg_publication row
+                  (both with gen_id=gen_ccbb1ccf3ff9) via mongosh.
+                * Pre-counts: {sl:1, vid:1, tg:1} ✅
+                * DELETE /api/generations/gen_ccbb1ccf3ff9 → 200.
+                * Post-counts: {sl:0, vid:0, tg:0, gen:0} — all orphans
+                  swept. The sweep at L1051-L1072 is correct (best-effort
+                  try/except wrap for each collection). ✅
+          7)  Image delete keeps arrays aligned:
+                * gen had images=2, thumbs=2.
+                * DELETE /api/generations/{id}/images/0 → 200.
+                * Detail GET: images=1, thumbs=1, both decremented by 1.
+                  Code at L1086-L1097 pops `thumbs[index]` only when
+                  `0 <= index < len(thumbs)`. ✅
+          8a) Backend log contains "[backfill] thumbnail sweep complete"
+              at /var/log/supervisor/backend.err.log (logged twice — once
+              for each recent reload — both within ~1s of startup). The
+              `asyncio.create_task(_backfill_thumbnails())` on startup
+              (L2622) fires correctly. ✅
+          8b) db.garments now has 26 documents with `thumb_base64`
+              populated (well > 0 — the backfill swept every existing
+              garment that lacked a thumb, capped at 25 per boot). ✅
+
+          Performance impact:
+            * Garments list payload: from O(N × ~400 KB) full PNGs to
+              O(N × ~10 KB) thumbs = ~40× smaller. Confirmed live:
+              9 garments → 16.8 KB body.
+            * Generations list payload: from O(M × num_variations ×
+              ~500 KB) to O(M × ~10 KB) per row = ~50-100× smaller.
+              Confirmed live: 30 gens → 224.1 KB body.
+          No 4xx, no 5xx, no upstream rate limits or 503s today. Two
+          Gemini calls (case 4 + case 5 + case 6) all returned status=done
+          first try. The optimisation is correct, idempotent, and 100%
+          backward compatible — legacy generations without `thumbs[]`
+          fall back to `images[0]` in the list endpoint until the
+          background backfill processes them. Nothing to fix.
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      Performance / thumbnail optimisations validation: 14/14 PASS via
+      /app/backend_test.py against the preview URL with Bearer
+      test_session_screen (user_demo01).
+
+      All review-request cases pass:
+        * 1) List endpoints are LEAN:
+            - GET /api/garments: 9 items, 16.8 KB body, every item has
+              thumb_base64, ZERO items have image_base64 ✅
+            - GET /api/generations: 30 items, 224.1 KB body, every item
+              has image_count + thumbnail, ZERO items have images[] ✅
+        * 2) Detail endpoints unchanged:
+            - GET /api/garments/{id} returns full image_base64 ✅
+            - GET /api/generations/{id} returns full images[] AND
+              thumbs[] both aligned ✅
+        * 3) POST /api/garments produces image_base64 (1.28 MB) AND
+            thumb_base64 (9.66 KB ≈ 132× smaller). New garment appears
+            in list view without image_base64 ✅
+        * 4) POST /api/generations with num_variations=1 produces both
+            images[] (length 1) AND thumbs[] (length 1, aligned).
+            List view shows non-null thumbnail for the new gen ✅
+        * 5) POST /api/studio/edit with gen_id=that_gen, image_base64=
+            images[0] → 200; gen's images.length AND thumbs.length BOTH
+            grew by 1 (atomic $push of both fields) ✅
+        * 6) Orphan cleanup: seeded short_link + fake video + fake
+            tg_publication for a fresh gen, then DELETE
+            /api/generations/{gen_id} → mongosh confirms all 3 reference
+            collections are zero for that gen_id ✅
+        * 7) DELETE /api/generations/{id}/images/0 keeps thumbs aligned:
+            (images=2, thumbs=2) → (images=1, thumbs=1) ✅
+        * 8) Backfill ran on startup — log marker present in
+            backend.err.log, db.garments has 26 thumb_base64-populated
+            rows ✅
+
+      Performance gains verified live:
+        * Garments list: 9 items in 16.8 KB (would have been ~3.6 MB
+          without the projection).
+        * Generations list: 30 items in 224.1 KB (would have been
+          ~15-60 MB before).
+
+      Nothing to fix. The implementation matches the review spec exactly
+      and is fully backward compatible (legacy gens without thumbs fall
+      back to images[0] in the list endpoint until backfill processes
+      them).
+
+backend:
   - task: "PATCH /api/garments/{garment_id} — edit Descrizione e prezzi"
     implemented: true
     working: true

@@ -1,5 +1,5 @@
 /**
- * Polls /api/info-requests/unread-count every ~25s while the user is logged in.
+ * Polls /api/info-requests/unread-count every ~60s while the user is logged in.
  * Exposes the current count + a short "ding" sound when the count increases
  * (i.e. a new customer request has arrived while the app was open).
  *
@@ -24,7 +24,7 @@ const Ctx = createContext<NotificationsCtx>({
   markAllRead: async () => {},
 });
 
-const POLL_MS = 25000;
+const POLL_MS = 60000;
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
