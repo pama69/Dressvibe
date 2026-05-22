@@ -33,6 +33,37 @@ const QUICK_EDITS = [
   { label: "Sfondo nero", prompt: "Replace the background with a pure black studio backdrop, cinematic lighting." },
 ];
 
+// Aesthetic "look" presets — same 5 styles offered in the Generation panel,
+// re-framed here as edit prompts that re-render the existing photo while
+// keeping the subject (model, outfit, pose, composition) untouched.
+const LOOK_PRESETS: { id: string; label: string; emoji: string; prompt: string }[] = [
+  {
+    id: "warm", label: "Caldo", emoji: "🔆",
+    prompt:
+      "Re-render this photo with warm, soft natural lighting coming from a side window: gentle golden-hour glow, soft volume on the body and fabric, light natural shadows, realistic depth, elegant lifestyle look. KEEP the model, outfit, pose, framing and overall composition EXACTLY the same — only change the lighting and color mood.",
+  },
+  {
+    id: "depth", label: "Profondo", emoji: "🎯",
+    prompt:
+      "Re-render this photo as if shot from a slightly lower three-quarter angle, with a natural perspective that elongates the figure. Add gentle background bokeh (shallow depth of field) and a clean professional modern look. KEEP the model, outfit and pose EXACTLY the same — only modify the apparent angle and background blur.",
+  },
+  {
+    id: "vivid", label: "Vivido", emoji: "🎨",
+    prompt:
+      "Re-grade this photo with vivid, fabric-faithful colors and balanced contrast: rich but realistic tones, soft diffused light that brings out the texture of the fabric, fresh commercial atmosphere, premium photo quality. KEEP the model, outfit, pose and composition EXACTLY the same — only change the color grading and tonal balance.",
+  },
+  {
+    id: "dynamic", label: "Dinamico", emoji: "💨",
+    prompt:
+      "Re-render this photo adding subtle natural movement: hair or fabric gently moving in a soft breeze, positive flowing energy, natural light, real-life feel without exaggeration, clean editorial style. KEEP the model, outfit and overall framing EXACTLY the same — only add the subtle motion and energy.",
+  },
+  {
+    id: "premium", label: "Premium", emoji: "💎",
+    prompt:
+      "Re-render this photo with a minimal setting and slightly blurred neutral background, elegant yet warm studio lighting, balanced composition, high-end fashion catalog look — very appealing for social media. KEEP the model, outfit and pose EXACTLY the same — only change the background and lighting style.",
+  },
+];
+
 export default function Studio() {
   const { id, index } = useLocalSearchParams<{ id: string; index: string }>();
   const router = useRouter();
@@ -512,6 +543,32 @@ export default function Studio() {
               </LinearGradient>
             </TouchableOpacity>
           </View>
+
+          {/* Cambia look — 5 preset estetici che ri-renderizzano la foto
+              mantenendo modello e outfit. Stesso set di stili offerto nel
+              pannello di generazione, ma riformulato come edit prompts. */}
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>✨ Cambia look</Text>
+            <Text style={s.lookHint}>
+              Cinque stili pronti per ri-renderizzare la foto. Modello e outfit restano identici — cambia solo l'estetica (luce, colore, prospettiva, atmosfera).
+            </Text>
+            <View style={s.lookGrid}>
+              {LOOK_PRESETS.map((lp) => (
+                <TouchableOpacity
+                  key={lp.id}
+                  onPress={() => applyEdit(lp.prompt)}
+                  disabled={busy}
+                  style={[s.lookBtn, busy && { opacity: 0.45 }]}
+                  activeOpacity={0.85}
+                  testID={`studio-look-${lp.id}`}
+                >
+                  <Text style={s.lookEmoji}>{lp.emoji}</Text>
+                  <Text style={s.lookLabel}>{lp.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           {/* Descrizione Post — usata sia per Telegram che per WhatsApp */}
           <View style={s.section}>
             <Text style={s.sectionLabel}>📝 Descrizione Post</Text>
@@ -699,5 +756,24 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(16,185,129,0.08)",
   },
   editedText: { color: theme.colors.success, fontSize: 12, flex: 1 },
+  // Cambia look (Studio)
+  lookHint: {
+    color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: -2,
+  },
+  lookGrid: {
+    flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4,
+  },
+  lookBtn: {
+    flexBasis: "31%", flexGrow: 1,
+    paddingVertical: 14, paddingHorizontal: 8,
+    borderWidth: 1, borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    alignItems: "center", justifyContent: "center", gap: 4,
+    minWidth: 90,
+  },
+  lookEmoji: { fontSize: 22 },
+  lookLabel: {
+    color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.3,
+  },
 });
 

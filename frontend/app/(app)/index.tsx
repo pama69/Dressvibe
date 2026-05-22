@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,15 +9,23 @@ import {
   RefreshControl,
   ActivityIndicator,
   useWindowDimensions,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api/client";
-import { theme } from "@/src/theme";
+import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
 import { useNotifications } from "@/src/contexts/NotificationsContext";
+
+// Module-level flag: the welcome splash should appear only the first time
+// the user lands on the gallery during a session. Tabbing away and coming
+// back should NOT re-trigger it.
+let SPLASH_SHOWN_ONCE = false;
 
 type Garment = {
   id: string;
@@ -50,6 +58,39 @@ export default function Galleria() {
   const numColumns = colsFor(winW);
   const tileW = Math.floor((winW - PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
   const tileH = Math.round(tileW / 0.78);
+
+  // Welcome splash — shown only the first time per session.
+  const [showSplash, setShowSplash] = useState(!SPLASH_SHOWN_ONCE);
+  const splashFade = useRef(new Animated.Value(1)).current;
+  const splashPulse = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!showSplash) return;
+    // Soft pulsing animation on the logo
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(splashPulse, {
+          toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true,
+        }),
+        Animated.timing(splashPulse, {
+          toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true,
+        }),
+      ])
+    );
+    pulseLoop.start();
+    // Auto-hide after 2.4s with a smooth fade
+    const t = setTimeout(() => {
+      Animated.timing(splashFade, {
+        toValue: 0, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }).start(() => {
+        SPLASH_SHOWN_ONCE = true;
+        setShowSplash(false);
+        pulseLoop.stop();
+      });
+    }, 2400);
+    return () => { clearTimeout(t); pulseLoop.stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSplash]);
 
   const load = useCallback(async () => {
     try {
@@ -197,15 +238,58 @@ export default function Galleria() {
       )}
 
       <TouchableOpacity
-        style={styles.generateCta}
-        onPress={() => router.push("/(app)/generate")}
-        testID="cta-generate"
+        style={styles.uploadFabBig}
+        onPress={() => router.push("/upload")}
+        testID="cta-upload"
         activeOpacity={0.85}
       >
-        <Ionicons name="sparkles" size={18} color={theme.colors.text} />
-        <Text style={styles.generateCtaText}>Vai al Magic Generator</Text>
-        <Ionicons name="arrow-forward" size={18} color={theme.colors.text} />
+        <Text style={styles.uploadFabBigText}>＋  Carica un capo</Text>
       </TouchableOpacity>
+
+      {/* Welcome splash — black overlay with animated DressVibe logo.
+          Shown only the first time per session, then fades out. */}
+      {showSplash ? (
+        <Animated.View style={[styles.splash, { opacity: splashFade }]} pointerEvents="none">
+          <LinearGradient
+            colors={["#050505", "#0b0b0b", "#050505"]}
+            style={StyleSheet.absoluteFill}
+          />
+          <Animated.View
+            style={{
+              transform: [
+                {
+                  scale: splashPulse.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 1.06],
+                  }),
+                },
+              ],
+              alignItems: "center",
+            }}
+          >
+            <View style={styles.splashLogoWrap}>
+              <LinearGradient
+                colors={MAGIC_GRADIENT}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.splashLogoDot}
+              />
+            </View>
+            <Text style={styles.splashTitle}>DressVibe</Text>
+            <Animated.View
+              style={[
+                styles.splashUnderline,
+                {
+                  opacity: splashPulse.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.25, 1],
+                  }),
+                },
+              ]}
+            />
+          </Animated.View>
+        </Animated.View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -314,4 +398,57 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   generateCtaText: { color: theme.colors.text, fontSize: 14, letterSpacing: 0.5 },
+  uploadFabBig: {
+    position: "absolute",
+    bottom: 96,
+    left: 24,
+    right: 24,
+    backgroundColor: theme.colors.primary,
+    paddingVertical: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  uploadFabBigText: {
+    color: theme.colors.primaryFg,
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+  },
+  // Welcome splash
+  splash: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  },
+  splashLogoWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    marginBottom: 18,
+    shadowColor: "#E11D48",
+    shadowOpacity: 0.55,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  splashLogoDot: {
+    width: "100%",
+    height: "100%",
+  },
+  splashTitle: {
+    color: "#fff",
+    fontSize: 36,
+    fontWeight: "300",
+    letterSpacing: 2,
+  },
+  splashUnderline: {
+    marginTop: 14,
+    width: 60,
+    height: 1.5,
+    backgroundColor: "#E11D48",
+  },
 });
