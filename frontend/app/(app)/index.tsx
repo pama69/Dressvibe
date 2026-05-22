@@ -60,13 +60,14 @@ export default function Galleria() {
   const tileH = Math.round(tileW / 0.78);
 
   // Welcome splash — shown only the first time per session.
+  // It stays visible until the user picks one of the 4 quick-action buttons.
   const [showSplash, setShowSplash] = useState(!SPLASH_SHOWN_ONCE);
   const splashFade = useRef(new Animated.Value(1)).current;
   const splashPulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!showSplash) return;
-    // Soft pulsing animation on the logo
+    // Soft pulsing animation on the logo (keeps running until dismissed)
     const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(splashPulse, {
@@ -78,19 +79,19 @@ export default function Galleria() {
       ])
     );
     pulseLoop.start();
-    // Auto-hide after 2.4s with a smooth fade
-    const t = setTimeout(() => {
-      Animated.timing(splashFade, {
-        toValue: 0, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true,
-      }).start(() => {
-        SPLASH_SHOWN_ONCE = true;
-        setShowSplash(false);
-        pulseLoop.stop();
-      });
-    }, 2400);
-    return () => { clearTimeout(t); pulseLoop.stop(); };
+    return () => { pulseLoop.stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSplash]);
+
+  const dismissSplashAndGo = useCallback((target: string | null) => {
+    Animated.timing(splashFade, {
+      toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true,
+    }).start(() => {
+      SPLASH_SHOWN_ONCE = true;
+      setShowSplash(false);
+      if (target) router.push(target as any);
+    });
+  }, [router, splashFade]);
 
   const load = useCallback(async () => {
     try {
@@ -237,57 +238,100 @@ export default function Galleria() {
         />
       )}
 
-      <TouchableOpacity
-        style={styles.uploadFabBig}
-        onPress={() => router.push("/upload")}
-        testID="cta-upload"
-        activeOpacity={0.85}
-      >
-        <Text style={styles.uploadFabBigText}>＋  Carica un capo</Text>
-      </TouchableOpacity>
+      {/* "Carica un capo" CTA removed per user request — already in header (+) */}
 
-      {/* Welcome splash — black overlay with animated DressVibe logo.
-          Shown only the first time per session, then fades out. */}
+      {/* Welcome splash — full-screen black overlay with animated logo + 4
+          quick-action buttons. Stays visible until the user picks an action. */}
       {showSplash ? (
-        <Animated.View style={[styles.splash, { opacity: splashFade }]} pointerEvents="none">
+        <Animated.View style={[styles.splash, { opacity: splashFade }]}>
           <LinearGradient
             colors={["#050505", "#0b0b0b", "#050505"]}
             style={StyleSheet.absoluteFill}
           />
-          <Animated.View
-            style={{
-              transform: [
-                {
-                  scale: splashPulse.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 1.06],
-                  }),
-                },
-              ],
-              alignItems: "center",
-            }}
-          >
-            <View style={styles.splashLogoWrap}>
-              <LinearGradient
-                colors={MAGIC_GRADIENT}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.splashLogoDot}
-              />
-            </View>
-            <Text style={styles.splashTitle}>DressVibe</Text>
+          <View style={styles.splashInner}>
             <Animated.View
-              style={[
-                styles.splashUnderline,
-                {
-                  opacity: splashPulse.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.25, 1],
-                  }),
-                },
-              ]}
-            />
-          </Animated.View>
+              style={{
+                transform: [
+                  {
+                    scale: splashPulse.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1, 1.06],
+                    }),
+                  },
+                ],
+                alignItems: "center",
+              }}
+            >
+              <View style={styles.splashLogoWrap}>
+                <LinearGradient
+                  colors={MAGIC_GRADIENT}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.splashLogoDot}
+                />
+              </View>
+              <Text style={styles.splashTitle}>DressVibe</Text>
+              <Animated.View
+                style={[
+                  styles.splashUnderline,
+                  {
+                    opacity: splashPulse.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.25, 1],
+                    }),
+                  },
+                ]}
+              />
+            </Animated.View>
+
+            <View style={styles.splashActions}>
+              <TouchableOpacity
+                style={styles.splashAction}
+                onPress={() => dismissSplashAndGo("/(app)/generate")}
+                testID="splash-generate"
+                activeOpacity={0.85}
+              >
+                <Text style={styles.splashActionEmoji}>✨</Text>
+                <Text style={styles.splashActionLabel}>Genera</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.splashAction}
+                onPress={() => dismissSplashAndGo("/upload")}
+                testID="splash-upload"
+                activeOpacity={0.85}
+              >
+                <Text style={styles.splashActionEmoji}>＋</Text>
+                <Text style={styles.splashActionLabel}>Carica capo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.splashAction}
+                onPress={() => dismissSplashAndGo("/(app)/history")}
+                testID="splash-history"
+                activeOpacity={0.85}
+              >
+                <Text style={styles.splashActionEmoji}>📂</Text>
+                <Text style={styles.splashActionLabel}>Storico</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.splashAction}
+                onPress={() => dismissSplashAndGo("/(app)/profile")}
+                testID="splash-profile"
+                activeOpacity={0.85}
+              >
+                <Text style={styles.splashActionEmoji}>👤</Text>
+                <Text style={styles.splashActionLabel}>Profilo</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => dismissSplashAndGo(null)}
+              style={styles.splashSkip}
+              testID="splash-skip"
+              activeOpacity={0.7}
+            >
+              <Text style={styles.splashSkipText}>Vai alla galleria</Text>
+            </TouchableOpacity>
+          </View>
         </Animated.View>
       ) : null}
     </SafeAreaView>
@@ -420,6 +464,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 1000,
+    paddingVertical: 40,
   },
   splashLogoWrap: {
     width: 72,
@@ -450,5 +495,55 @@ const styles = StyleSheet.create({
     width: 60,
     height: 1.5,
     backgroundColor: "#E11D48",
+  },
+  splashInner: {
+    width: "100%",
+    maxWidth: 360,
+    paddingHorizontal: 28,
+    paddingTop: 40,
+    paddingBottom: 30,
+    alignItems: "center",
+    justifyContent: "space-between",
+    flex: 1,
+  },
+  splashActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    justifyContent: "center",
+    marginTop: 40,
+    width: "100%",
+  },
+  splashAction: {
+    flexBasis: "45%",
+    flexGrow: 1,
+    minHeight: 92,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  splashActionEmoji: { fontSize: 28, lineHeight: 32 },
+  splashActionLabel: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    textAlign: "center",
+  },
+  splashSkip: {
+    marginTop: 22,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+  },
+  splashSkipText: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 12,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
   },
 });

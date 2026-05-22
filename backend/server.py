@@ -440,7 +440,14 @@ LOOK_STYLES_PROMPTS = {
 }
 
 
-def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label: Optional[str] = None) -> str:
+import re
+
+def build_outfit_prompt(
+    p: GenerationCreate,
+    variation_idx: int,
+    custom_bg_label: Optional[str] = None,
+    price_descriptions: Optional[List[str]] = None,
+) -> str:
     gender = GENDER_IT.get(p.model_gender, p.model_gender)
     age = AGE_IT.get(p.model_age, p.model_age)
     body = BODY_IT.get(p.model_body, p.model_body)
@@ -472,7 +479,52 @@ def build_outfit_prompt(p: GenerationCreate, variation_idx: int, custom_bg_label
         f"STRICT vertical 4:5 aspect ratio (portrait, ratio 1080x1350 — the native Instagram feed format). "
         f"The composition must fit the model fully inside the 4:5 frame with comfortable margins on top and bottom. "
         f"Variation seed {variation_idx}."
+        f"{_compose_price_tags_suffix(price_descriptions)}"
         f"{_compose_look_styles_suffix(p.look_styles)}"
+    )
+
+
+# Regex used to detect auto-generated placeholder names (e.g. "Cap 4521").
+# When a garment's name matches this pattern it means the shop owner did NOT
+# provide a real description/price list, so we do NOT inject a price-tag
+# instruction into the AI prompt.
+_AUTO_NAME_RE = re.compile(r"^Cap\s+\d{3,5}$", re.IGNORECASE)
+
+
+def is_real_description(name: Optional[str]) -> bool:
+    """Return True if `name` looks like a real shop description (e.g.
+    "Vestito €59, pantalone €67") rather than the auto-generated "Cap NNNN"
+    placeholder used by the upload flow when the user leaves the field blank.
+    """
+    if not name:
+        return False
+    s = name.strip()
+    if not s:
+        return False
+    return not _AUTO_NAME_RE.match(s)
+
+
+def _compose_price_tags_suffix(descriptions: Optional[List[str]]) -> str:
+    """Append a price-tag instruction in English to the outfit prompt.
+
+    The shop owner can type descriptions like "Vestito €59, pantalone €67" in
+    the upload form. When at least one selected garment has such a real
+    description, we tell Gemini to overlay tasteful price tags on the final
+    image, each placed next to the matching garment.
+    """
+    real = [d.strip() for d in (descriptions or []) if d and d.strip()]
+    if not real:
+        return ""
+    joined = " | ".join(real)
+    return (
+        f" Garment descriptions and prices provided by the shop owner: {joined}. "
+        f"Render small, clean price tags (like discreet boutique price labels) inside the photo, "
+        f"placed close to the corresponding garment they refer to (price for the dress next to the dress, "
+        f"price for the trousers near the trousers, etc.). "
+        f"Each tag must show the EXACT prices listed above, with a clean modern sans-serif font, "
+        f"high-contrast color against the surrounding background (so the price is always readable), "
+        f"a size that is clear but NOT intrusive, no logos, no watermarks. "
+        f"Position the tags so they do not cover the model's face or hands."
     )
 
 
@@ -747,6 +799,13 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
         raise HTTPException(status_code=404, detail="Capi non trovati")
     refs = [g["image_base64"] for g in garments]
 
+    # Collect real (non-auto-placeholder) descriptions from the selected
+    # garments. When at least one is present, the AI is instructed to overlay
+    # tasteful price tags next to each matching garment in the final photo.
+    price_descriptions: List[str] = [
+        g["name"] for g in garments if is_real_description(g.get("name"))
+    ]
+
     # Custom background: append its image as the LAST reference and pass label to prompt.
     custom_bg_label: Optional[str] = None
     if payload.custom_background_id:
@@ -780,7 +839,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     async def _bounded(i: int):
         async with sem:
             return await generate_single_image(
-                build_outfit_prompt(payload, i, custom_bg_label),
+                build_outfit_prompt(payload, i, custom_bg_label, price_descriptions),
                 refs,
                 f"{gen_id}_{i}",
             )

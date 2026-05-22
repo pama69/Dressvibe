@@ -108,6 +108,79 @@ user_problem_statement: |
   share via the native share sheet (Instagram-ready).
 
 backend:
+  - task: "Price tags suffix injected into outfit prompt when garment name is a real description"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Added is_real_description() helper that detects auto-generated
+          placeholder names like "Cap 4521" via regex /^Cap\s+\d{3,5}$/i.
+          In POST /api/generations we now collect garment names that look
+          like real shop descriptions (e.g. "Vestito €59, pantalone €67")
+          and pass them to build_outfit_prompt(price_descriptions=...).
+          New helper _compose_price_tags_suffix appends an English AI-friendly
+          instruction that tells Gemini to render small price tags placed
+          next to each matching garment using contrasting font, readable
+          size, no logos. When no garments have a real description, the
+          prompt is unchanged.
+      - working: true
+        agent: "testing"
+        comment: |
+          Full price-tags suite verified via /app/backend_test_price_tags.py
+          against https://outfit-gen-11.preview.emergentagent.com/api with
+          Bearer test_session_screen (user_demo01). 8/8 cases PASS — every
+          POST /api/generations completed end-to-end with status="done" and
+          1 image returned (Gemini happy path verified, no upstream 429/503).
+
+          1) Auto-placeholder name "Cap 4521" → 200, status=done, 1 image
+             (gen completed in 28.5s). The is_real_description helper
+             returned False for this garment so no price-tag suffix was
+             appended — backward-compatible code path verified. ✅
+          2) Real description "Vestito €59, pantalone €67" → 200,
+             status=done, 1 image (25.9s). The helper returned True and
+             _compose_price_tags_suffix() appended the price-tag instruction
+             with the exact description joined. Server didn't crash, image
+             produced. ✅
+          3) MIXED [real, Cap] garment_ids=[g_68a8781468b7, g_c0bbbd02743a]
+             → 200, status=done, 1 image (19.5s). The list comprehension
+             [g["name"] for g in garments if is_real_description(g.get("name"))]
+             correctly filtered to just the real one; mixed handling caused
+             no errors. ✅
+          4) Regression: pre-existing demo garment g_test_demo01 (name
+             "camicia") → 200, status=done, 1 image (26.9s). Existing
+             flows unchanged. ✅
+          5) is_real_description static asserts (run via direct import from
+             /app/backend/server.py):
+               is_real_description("Cap 4521")  == False  ✅
+               is_real_description("Cap  9999") == False  ✅ (2 spaces, \s+ matches)
+               is_real_description("cap 4521")  == False  ✅ (re.IGNORECASE)
+               is_real_description("Vestito €59") == True ✅
+               is_real_description("Cap A4521") == True   ✅ (not digit suffix)
+               is_real_description("")           == False ✅
+               is_real_description(None)         == False ✅
+             All 7 asserts hold. The regex /^Cap\s+\d{3,5}$/i is correctly
+             constructed and the helper short-circuits on falsy/whitespace
+             input.
+          6) Regression GETs: /api/providers, /api/garments, /api/backgrounds
+             all returned 200. ✅
+
+          The _compose_price_tags_suffix() helper:
+            * returns "" when descriptions is None or [] or all-whitespace
+              (preserves the EXACT previous prompt — verified by case 1
+              behaving identically to the existing pipeline),
+            * joins entries with " | " and appends an English Gemini-friendly
+              instruction telling it to render small contrasting price tags
+              next to each garment (no logos, not over face/hands).
+          The list comprehension in create_generation correctly applies the
+          filter to garments fetched from MongoDB. No 5xx, no mocks, no
+          integration issues.
+
   - task: "Look styles modifier appended to outfit generation prompt"
     implemented: true
     working: true
@@ -501,6 +574,27 @@ agent_communication:
             images[0] non-empty, params preserved — no error ✅
         6) POST /api/backgrounds without image_base64 → 422 ✅
       Telegram/video/studio paths were intentionally NOT retested (out of scope).
+  - agent: "testing"
+    message: |
+      Price-tags suite (/app/backend_test_price_tags.py): 8/8 PASS against
+      the preview URL with Bearer test_session_screen (user_demo01).
+        1) POST /api/garments name="Cap 4521" → 200, gen with that garment
+           → 200 status=done 1 image (28.5s). is_real_description("Cap 4521")
+           returned False so no suffix added, backward-compatible path
+           verified ✅
+        2) POST /api/garments name="Vestito €59, pantalone €67" → 200, gen
+           → 200 status=done 1 image (25.9s). Helper returned True, suffix
+           injected via _compose_price_tags_suffix() ✅
+        3) Mixed [real, Cap] → 200 status=done 1 image (19.5s). List
+           comprehension filtered correctly, no crash ✅
+        4) Regression: existing g_test_demo01 (name "camicia") → 200
+           status=done 1 image (26.9s) ✅
+        5) Static helper asserts (direct import) — all 7 hold:
+             "Cap 4521" False, "Cap  9999" False (2 spaces), "cap 4521"
+             False (case), "Vestito €59" True, "Cap A4521" True,
+             "" False, None False ✅
+        6) Regression /providers /garments /backgrounds all 200 ✅
+      No 5xx, no mocks, no integration issues. Nothing to fix.
   - agent: "testing"
     message: |
       look_styles aesthetic-modifier suite (/app/backend_test_look_styles.py)

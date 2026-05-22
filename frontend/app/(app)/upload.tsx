@@ -161,15 +161,16 @@ export default function Upload() {
       notify("Foto richiesta", "Scegli o scatta una foto del capo.");
       return;
     }
-    if (!name.trim()) {
-      setError("Inserisci il nome del capo.");
-      notify("Nome richiesto", "Inserisci il nome del capo.");
-      return;
-    }
+    // "Descrizione e prezzi" is OPTIONAL. If the user didn't type anything we
+    // auto-generate a unique placeholder code "Cap NNNN" so the garment still
+    // has a stable identifier in the gallery — and the backend knows there
+    // is no real description / price list to bake into the prompt.
+    const trimmed = name.trim();
+    const finalName = trimmed || `Cap ${String(Math.floor(1000 + Math.random() * 9000))}`;
     setSaving(true);
     try {
       await api.createGarment({
-        name: name.trim(),
+        name: finalName,
         image_base64: imageBase64,
         category,
         color: color.trim() || null,
@@ -234,10 +235,13 @@ export default function Upload() {
             </View>
           )}
 
-          <Text style={s.fieldLabel}>Nome capo</Text>
+          <Text style={s.fieldLabel}>Descrizione e prezzi</Text>
+          <Text style={s.fieldHint}>
+            Facoltativo — es. "Vestito €59, pantalone €67". Se compilato, i prezzi appariranno come piccole etichette nella foto generata.
+          </Text>
           <TextInput
             value={name} onChangeText={setName}
-            placeholder="es. Maglione cashmere rosa"
+            placeholder='es. Vestito €59, pantalone €67'
             placeholderTextColor={theme.colors.textMuted}
             style={s.input}
             testID="upload-name"
@@ -359,6 +363,9 @@ const s = StyleSheet.create({
   fieldLabel: {
     color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2,
     textTransform: "uppercase", marginTop: 14, marginBottom: 6,
+  },
+  fieldHint: {
+    color: theme.colors.textMuted, fontSize: 11, lineHeight: 15, marginBottom: 8, marginTop: -2,
   },
   input: {
     backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border,
