@@ -39,7 +39,7 @@ const LOOK_STYLES: LookStyle[] = [
   { id: "premium", label: "Premium",  emoji: "💎" },
 ];
 
-type Garment = { id: string; name: string; image_base64: string; category: string };
+type Garment = { id: string; name: string; image_base64?: string; thumb_base64?: string; category: string };
 
 function ChipRow({
   label,
@@ -197,7 +197,14 @@ export default function Generate() {
                     activeOpacity={0.85}
                     testID={`select-garment-${g.id}`}
                   >
-                    <Image source={{ uri: `data:image/png;base64,${g.image_base64}` }} style={styles.garmentImg} />
+                    <Image
+                      source={{
+                        uri: g.thumb_base64
+                          ? `data:image/jpeg;base64,${g.thumb_base64}`
+                          : `data:image/png;base64,${g.image_base64}`,
+                      }}
+                      style={styles.garmentImg}
+                    />
                     {active && (
                       <View style={styles.checkBadge}>
                         <Ionicons name="checkmark" size={14} color={theme.colors.primaryFg} />
