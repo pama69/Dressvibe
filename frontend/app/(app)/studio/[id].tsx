@@ -68,7 +68,14 @@ export default function Studio() {
   const { id, index } = useLocalSearchParams<{ id: string; index: string }>();
   const router = useRouter();
   const notify = useNotify();
-  const idx = parseInt(index || "0", 10);
+  const initialIdx = parseInt(index || "0", 10);
+  // Live image index: starts from the URL param, but is BUMPED to the new
+  // gallery position every time the user applies an edit (since
+  // /studio/edit appends the result with $push). Keeping this in sync is
+  // critical so subsequent shares (Telegram URL button, WhatsApp short
+  // link, gallery save) always reference the IMAGE THE USER IS SEEING,
+  // not the original at the old index.
+  const [idx, setIdx] = useState<number>(initialIdx);
 
   const [image, setImage] = useState<string | null>(null);
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -274,6 +281,12 @@ export default function Studio() {
       const res = await api.studioEdit(image, finalPrompt, id, addPriceTags);
       setImage(res.image_base64);
       setEdited(true);
+      // Bump local index to the just-appended position so subsequent
+      // shares (Telegram URL button, WhatsApp short link, gallery save)
+      // reference the edited image, not the original at the old idx.
+      if (typeof res.image_index === "number" && res.image_index >= 0) {
+        setIdx(res.image_index);
+      }
     } catch (e: any) {
       notify({ title: "Modifica non riuscita", message: e?.message || "Riprova" });
     } finally {

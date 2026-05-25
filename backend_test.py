@@ -1,374 +1,324 @@
-"""DressVibe — Email/Password Auth + Telegram strict tests.
-
-Runs against the live backend (localhost:8001) per the review request.
-Reads OTPs directly from MongoDB `users` collection (fields
-`verification_code`, `reset_code`).
 """
+Backend test for /api/studio/edit returning new image_index.
 
-import asyncio
+Verifies the fix where /api/studio/edit returns:
+  {image_base64: <result>, image_index: <int|null>}
+
+The new image_index is computed via find_one_and_update(return_document=AFTER)
+which atomically pushes the image+thumb and returns the post-state; index = len(images) - 1.
+
+Auth: Bearer test_session_screen (user_demo01).
+"""
+import base64
 import os
 import sys
-import uuid
-from pathlib import Path
-
-import httpx
+import time
+import requests
+from pymongo import MongoClient
 from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
+load_dotenv("/app/backend/.env")
 
-ROOT = Path("/app/backend")
-load_dotenv(ROOT / ".env")
 
-API_BASE = "http://localhost:8001/api"
-BEARER = "Bearer test_session_screen"  # user_demo01
-HEADERS_AUTH = {"Authorization": BEARER}
+def _read_frontend_env(key: str) -> str:
+    with open("/app/frontend/.env") as f:
+        for line in f:
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip().strip('"')
+    return ""
 
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ["DB_NAME"]
+BASE_URL = _read_frontend_env("EXPO_PUBLIC_BACKEND_URL").rstrip("/") + "/api"
+TOKEN = "test_session_screen"
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "dressvibe")
+mongo = MongoClient(MONGO_URL)
+db = mongo[DB_NAME]
 
 results = []
-
-
 def record(name: str, ok: bool, info: str = ""):
-    flag = "PASS" if ok else "FAIL"
-    line = f"[{flag}] {name}" + (f" -- {info}" if info else "")
-    print(line)
+    status = "PASS" if ok else "FAIL"
+    print(f"[{status}] {name} :: {info}")
     results.append((name, ok, info))
 
 
-async def find_user(db, email: str):
-    return await db.users.find_one({"email": email.lower().strip()}, {"_id": 0})
+PREFERRED_GEN_ID = "gen_d24135486f39"
+
+def find_or_create_gen():
+    g = db.generations.find_one(
+        {"id": PREFERRED_GEN_ID, "user_id": "user_demo01"},
+        {"_id": 0, "id": 1, "images": 1},
+    )
+    if g and g.get("images"):
+        return g["id"], len(g["images"])
+    cur = db.generations.find(
+        {"user_id": "user_demo01", "images.0": {"$exists": True}},
+        {"_id": 0, "id": 1, "images": 1},
+    ).sort("created_at", -1).limit(5)
+    for g in cur:
+        if g.get("images"):
+            return g["id"], len(g["images"])
+    return None, 0
+
+GEN_ID, N_BEFORE = find_or_create_gen()
+print(f"[setup] using gen_id={GEN_ID} with images.length={N_BEFORE}")
 
 
-async def main():
-    mclient = AsyncIOMotorClient(MONGO_URL)
-    db = mclient[DB_NAME]
+def case1():
+    if not GEN_ID:
+        record("case1_setup", False, "No suitable gen_id found for user_demo01")
+        return None, None, None
 
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30.0) as cx:
-        # =========== EMAIL/PASSWORD AUTH ===========
+    r = requests.get(f"{BASE_URL}/generations/{GEN_ID}", headers=HEADERS, timeout=60)
+    if r.status_code != 200:
+        record("case1_get_before", False, f"status={r.status_code} body={r.text[:200]}")
+        return None, None, None
+    gen = r.json()
+    images = gen.get("images") or []
+    N = len(images)
+    if N == 0:
+        record("case1_setup", False, "gen has 0 images")
+        return None, None, None
+    record("case1_get_before", True, f"images.length={N}")
 
-        # CASE 1: Register new email — happy path
-        email1 = f"test+{uuid.uuid4().hex[:8]}@example.it"
-        pwd1 = "MyStr0ngPass!"
-        r = await cx.post(
-            "/auth/email/register",
-            json={"email": email1, "password": pwd1, "name": "Anna Rossi"},
-        )
-        ok = r.status_code == 200 and r.json().get("ok") is True
-        record("Case 1: register happy path", ok, f"status={r.status_code}")
-        u = await find_user(db, email1)
-        otp1 = u.get("verification_code") if u else None
-        record(
-            "Case 1b: user row created with verification_code, is_verified=False",
-            bool(u) and bool(otp1) and u.get("is_verified") is False,
-            f"is_verified={u.get('is_verified') if u else None} otp_len={len(otp1) if otp1 else 0}",
-        )
+    body = {
+        "image_base64": images[0],
+        "edit_prompt": "Subtle warm tone",
+        "gen_id": GEN_ID,
+        "add_price_tags": False,
+    }
+    t0 = time.time()
+    try:
+        r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
+    except Exception as e:
+        record("case1_studio_edit", False, f"exception: {e}")
+        return None, None, None
+    elapsed = time.time() - t0
+    if r.status_code != 200:
+        if r.status_code in (429, 502, 503):
+            print(f"[case1] retry once after {r.status_code}: {r.text[:200]}")
+            time.sleep(8)
+            r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
+        if r.status_code != 200:
+            record("case1_studio_edit", False, f"status={r.status_code} body={r.text[:200]} (elapsed={elapsed:.1f}s)")
+            return None, None, None
 
-        # CASE 2: Register with weak password → 400
-        r = await cx.post(
-            "/auth/email/register",
-            json={"email": f"test+{uuid.uuid4().hex[:8]}@example.it", "password": "short"},
-        )
-        record(
-            "Case 2: register weak password rejected (400)",
-            r.status_code == 400 and "almeno 8 caratteri" in r.text,
-            f"status={r.status_code} body={r.text[:200]}",
-        )
+    js = r.json()
+    edited_b64 = js.get("image_base64")
+    new_index = js.get("image_index")
+    if not edited_b64 or not isinstance(edited_b64, str):
+        record("case1_studio_edit_has_image", False, "image_base64 missing/empty")
+        return None, None, None
+    record("case1_studio_edit_has_image", True, f"len={len(edited_b64)} elapsed={elapsed:.1f}s")
 
-        # CASE 3: Register with invalid email → 422
-        r = await cx.post(
-            "/auth/email/register",
-            json={"email": "not-an-email", "password": "Whatever1234"},
-        )
-        record(
-            "Case 3: register invalid email rejected",
-            r.status_code in (400, 422),
-            f"status={r.status_code}",
-        )
+    if new_index != N:
+        record("case1_image_index_equals_N", False, f"got {new_index}, expected {N}")
+        return None, None, None
+    record("case1_image_index_equals_N", True, f"image_index={new_index} == N={N}")
 
-        # CASE 4: Verify with WRONG code → 400
-        r = await cx.post("/auth/email/verify", json={"email": email1, "code": "000000"})
-        record(
-            "Case 4: verify wrong code → 400",
-            r.status_code == 400 and "non valido" in r.text.lower(),
-            f"status={r.status_code} body={r.text[:200]}",
-        )
+    r2 = requests.get(f"{BASE_URL}/generations/{GEN_ID}", headers=HEADERS, timeout=60)
+    if r2.status_code != 200:
+        record("case1_get_after", False, f"status={r2.status_code}")
+        return None, None, None
+    gen2 = r2.json()
+    images2 = gen2.get("images") or []
+    if len(images2) != N + 1:
+        record("case1_get_after_length", False, f"got {len(images2)}, expected {N+1}")
+        return None, None, None
+    record("case1_get_after_length", True, f"images.length={len(images2)}")
 
-        # CASE 5: Verify with CORRECT code → 200 + session_token
-        r = await cx.post("/auth/email/verify", json={"email": email1, "code": otp1})
-        body = r.json() if r.status_code == 200 else {}
-        session_token_email1 = body.get("session_token")
-        record(
-            "Case 5: verify correct code returns session_token",
-            r.status_code == 200
-            and bool(session_token_email1)
-            and body.get("user", {}).get("email") == email1.lower(),
-            f"status={r.status_code} token_present={bool(session_token_email1)}",
-        )
-        u2 = await find_user(db, email1)
-        record(
-            "Case 5b: DB row is_verified=True + verification_code unset",
-            bool(u2) and u2.get("is_verified") is True and "verification_code" not in u2,
-            f"is_verified={u2.get('is_verified') if u2 else None} "
-            f"has_vc={'verification_code' in (u2 or {})}",
-        )
+    if images2[N] != edited_b64:
+        record("case1_images_N_matches", False, f"images[{N}] differs from returned image_base64 (lens {len(images2[N])} vs {len(edited_b64)})")
+        return None, None, None
+    record("case1_images_N_matches", True, f"images[{N}] == returned image_base64 ({len(edited_b64)} chars)")
 
-        # CASE 6: Register DUPLICATE verified email → 409
-        r = await cx.post(
-            "/auth/email/register",
-            json={"email": email1, "password": "AnotherPass1!"},
-        )
-        record(
-            "Case 6: re-register verified email → 409",
-            r.status_code == 409,
-            f"status={r.status_code} body={r.text[:200]}",
-        )
+    return GEN_ID, new_index, edited_b64
 
-        # CASE 7: Login with correct password → 200
-        r = await cx.post("/auth/email/login", json={"email": email1, "password": pwd1})
-        body = r.json() if r.status_code == 200 else {}
-        login_token = body.get("session_token")
-        record(
-            "Case 7: login happy path returns session_token",
-            r.status_code == 200 and bool(login_token),
-            f"status={r.status_code}",
-        )
-        if login_token:
-            rme = await cx.get(
-                "/auth/me", headers={"Authorization": f"Bearer {login_token}"}
-            )
-            record(
-                "Case 7b: returned session_token works on /auth/me",
-                rme.status_code == 200 and rme.json().get("email") == email1.lower(),
-                f"status={rme.status_code}",
-            )
 
-        # CASE 8: Login with WRONG password → 401
-        r = await cx.post(
-            "/auth/email/login", json={"email": email1, "password": "WrongPass1234"}
-        )
-        record(
-            "Case 8: login wrong password → 401",
-            r.status_code == 401,
-            f"status={r.status_code}",
-        )
+def case2():
+    # 1x1 transparent PNG
+    tiny_png = base64.b64encode(bytes.fromhex(
+        "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4"
+        "890000000A49444154789C6300010000000500010D0A2DB40000000049454E44"
+        "AE426082"
+    )).decode("ascii")
+    body = {
+        "image_base64": tiny_png,
+        "edit_prompt": "Make it brighter",
+        "add_price_tags": False,
+    }
+    t0 = time.time()
+    try:
+        r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
+    except Exception as e:
+        record("case2_studio_edit", False, f"exception: {e}")
+        return
+    elapsed = time.time() - t0
+    if r.status_code != 200:
+        if r.status_code in (429, 502, 503):
+            print(f"[case2] retry once after {r.status_code}: {r.text[:200]}")
+            time.sleep(8)
+            r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
+        if r.status_code != 200:
+            record("case2_studio_edit", False, f"status={r.status_code} body={r.text[:200]} (elapsed={elapsed:.1f}s)")
+            return
+    js = r.json()
+    if not js.get("image_base64"):
+        record("case2_has_image_base64", False, "image_base64 missing/empty")
+        return
+    record("case2_has_image_base64", True, f"len={len(js['image_base64'])} elapsed={elapsed:.1f}s")
 
-        # CASE 9: Login UNVERIFIED user → 403
-        email_unv = f"test+{uuid.uuid4().hex[:8]}@example.it"
-        pwd_unv = "UnverifiedPass1!"
-        r = await cx.post(
-            "/auth/email/register", json={"email": email_unv, "password": pwd_unv}
-        )
-        record("Case 9a: register unverified user", r.status_code == 200, f"status={r.status_code}")
-        r = await cx.post(
-            "/auth/email/login", json={"email": email_unv, "password": pwd_unv}
-        )
-        record(
-            "Case 9b: login unverified → 403",
-            r.status_code == 403 and "non ancora verificato" in r.text.lower(),
-            f"status={r.status_code} body={r.text[:200]}",
-        )
+    val = js.get("image_index")
+    if val is not None:
+        record("case2_image_index_is_null", False, f"image_index={val!r} (expected null)")
+        return
+    record("case2_image_index_is_null", True, f"image_index field present={'image_index' in js}, value=null")
 
-        # CASE 10: Forgot password
-        r = await cx.post("/auth/email/forgot", json={"email": email1})
-        record(
-            "Case 10: forgot password returns 200",
-            r.status_code == 200 and r.json().get("ok") is True,
-            f"status={r.status_code}",
-        )
-        u3 = await find_user(db, email1)
-        reset_otp = u3.get("reset_code") if u3 else None
-        record(
-            "Case 10b: reset_code stored in DB (6-digit)",
-            bool(reset_otp) and len(reset_otp) == 6 and reset_otp.isdigit(),
-            f"present={bool(reset_otp)}",
-        )
-        r = await cx.post(
-            "/auth/email/forgot",
-            json={"email": f"nobody+{uuid.uuid4().hex[:6]}@example.it"},
-        )
-        record(
-            "Case 10c: forgot unknown email still 200 (no enumeration)",
-            r.status_code == 200 and r.json().get("ok") is True,
-            f"status={r.status_code}",
-        )
 
-        # CASE 11: Reset password
-        r = await cx.post(
-            "/auth/email/reset",
-            json={"email": email1, "code": "999999", "password": "BrandNewPass1!"},
-        )
-        record(
-            "Case 11a: reset wrong code → 400",
-            r.status_code == 400,
-            f"status={r.status_code}",
-        )
-        new_pwd = "BrandNewPass1!"
-        r = await cx.post(
-            "/auth/email/reset",
-            json={"email": email1, "code": reset_otp, "password": new_pwd},
-        )
-        record(
-            "Case 11b: reset correct code → 200",
-            r.status_code == 200 and r.json().get("ok") is True,
-            f"status={r.status_code}",
-        )
-        r = await cx.post("/auth/email/login", json={"email": email1, "password": pwd1})
-        record(
-            "Case 11c: old password no longer works (401)",
-            r.status_code == 401,
-            f"status={r.status_code}",
-        )
-        r = await cx.post(
-            "/auth/email/login", json={"email": email1, "password": new_pwd}
-        )
-        record(
-            "Case 11d: new password works",
-            r.status_code == 200 and bool(r.json().get("session_token")),
-            f"status={r.status_code}",
-        )
-
-        # CASE 12: Resend code (with cooldown)
-        email_re = f"test+{uuid.uuid4().hex[:8]}@example.it"
-        await cx.post(
-            "/auth/email/register",
-            json={"email": email_re, "password": "ResendTest1!"},
-        )
-        r = await cx.post(
-            "/auth/email/resend-code", json={"email": email_re, "purpose": "verify"}
-        )
-        record(
-            "Case 12a: resend immediately after register → 429",
-            r.status_code == 429 and "secondi" in r.text.lower(),
-            f"status={r.status_code} body={r.text[:200]}",
-        )
-        r = await cx.post(
-            "/auth/email/resend-code", json={"email": email_re, "purpose": "bogus"}
-        )
-        record(
-            "Case 12b: resend invalid purpose → 400",
-            r.status_code == 400,
-            f"status={r.status_code} body={r.text[:160]}",
-        )
-        r = await cx.post(
-            "/auth/email/resend-code",
-            json={
-                "email": f"ghost+{uuid.uuid4().hex[:6]}@example.it",
-                "purpose": "verify",
-            },
-        )
-        record(
-            "Case 12c: resend unknown email → 200 (no enumeration)",
-            r.status_code == 200,
-            f"status={r.status_code}",
-        )
-        await db.users.update_one(
-            {"email": email_re},
-            {"$unset": {"verification_sent_at": "", "reset_sent_at": ""}},
-        )
-        prev = await find_user(db, email_re)
-        prev_otp = prev.get("verification_code") if prev else None
-        r = await cx.post(
-            "/auth/email/resend-code", json={"email": email_re, "purpose": "verify"}
-        )
-        post = await find_user(db, email_re)
-        new_otp = post.get("verification_code") if post else None
-        record(
-            "Case 12d: resend after cooldown clear → 200 + new OTP",
-            r.status_code == 200 and bool(new_otp) and new_otp != prev_otp,
-            f"status={r.status_code} otp_changed={new_otp != prev_otp}",
-        )
-
-        # =========== TELEGRAM STRICT ===========
-
-        # Ensure no telegram_channel for user_demo01
-        await db.user_settings.update_one(
-            {"user_id": "user_demo01"},
-            {"$set": {"telegram_channel": ""}, "$setOnInsert": {"user_id": "user_demo01"}},
-            upsert=True,
-        )
-
-        # CASE 13a: /telegram/status reports channel_source="none"
-        r = await cx.get("/telegram/status", headers=HEADERS_AUTH)
-        body = r.json() if r.status_code == 200 else {}
-        record(
-            "Case 13a: /telegram/status channel_source='none' when no channel",
-            r.status_code == 200
-            and body.get("channel_source") == "none"
-            and body.get("configured") is False,
-            f"status={r.status_code} body={body}",
-        )
-
-        # CASE 13b: /telegram/publish without channel → 400
-        tiny_png_b64 = (
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEX/AAAZ4gk3"
-            "AAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
-        )
-        r = await cx.post(
-            "/telegram/publish",
-            headers=HEADERS_AUTH,
-            json={
-                "image_base64": tiny_png_b64,
-                "media_type": "photo",
-                "caption": "test",
-            },
-        )
-        record(
-            "Case 13b: /telegram/publish without channel → 400 'Canale Telegram non inserito'",
-            r.status_code == 400 and "Canale Telegram non inserito" in r.text,
-            f"status={r.status_code} body={r.text[:240]}",
-        )
-
-        # CASE 14a: PUT /user-settings with telegram channel
-        r = await cx.put(
-            "/user-settings",
-            headers=HEADERS_AUTH,
+def ensure_telegram_channel():
+    # Read current setting
+    r = requests.get(f"{BASE_URL}/user-settings", headers=HEADERS, timeout=30)
+    if r.status_code != 200:
+        return None
+    prev = (r.json() or {}).get("telegram_channel") or ""
+    if not prev:
+        # set to a test channel — value isn't actually used for short_link minting,
+        # but the strict-channel guard requires non-empty.
+        rp = requests.put(
+            f"{BASE_URL}/user-settings",
+            headers=HEADERS,
             json={"telegram_channel": "@frammenti_pe"},
+            timeout=30,
         )
-        record(
-            "Case 14a: PUT /user-settings telegram_channel='@frammenti_pe' → 200",
-            r.status_code == 200 and r.json().get("telegram_channel") == "@frammenti_pe",
-            f"status={r.status_code} body={r.text[:240]}",
-        )
-
-        # CASE 14b: /telegram/status now reports 'user'
-        r = await cx.get("/telegram/status", headers=HEADERS_AUTH)
-        body = r.json() if r.status_code == 200 else {}
-        record(
-            "Case 14b: /telegram/status channel_source='user' after set",
-            r.status_code == 200
-            and body.get("channel_source") == "user"
-            and body.get("configured") is True
-            and body.get("channel_id") == "@frammenti_pe",
-            f"status={r.status_code} body={body}",
-        )
-
-        # Cleanup: revert telegram_channel to empty for downstream tests
-        await db.user_settings.update_one(
-            {"user_id": "user_demo01"},
-            {"$set": {"telegram_channel": ""}},
-        )
-        r = await cx.get("/telegram/status", headers=HEADERS_AUTH)
-        body = r.json() if r.status_code == 200 else {}
-        record(
-            "Case 14c: cleanup — /telegram/status back to 'none'",
-            r.status_code == 200 and body.get("channel_source") == "none",
-            f"status={r.status_code} body={body}",
-        )
-
-    # =========== Summary ===========
-    print("\n" + "=" * 70)
-    total = len(results)
-    passed = sum(1 for _, ok, _ in results if ok)
-    failed = total - passed
-    print(f"TOTAL: {total}  PASS: {passed}  FAIL: {failed}")
-    if failed:
-        print("\nFailed cases:")
-        for name, ok, info in results:
-            if not ok:
-                print(f"  - {name}: {info}")
-    print("=" * 70)
-    return 0 if failed == 0 else 1
+        print(f"[setup] set telegram_channel @frammenti_pe -> {rp.status_code}")
+    else:
+        print(f"[setup] telegram_channel already set to {prev!r}")
+    return prev
 
 
-if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+def case3():
+    if not GEN_ID:
+        record("case3", False, "no gen_id")
+        return None, None, None
+
+    ensure_telegram_channel()
+
+    r0 = requests.get(f"{BASE_URL}/generations/{GEN_ID}", headers=HEADERS, timeout=60)
+    if r0.status_code != 200:
+        record("case3_get_before", False, f"status={r0.status_code}")
+        return None, None, None
+    images0 = r0.json().get("images") or []
+    N = len(images0)
+    if N == 0:
+        record("case3_setup", False, "no images in gen")
+        return None, None, None
+    record("case3_get_before", True, f"images.length={N}")
+
+    body = {
+        "image_base64": images0[0],
+        "edit_prompt": "Slightly enhance contrast",
+        "gen_id": GEN_ID,
+        "add_price_tags": False,
+    }
+    t0 = time.time()
+    r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
+    elapsed = time.time() - t0
+    if r.status_code != 200:
+        if r.status_code in (429, 502, 503):
+            print(f"[case3] retry once after {r.status_code}")
+            time.sleep(8)
+            r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
+        if r.status_code != 200:
+            record("case3_studio_edit", False, f"status={r.status_code} body={r.text[:200]}")
+            return None, None, None
+    js = r.json()
+    edited_b64 = js["image_base64"]
+    new_index = js["image_index"]
+    if new_index != N:
+        record("case3_image_index", False, f"got {new_index}, expected {N}")
+        return None, None, None
+    record("case3_studio_edit", True, f"new_index={new_index} elapsed={elapsed:.1f}s")
+
+    pub_body = {
+        "image_base64": edited_b64,
+        "media_type": "photo",
+        "caption": "Test fix studio_edit image_index",
+        "gen_id": GEN_ID,
+        "image_index": new_index,
+    }
+    rp = requests.post(f"{BASE_URL}/telegram/publish", headers=HEADERS, json=pub_body, timeout=120)
+    record("case3_publish_response", rp.status_code == 200, f"status={rp.status_code} body={rp.text[:200]}")
+
+    sl = db.short_links.find_one({"gen_id": GEN_ID, "image_index": new_index})
+    if not sl:
+        record("case3_short_link_exists", False, f"no short_link row for gen_id={GEN_ID} idx={new_index}")
+        return None, None, None
+    short_id = sl.get("short_id")
+    if not short_id:
+        record("case3_short_link_exists", False, f"short_link row exists but missing short_id: {sl}")
+        return None, None, None
+    record("case3_short_link_exists", True, f"short_id={short_id}")
+
+    return short_id, new_index, edited_b64
+
+
+def case4(short_id, new_index, edited_b64):
+    if not short_id:
+        record("case4", False, "no short_id from case3")
+        return
+    r = requests.get(f"{BASE_URL}/r/{short_id}/image", timeout=60)
+    if r.status_code != 200:
+        record("case4_get_image", False, f"status={r.status_code} body={r.text[:200]}")
+        return
+    record("case4_get_image", True, f"status=200 ctype={r.headers.get('content-type')} len={len(r.content)}")
+
+    try:
+        expected_raw = base64.b64decode(edited_b64)
+    except Exception as e:
+        record("case4_decode_edited", False, f"could not b64decode edited image: {e}")
+        return
+    if len(r.content) != len(expected_raw):
+        record("case4_length_match", False, f"got {len(r.content)} bytes, expected {len(expected_raw)} bytes")
+        return
+    record("case4_length_match", True, f"raw size={len(r.content)} bytes")
+
+    if r.content[:100] != expected_raw[:100]:
+        record("case4_prefix_match", False, "first 100 bytes differ")
+        return
+    record("case4_prefix_match", True, "first 100 bytes match")
+
+    if r.content != expected_raw:
+        record("case4_full_match", False, "full byte buffers differ")
+        return
+    record("case4_full_match", True, "full byte-for-byte match — landing serves the EDITED image")
+
+
+def case5():
+    r1 = requests.get(f"{BASE_URL}/generations", headers=HEADERS, timeout=30)
+    record("case5_generations", r1.status_code == 200, f"status={r1.status_code} count={len(r1.json()) if r1.status_code==200 else 'n/a'}")
+    r2 = requests.get(f"{BASE_URL}/garments", headers=HEADERS, timeout=30)
+    record("case5_garments", r2.status_code == 200, f"status={r2.status_code} count={len(r2.json()) if r2.status_code==200 else 'n/a'}")
+
+
+print(f"\n=== Testing studio/edit image_index fix at {BASE_URL} ===\n")
+case1_out = case1()
+print()
+case2()
+print()
+case3_out = case3()
+print()
+if case3_out and case3_out[0]:
+    case4(*case3_out)
+else:
+    print("[case4] skipped (case3 failed)")
+print()
+case5()
+
+print("\n=== SUMMARY ===")
+passed = sum(1 for _, ok, _ in results if ok)
+total = len(results)
+print(f"{passed}/{total} PASS")
+for name, ok, info in results:
+    flag = "[PASS]" if ok else "[FAIL]"
+    print(f"  {flag} {name}")
+sys.exit(0 if passed == total else 1)

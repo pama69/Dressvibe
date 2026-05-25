@@ -113,7 +113,7 @@ export const api = {
 
   // studio
   studioEdit: (image_base64: string, edit_prompt: string, gen_id?: string, add_price_tags?: boolean) =>
-    request<{ image_base64: string }>("/studio/edit", {
+    request<{ image_base64: string; image_index?: number | null }>("/studio/edit", {
       method: "POST",
       body: { image_base64, edit_prompt, gen_id, add_price_tags: !!add_price_tags },
       timeoutMs: 90000,

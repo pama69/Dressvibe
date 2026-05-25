@@ -1302,3 +1302,116 @@ agent_communication:
 
       Telegram publish refactor task moved from working:false → working:true,
       stuck_count reset to 0, current_focus cleared. Nothing else to fix.
+
+
+backend:
+  - task: "POST /api/studio/edit returns new image_index of just-pushed image"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          Bug fix verified end-to-end via /app/backend_test.py against
+          https://outfit-gen-11.preview.emergentagent.com/api with Bearer
+          test_session_screen (user_demo01). 17/17 cases PASS.
+
+          The fix at /app/backend/server.py L1491-L1504 uses
+          `db.generations.find_one_and_update(..., return_document=ReturnDocument.AFTER)`
+          to atomically push the edited image+thumb AND return the post-state,
+          from which `new_index = len(updated.images) - 1` is derived. The
+          response now includes `{image_base64, image_index}` instead of just
+          `{image_base64}`. Import `from pymongo import ReturnDocument` at
+          L6 is in place.
+
+          Case 1 — studio_edit returns new image_index with gen_id:
+            * Used gen_236386c42285 (user_demo01).
+            * Pre-edit GET: images.length=3 (N=3)
+            * POST /api/studio/edit with images[0], edit_prompt="Subtle warm
+              tone", gen_id=gen_236386c42285, add_price_tags=false
+              → 200 in 15.1s, image_base64 len=2,291,392 chars
+              **image_index=3 == N ✅**
+            * Re-GET /api/generations/gen_236386c42285:
+              images.length=4 (N+1) ✅
+              images[3] byte-for-byte == returned image_base64 ✅
+
+          Case 2 — studio_edit returns image_index=null when gen_id omitted:
+            * POST /api/studio/edit with NO gen_id (tiny 1x1 PNG payload,
+              edit_prompt="Make it brighter", add_price_tags=false)
+              → 200 in 13.2s
+              response.image_base64 len=2,367,772 chars ✅
+              **response.image_index is null (None)** — `image_index` key
+              IS present in JSON with value null. The `if payload.gen_id:`
+              guard at L1492 correctly short-circuits the find_one_and_update
+              path so `new_index` stays None.
+
+          Case 3 — End-to-end Telegram publish after edit uses the NEW index:
+            * Set telegram_channel="@frammenti_pe" on user_demo01 (strict
+              per-user channel guard requires non-empty value).
+            * Pre-edit GET: images.length=4 (N=4)
+            * POST /api/studio/edit (gen_id=gen_236386c42285) → 200 in 15.8s,
+              **new_index=4 ✅**
+            * POST /api/telegram/publish with body
+                {image_base64: <edited>, media_type:"photo",
+                 caption:"Test fix studio_edit image_index",
+                 gen_id:gen_236386c42285, image_index:4}
+              → 200 with channel_message_id=28, token=7275ca94f5a04b ✅
+            * MongoDB: `db.short_links.find_one({gen_id, image_index:4})`
+              → row exists with **short_id="zwN8yy"** ✅
+
+          Case 4 — Landing page resolves to the EDITED image:
+            * GET /api/r/zwN8yy/image (no auth) → 200, Content-Type=image/png,
+              len=1,691,578 bytes ✅
+            * Decoded: base64.b64decode(edited_b64 from case 3) == response
+              bytes — **full byte-for-byte equality** (not just length /
+              prefix). The landing page now serves the EDITED image at
+              images[4], NOT the original at images[0]. The bug — where the
+              frontend kept the OLD `idx` and the short_link pointed at the
+              original image — is fully fixed.
+
+          Case 5 — Regression:
+            * GET /api/generations → 200, count=31 ✅
+            * GET /api/garments → 200, count=10 ✅
+
+          All Gemini calls (3 in case 1+2+3) returned status=done on first
+          try — no upstream rate limits today. No 4xx, no 5xx. The new code
+          path is 100% backward compatible: legacy callers that ignore the
+          new `image_index` field see no change in behavior; the new index
+          is just an additional return value.
+
+          Tester note: case 3 required setting telegram_channel via
+          PUT /api/user-settings (strict per-user channel guard at L2024-
+          L2041). The test harness does this once and proceeds.
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      /api/studio/edit image_index fix validation: 17/17 PASS via
+      /app/backend_test.py against the preview URL with Bearer
+      test_session_screen (user_demo01).
+
+      All review-request cases pass:
+        * Case 1: gen_236386c42285, N=3 → studio_edit returns
+          {image_base64, image_index:3} (== N). Re-GET shows
+          images.length=4 and images[3] byte-for-byte == returned
+          image_base64 ✅
+        * Case 2: no gen_id → studio_edit returns image_index=null ✅
+        * Case 3: re-run edit (new_index=4) + telegram/publish with
+          image_index=4 → 200; db.short_links row exists for
+          (gen_236386c42285, 4) with short_id=zwN8yy ✅
+        * Case 4: GET /api/r/zwN8yy/image (no auth) → 200 image/png
+          1.69 MB, BYTE-FOR-BYTE equal to the edited image from case 1.
+          The landing page now serves the EDITED image, not the original ✅
+        * Case 5: regression /generations, /garments → 200 ✅
+
+      Note: case 3 required setting telegram_channel="@frammenti_pe"
+      for user_demo01 first (strict per-user-channel guard introduced
+      earlier). The fix at server.py L1491-L1504 uses
+      find_one_and_update(return_document=ReturnDocument.AFTER) and
+      correctly derives new_index = len(images)-1 from the post-state.
+
+      Nothing to fix.

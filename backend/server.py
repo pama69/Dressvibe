@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 import os
 import logging
 import asyncio
@@ -1483,14 +1484,24 @@ async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] =
         raise HTTPException(status_code=502, detail="Modifica non riuscita, riprova")
     # If linked to a generation, append the edited image AND its small
     # thumbnail to the gallery so the history list view stays cheap.
+    # We return the NEW image_index back to the client so that subsequent
+    # actions on the edited image (Telegram publish, WhatsApp share, etc.)
+    # use the correct index — otherwise short_links would point at the
+    # original unedited image at the old index.
+    new_index: Optional[int] = None
     if payload.gen_id:
         loop = asyncio.get_event_loop()
         thumb = await loop.run_in_executor(None, make_thumb_b64, result)
-        await db.generations.update_one(
+        update_res = await db.generations.find_one_and_update(
             {"id": payload.gen_id, "user_id": user["user_id"]},
             {"$push": {"images": result, "thumbs": thumb}},
+            return_document=ReturnDocument.AFTER,
+            projection={"_id": 0, "images": 1},
         )
-    return {"image_base64": result}
+        if update_res and update_res.get("images"):
+            # The just-pushed image is the last one — its index is len-1.
+            new_index = len(update_res["images"]) - 1
+    return {"image_base64": result, "image_index": new_index}
 
 
 # ---------- Virtual Clients ----------
