@@ -1419,12 +1419,55 @@ agent_communication:
 backend:
   - task: "WhatsApp short-link 404 fix — live-host derivation for /api/short-links, /api/telegram/publish, /api/r/{short_id}"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          RE-TEST after main agent's fix (public_base derivation moved
+          ABOVE db.short_links.insert_one and the inserted dict now
+          includes public_base_at_creation): /app/backend_test.py against
+          http://localhost:8001/api with Bearer test_session_screen
+          (user_demo01) and gen_236386c42285 — **21/21 ASSERTIONS PASS**.
+
+          Case 4 (previously failing) now PASSES:
+            * POST /api/telegram/publish with X-Forwarded-Host=
+              test-host.test, X-Forwarded-Proto=https, image_index=4
+              → 200 {ok:true, channel_message_id=31, token=
+              915104ebd5e04a, media_type=photo}.
+            * db.short_links row exists for (user_demo01,
+              gen_236386c42285, 4) with short_id=Fif02I and
+              **public_base_at_creation == "https://test-host.test"** ✅
+            * db.tg_publications row inserted with channel_message_id=31 ✅
+
+          Regression on the other cases (all still PASS):
+            * 1a localhost direct → public_url starts with
+              http://localhost:8001/api/r/ (not preview URL) ✅
+            * 1b X-Forwarded-Host=my-custom-domain.test → public_url
+              starts with https://my-custom-domain.test/api/r/ ✅
+            * 2 idempotent host change hostA→hostB:
+                - same short_id returned both times
+                - public_url on call 2 uses hostB.test
+                - db.public_base_at_creation updated to
+                  "https://hostB.test"
+                - tiny_url present in both response and DB ✅
+            * 3 fresh mint with X-Forwarded-Host=fresh-host.test →
+              db.public_base_at_creation="https://fresh-host.test" ✅
+            * 5 GET /api/r/{sid} with X-Forwarded-Host=hostC.test →
+              200, text/html, <img src> contains
+              https://hostC.test/api/r/{sid}/image ✅
+            * 6 regression: /api/r/{sid}/image → 200 image/png 1.6MB,
+              /api/providers → 200, /api/garments → 200 ✅
+
+          The fix is correctly applied — the public_base derivation
+          block runs before the insert and public_base_at_creation is
+          persisted on every newly minted short_link, including those
+          minted as a side-effect of /api/telegram/publish. Nothing
+          to fix.
       - working: false
         agent: "testing"
         comment: |
@@ -1575,3 +1618,27 @@ agent_communication:
 
       Test driver: /app/backend_test.py against http://localhost:8001/api.
 
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      RE-TEST after main agent's fix to telegram_publish: **21/21 PASS**
+      via /app/backend_test.py against http://localhost:8001/api.
+
+      Case 4 (previously the lone failure) now passes:
+        * POST /api/telegram/publish with X-Forwarded-Host=test-host.test
+          → 200 {ok:true, channel_message_id=31}.
+        * db.short_links row for (user_demo01, gen_236386c42285, 4)
+          exists with **public_base_at_creation == "https://test-host.test"**.
+        * db.tg_publications row inserted.
+
+      Regression on cases 1, 2, 3, 5, 6 all GREEN — public_url uses the
+      live request host, idempotent re-mints update
+      public_base_at_creation in the DB, landing-page HTML embeds the
+      live host, and image/providers/garments endpoints still respond
+      normally.
+
+      The public_base derivation block is correctly placed above the
+      db.short_links.insert_one(...) call and the inserted dict includes
+      public_base_at_creation. Nothing to fix. Main agent can summarize
+      and finish.

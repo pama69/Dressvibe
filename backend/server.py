@@ -2074,7 +2074,22 @@ async def telegram_publish(payload: TelegramPublishRequest, request: Request, au
             if existing_sl:
                 short_id_for_url = existing_sl["short_id"]
             else:
-                # Mint a fresh short id (retry on extremely unlikely collision)
+                # Mint a fresh short id (retry on extremely unlikely collision).
+                # Compute the live public_base BEFORE the insert so the new
+                # doc carries the `public_base_at_creation` snapshot — that
+                # snapshot is what /api/short-links uses on idempotent
+                # re-fetch to detect a host change and re-mint a stale
+                # tiny_url. Without it, links born here would be invisible
+                # to the self-heal logic on subsequent shares.
+                fwd_host_mint = (
+                    request.headers.get("x-forwarded-host")
+                    or request.headers.get("host")
+                    or ""
+                ).split(",")[0].strip()
+                fwd_proto_mint = request.headers.get("x-forwarded-proto")
+                if not fwd_proto_mint:
+                    fwd_proto_mint = "http" if (fwd_host_mint.startswith("localhost") or fwd_host_mint.startswith("127.")) else "https"
+                base_at_mint = (f"{fwd_proto_mint}://{fwd_host_mint}" if fwd_host_mint else (PUBLIC_BASE_URL or "")).rstrip("/")
                 short_id_for_url = ""
                 for _ in range(8):
                     cand = _gen_short_id(6)
@@ -2089,12 +2104,14 @@ async def telegram_publish(payload: TelegramPublishRequest, request: Request, au
                         "image_index": payload.image_index,
                         "look_name": (owner_gen.get("title") or "Look").strip()[:120],
                         "tiny_url": None,
+                        "public_base_at_creation": base_at_mint,
                         "created_at": datetime.now(timezone.utc),
                     })
             if short_id_for_url:
-                # Derive base URL from the live request — matches the same
-                # approach used by /api/short-links and /api/videos so links
-                # stay valid even if PUBLIC_BASE_URL in .env is stale.
+                # Build the actual landing URL for the inline button — same
+                # live-host derivation block (used also when the short_link
+                # was reused from cache, so we always honour the current
+                # host, not the snapshot from the original mint).
                 fwd_host = (
                     request.headers.get("x-forwarded-host")
                     or request.headers.get("host")
