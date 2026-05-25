@@ -1415,3 +1415,163 @@ agent_communication:
       correctly derives new_index = len(images)-1 from the post-state.
 
       Nothing to fix.
+
+backend:
+  - task: "WhatsApp short-link 404 fix — live-host derivation for /api/short-links, /api/telegram/publish, /api/r/{short_id}"
+    implemented: true
+    working: false
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: |
+          Verified the WhatsApp short-link "404 after paste" fix via
+          /app/backend_test.py against http://localhost:8001/api with Bearer
+          test_session_screen (user_demo01) + gen_236386c42285 (5 images).
+          20/21 cases PASS, 1 MINOR-but-non-trivial FAIL.
+
+          PASSING (Cases 1, 2, 3, 5, 6 — all green):
+
+          1a) POST /api/short-links direct to localhost:8001 (no proxy)
+              {gen_id: gen_236386c42285, image_index: 0, look_name: "Test"}
+              → 200; public_url="http://localhost:8001/api/r/yM0Fc9".
+              Starts with http://localhost:8001/api/r/ ✅
+              Does NOT contain the stale preview URL
+              "outfit-gen-11.preview.emergentagent.com" ✅
+          1b) Same call WITH X-Forwarded-Host=my-custom-domain.test +
+              X-Forwarded-Proto=https → 200; public_url=
+              "https://my-custom-domain.test/api/r/JPEOkJ". Starts with
+              https://my-custom-domain.test/api/r/ ✅
+
+          2)  Idempotent host change:
+              * 1st call hostA.test (image_index=2) → public_url=
+                "https://hostA.test/api/r/MFaOan",
+                db.public_base_at_creation="https://hostA.test",
+                db.tiny_url="https://tinyurl.com/259xj32d" ✅
+              * 2nd call hostB.test, SAME gen+image_index → public_url=
+                "https://hostB.test/api/r/MFaOan" (same short_id, idempotent),
+                db.public_base_at_creation updated to "https://hostB.test",
+                db.tiny_url RE-MINTED to "https://tinyurl.com/297b8nvq"
+                (different from hostA's tinyurl, confirming re-mint
+                pathway at server.py L2398-L2411 fires) ✅
+              * tiny_url present and non-empty in both response and DB ✅
+
+          3)  New (gen, image_index=3) combo with X-Forwarded-Host=
+              fresh-host.test → db.public_base_at_creation=
+              "https://fresh-host.test" — non-empty string, matches the
+              host that served the request ✅
+
+          5)  GET /api/r/{short_id} (yM0Fc9) with X-Forwarded-Host=
+              hostC.test + X-Forwarded-Proto=https → 200, content-type
+              text/html, body contains the exact substring
+              "https://hostC.test/api/r/yM0Fc9/image" as the <img src=...>
+              attribute ✅
+
+          6)  Regression:
+              * GET /api/r/yM0Fc9/image → 200, image/png, 1,631,786 bytes ✅
+              * GET /api/providers (auth) → 200 ✅
+              * GET /api/garments (auth) → 200 ✅
+
+          FAILING — Case 4 sub-assertion (Telegram publish DB snapshot):
+
+          4)  POST /api/telegram/publish with gen_id=gen_236386c42285,
+              image_index=4 (fresh — no prior short_link), X-Forwarded-Host=
+              test-host.test + X-Forwarded-Proto=https
+              → 200 OK, channel_message_id=30, media_type="photo" ✅
+              short_link row WAS minted for (gen_236386c42285, 4) →
+              short_id="YNXfj3" ✅
+              tg_publications row exists, channel_message_id=30 ✅
+              **public_base_at_creation on the minted short_link doc:
+              `None` — EXPECTED `"https://test-host.test"`** ❌
+
+              The inline button URL Telegram receives IS correct (derived
+              from the live X-Forwarded-Host at server.py L2098-L2108
+              AFTER the insert), so the user-visible behavior — Telegram
+              post → "RICHIEDI INFO" button → live-host landing page — is
+              working. However, the persisted DB snapshot is missing.
+
+              ROOT CAUSE: server.py L2085-L2093 inserts the short_link
+              doc WITHOUT the `public_base_at_creation` field:
+                  await db.short_links.insert_one({
+                      "short_id": short_id_for_url,
+                      "user_id": user["user_id"],
+                      "gen_id": payload.gen_id,
+                      "image_index": payload.image_index,
+                      "look_name": ...,
+                      "tiny_url": None,
+                      "created_at": ...,
+                  })
+              The host derivation block at L2098-L2106 runs AFTER the
+              insert (and only when short_id_for_url is set). So the
+              DB column is never populated for short_links born in
+              the Telegram-publish path.
+
+              IMPACT: the self-heal logic in POST /api/short-links
+              (L2396-L2411) compares `cached_base = (existing.get(
+              "public_base_at_creation") or "").rstrip("/")` against
+              the current host. When `cached_base == ""`, `host_changed
+              = bool(public_base) and bool(cached_base) and (cached_base
+              != public_base)` evaluates to False, so the auto-recovery
+              never fires for short_links minted via telegram_publish.
+              This means: if a user publishes to Telegram on host X and
+              later opens Studio → WhatsApp on host Y, the cached
+              tinyurl that points at host X will keep being served
+              instead of being re-minted against host Y. This defeats
+              part of the original fix's intent.
+
+              SUGGESTED FIX (minor, ~5 lines): move the
+              fwd_host/fwd_proto/public_base derivation block above the
+              insert and add `"public_base_at_creation": public_base`
+              to the inserted dict.
+
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Pending re-test after fix.
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      WhatsApp short-link 404 fix verification: 20/21 PASS, 1 MAJOR
+      failure on the Telegram-publish DB snapshot path.
+
+      WORKING (5 of 6 review-request cases fully green):
+        * 1) /api/short-links host-derived public_url: localhost direct
+             AND X-Forwarded-Host both produce the correct prefix ✅
+        * 2) Idempotent re-fetch under host change: public_url retargets
+             to new host, public_base_at_creation updated in DB, tiny_url
+             RE-MINTED (different from hostA's tinyurl) ✅
+        * 3) New creates record public_base_at_creation in DB ✅
+        * 5) Landing page <img src> uses live host ✅
+        * 6) Regression /api/r/{sid}/image, /providers, /garments → all 200 ✅
+
+      FAILING — case 4 (Telegram publish + short_link DB snapshot):
+        * The inline-button URL Telegram receives IS correct (uses
+          live X-Forwarded-Host). The 200 OK response and the
+          channel_message_id confirm the post lands on Telegram with
+          the correct button URL pointing at https://test-host.test/api/r/...
+        * BUT: when /api/telegram/publish has to MINT a fresh
+          short_link (because none exists for the gen+image_index),
+          the insert at server.py L2085-L2093 omits the new
+          `public_base_at_creation` field. The host derivation block
+          at L2098-L2106 runs AFTER the insert and only populates the
+          local `base` variable — the DB doc never gets the snapshot.
+        * Impact: short_links minted via telegram_publish are
+          permanently invisible to the self-heal logic at L2396-L2411
+          (cached_base=="" → host_changed always False). Stale tinyurls
+          minted on host X will keep being served when the user later
+          opens Studio → WhatsApp on host Y, defeating part of the
+          original fix's intent. This IS the same class of bug the
+          fix was meant to address.
+        * Fix is one of the simplest possible: move the fwd_host /
+          fwd_proto / public_base derivation block above the
+          insert_one() call and add
+          `"public_base_at_creation": public_base` to the inserted
+          dict. ~5 lines.
+        * I did NOT touch the code per the testing-agent rules.
+
+      Test driver: /app/backend_test.py against http://localhost:8001/api.
+

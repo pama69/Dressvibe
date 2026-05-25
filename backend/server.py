@@ -2024,7 +2024,7 @@ class TelegramPublishRequest(BaseModel):
 
 
 @api_router.post("/telegram/publish")
-async def telegram_publish(payload: TelegramPublishRequest, authorization: Optional[str] = Header(None)):
+async def telegram_publish(payload: TelegramPublishRequest, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not TELEGRAM_BOT_TOKEN:
         raise HTTPException(status_code=503, detail="Telegram non configurato (token mancante)")
@@ -2092,7 +2092,18 @@ async def telegram_publish(payload: TelegramPublishRequest, authorization: Optio
                         "created_at": datetime.now(timezone.utc),
                     })
             if short_id_for_url:
-                base = (PUBLIC_BASE_URL or "").rstrip("/")
+                # Derive base URL from the live request — matches the same
+                # approach used by /api/short-links and /api/videos so links
+                # stay valid even if PUBLIC_BASE_URL in .env is stale.
+                fwd_host = (
+                    request.headers.get("x-forwarded-host")
+                    or request.headers.get("host")
+                    or ""
+                ).split(",")[0].strip()
+                fwd_proto = request.headers.get("x-forwarded-proto")
+                if not fwd_proto:
+                    fwd_proto = "http" if (fwd_host.startswith("localhost") or fwd_host.startswith("127.")) else "https"
+                base = (f"{fwd_proto}://{fwd_host}" if fwd_host else (PUBLIC_BASE_URL or "")).rstrip("/")
                 if base:
                     landing_url = f"{base}/api/r/{short_id_for_url}"
 
@@ -2347,7 +2358,7 @@ class InfoRequestPublicCreate(BaseModel):
 
 
 @api_router.post("/short-links")
-async def create_short_link(payload: ShortLinkCreate, authorization: Optional[str] = Header(None)):
+async def create_short_link(payload: ShortLinkCreate, request: Request, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     # Verify the generation belongs to the user
     gen = await db.generations.find_one({"id": payload.gen_id, "user_id": user["user_id"]}, {"_id": 0})
@@ -2357,26 +2368,48 @@ async def create_short_link(payload: ShortLinkCreate, authorization: Optional[st
     if payload.image_index < 0 or payload.image_index >= len(images):
         raise HTTPException(status_code=400, detail="Indice immagine non valido")
 
+    # Derive the public base URL from the INCOMING request so the link the
+    # user copies/pastes to WhatsApp always points at the host that actually
+    # served the API call. This is essential when the static PUBLIC_BASE_URL
+    # in .env is stale (e.g. preview URL recycled, custom domain not yet
+    # propagated to the env file, app deployed under a new host, etc).
+    fwd_host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(",")[0].strip()
+    fwd_proto = request.headers.get("x-forwarded-proto")
+    if not fwd_proto:
+        fwd_proto = "http" if (fwd_host.startswith("localhost") or fwd_host.startswith("127.")) else "https"
+    public_base = (f"{fwd_proto}://{fwd_host}" if fwd_host else (PUBLIC_BASE_URL or "")).rstrip("/")
+
     # Reuse an existing short link for the same (gen, image) if any → idempotent
     existing = await db.short_links.find_one(
         {"user_id": user["user_id"], "gen_id": payload.gen_id, "image_index": payload.image_index},
         {"_id": 0},
     )
     if existing:
-        # If we have an existing record but it doesn't have a tiny URL yet
-        # (e.g. created before this feature shipped, or tinyurl was down),
-        # try to generate one now and persist it.
-        if not existing.get("tiny_url"):
-            base = (PUBLIC_BASE_URL or "").rstrip("/")
-            full_url = f"{base}/api/r/{existing['short_id']}" if base else f"/api/r/{existing['short_id']}"
+        # The tiny URL was minted against a snapshot of the host that served
+        # the original POST. If we're now reached from a different host
+        # (preview URL recycled, custom domain switched, etc.) the tiny URL
+        # will resolve to a now-dead origin. Detect that and re-mint.
+        cached_base = (existing.get("public_base_at_creation") or "").rstrip("/")
+        host_changed = bool(public_base) and bool(cached_base) and (cached_base != public_base)
+        if host_changed or not existing.get("tiny_url"):
+            full_url = f"{public_base}/api/r/{existing['short_id']}" if public_base else f"/api/r/{existing['short_id']}"
             tiny = await _shorten_with_tinyurl(full_url)
+            patch = {}
             if tiny:
+                patch["tiny_url"] = tiny
+                existing["tiny_url"] = tiny
+            if public_base:
+                patch["public_base_at_creation"] = public_base
+            if patch:
                 await db.short_links.update_one(
                     {"short_id": existing["short_id"]},
-                    {"$set": {"tiny_url": tiny}},
+                    {"$set": patch},
                 )
-                existing["tiny_url"] = tiny
-        return _short_link_response(existing)
+        return _short_link_response(existing, public_base=public_base)
 
     # Generate a unique short id (retry if collision)
     short_id = ""
@@ -2388,8 +2421,7 @@ async def create_short_link(payload: ShortLinkCreate, authorization: Optional[st
     if not short_id:
         raise HTTPException(status_code=500, detail="Impossibile generare short id")
 
-    base = (PUBLIC_BASE_URL or "").rstrip("/")
-    full_url = f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}"
+    full_url = f"{public_base}/api/r/{short_id}" if public_base else f"/api/r/{short_id}"
     # Best-effort shortening via TinyURL (no key, free, generous limits).
     # If it fails the caller still gets the full public_url so the flow keeps
     # working — never breaks the user-facing share button.
@@ -2402,10 +2434,14 @@ async def create_short_link(payload: ShortLinkCreate, authorization: Optional[st
         "image_index": payload.image_index,
         "look_name": (payload.look_name or gen.get("title") or "Look").strip()[:120],
         "tiny_url": tiny_url,
+        # Snapshot of the host the tiny URL was minted against — used on
+        # idempotent re-fetch to detect when the public host has changed
+        # and the cached tiny URL needs to be regenerated.
+        "public_base_at_creation": public_base,
         "created_at": datetime.now(timezone.utc),
     }
     await db.short_links.insert_one(doc.copy())
-    return _short_link_response(doc)
+    return _short_link_response(doc, public_base=public_base)
 
 
 async def _shorten_with_tinyurl(long_url: str) -> Optional[str]:
@@ -2431,8 +2467,11 @@ async def _shorten_with_tinyurl(long_url: str) -> Optional[str]:
     return None
 
 
-def _short_link_response(doc: dict) -> dict:
-    base = (PUBLIC_BASE_URL or "").rstrip("/")
+def _short_link_response(doc: dict, public_base: Optional[str] = None) -> dict:
+    # When `public_base` is provided (derived from the live request host),
+    # use it — that way the URL we ship back to the user always matches the
+    # host they actually reached, even if PUBLIC_BASE_URL in .env is stale.
+    base = (public_base or PUBLIC_BASE_URL or "").rstrip("/")
     short_id = doc["short_id"]
     full_url = f"{base}/api/r/{short_id}" if base else f"/api/r/{short_id}"
     return {
@@ -2446,7 +2485,7 @@ def _short_link_response(doc: dict) -> dict:
 
 
 @api_router.get("/r/{short_id}", response_class=HTMLResponse)
-async def public_richiesta_info_page(short_id: str):
+async def public_richiesta_info_page(short_id: str, request: Request):
     """Mobile-first landing page shown when a customer taps the WhatsApp link."""
     sl = await db.short_links.find_one({"short_id": short_id}, {"_id": 0})
     if not sl:
@@ -2455,7 +2494,18 @@ async def public_richiesta_info_page(short_id: str):
     owner_settings = await db.user_settings.find_one({"user_id": sl["user_id"]}, {"_id": 0}) or {}
     shop_phone_e164 = (owner_settings.get("whatsapp_business_phone") or "").strip()
     shop_name = (owner_settings.get("shop_name") or "").strip() or "Frammenti"
-    base = (PUBLIC_BASE_URL or "").rstrip("/")
+    # Always derive the base URL from the live request so the embedded
+    # <img src> and wa.me share link stay valid even if PUBLIC_BASE_URL
+    # in .env is stale.
+    fwd_host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(",")[0].strip()
+    fwd_proto = request.headers.get("x-forwarded-proto")
+    if not fwd_proto:
+        fwd_proto = "http" if (fwd_host.startswith("localhost") or fwd_host.startswith("127.")) else "https"
+    base = (f"{fwd_proto}://{fwd_host}" if fwd_host else (PUBLIC_BASE_URL or "")).rstrip("/")
     image_url = f"{base}/api/r/{short_id}/image" if base else f"/api/r/{short_id}/image"
     # Prefer the short tinyurl in the wa.me message body — looks much nicer
     # when the customer's phone shows the auto-composed text, and the link

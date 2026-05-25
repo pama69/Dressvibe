@@ -1,324 +1,359 @@
 """
-Backend test for /api/studio/edit returning new image_index.
-
-Verifies the fix where /api/studio/edit returns:
-  {image_base64: <result>, image_index: <int|null>}
-
-The new image_index is computed via find_one_and_update(return_document=AFTER)
-which atomically pushes the image+thumb and returns the post-state; index = len(images) - 1.
-
-Auth: Bearer test_session_screen (user_demo01).
+Backend tests for WhatsApp short-link "404 after paste" fix.
+Verifies that POST /api/short-links, POST /api/telegram/publish, and
+GET /api/r/{short_id} derive their public base URL from the live incoming
+request (x-forwarded-host / host + x-forwarded-proto) instead of the static
+PUBLIC_BASE_URL env value.
 """
-import base64
 import os
 import sys
-import time
-import requests
-from pymongo import MongoClient
+import asyncio
+import httpx
+from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
-load_dotenv("/app/backend/.env")
+from pathlib import Path
+
+load_dotenv(Path("/app/backend/.env"))
+
+# CRITICAL: tests must talk DIRECTLY to localhost:8001 so the Host header
+# is "localhost:8001" — otherwise the preview URL ingress rewrites it.
+LOCAL_BASE = "http://localhost:8001/api"
+AUTH = {"Authorization": "Bearer test_session_screen"}
+GEN_ID = "gen_236386c42285"  # user_demo01 — 5 images
+
+mongo_url = os.environ["MONGO_URL"]
+db_name = os.environ["DB_NAME"]
+mclient = AsyncIOMotorClient(mongo_url)
+db = mclient[db_name]
 
 
-def _read_frontend_env(key: str) -> str:
-    with open("/app/frontend/.env") as f:
-        for line in f:
-            if line.startswith(f"{key}="):
-                return line.split("=", 1)[1].strip().strip('"')
-    return ""
-
-BASE_URL = _read_frontend_env("EXPO_PUBLIC_BACKEND_URL").rstrip("/") + "/api"
-TOKEN = "test_session_screen"
-HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
-
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = os.environ.get("DB_NAME", "dressvibe")
-mongo = MongoClient(MONGO_URL)
-db = mongo[DB_NAME]
-
-results = []
-def record(name: str, ok: bool, info: str = ""):
-    status = "PASS" if ok else "FAIL"
-    print(f"[{status}] {name} :: {info}")
-    results.append((name, ok, info))
+PASS = 0
+FAIL = 0
+FAILURES = []
 
 
-PREFERRED_GEN_ID = "gen_d24135486f39"
-
-def find_or_create_gen():
-    g = db.generations.find_one(
-        {"id": PREFERRED_GEN_ID, "user_id": "user_demo01"},
-        {"_id": 0, "id": 1, "images": 1},
-    )
-    if g and g.get("images"):
-        return g["id"], len(g["images"])
-    cur = db.generations.find(
-        {"user_id": "user_demo01", "images.0": {"$exists": True}},
-        {"_id": 0, "id": 1, "images": 1},
-    ).sort("created_at", -1).limit(5)
-    for g in cur:
-        if g.get("images"):
-            return g["id"], len(g["images"])
-    return None, 0
-
-GEN_ID, N_BEFORE = find_or_create_gen()
-print(f"[setup] using gen_id={GEN_ID} with images.length={N_BEFORE}")
-
-
-def case1():
-    if not GEN_ID:
-        record("case1_setup", False, "No suitable gen_id found for user_demo01")
-        return None, None, None
-
-    r = requests.get(f"{BASE_URL}/generations/{GEN_ID}", headers=HEADERS, timeout=60)
-    if r.status_code != 200:
-        record("case1_get_before", False, f"status={r.status_code} body={r.text[:200]}")
-        return None, None, None
-    gen = r.json()
-    images = gen.get("images") or []
-    N = len(images)
-    if N == 0:
-        record("case1_setup", False, "gen has 0 images")
-        return None, None, None
-    record("case1_get_before", True, f"images.length={N}")
-
-    body = {
-        "image_base64": images[0],
-        "edit_prompt": "Subtle warm tone",
-        "gen_id": GEN_ID,
-        "add_price_tags": False,
-    }
-    t0 = time.time()
-    try:
-        r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
-    except Exception as e:
-        record("case1_studio_edit", False, f"exception: {e}")
-        return None, None, None
-    elapsed = time.time() - t0
-    if r.status_code != 200:
-        if r.status_code in (429, 502, 503):
-            print(f"[case1] retry once after {r.status_code}: {r.text[:200]}")
-            time.sleep(8)
-            r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
-        if r.status_code != 200:
-            record("case1_studio_edit", False, f"status={r.status_code} body={r.text[:200]} (elapsed={elapsed:.1f}s)")
-            return None, None, None
-
-    js = r.json()
-    edited_b64 = js.get("image_base64")
-    new_index = js.get("image_index")
-    if not edited_b64 or not isinstance(edited_b64, str):
-        record("case1_studio_edit_has_image", False, "image_base64 missing/empty")
-        return None, None, None
-    record("case1_studio_edit_has_image", True, f"len={len(edited_b64)} elapsed={elapsed:.1f}s")
-
-    if new_index != N:
-        record("case1_image_index_equals_N", False, f"got {new_index}, expected {N}")
-        return None, None, None
-    record("case1_image_index_equals_N", True, f"image_index={new_index} == N={N}")
-
-    r2 = requests.get(f"{BASE_URL}/generations/{GEN_ID}", headers=HEADERS, timeout=60)
-    if r2.status_code != 200:
-        record("case1_get_after", False, f"status={r2.status_code}")
-        return None, None, None
-    gen2 = r2.json()
-    images2 = gen2.get("images") or []
-    if len(images2) != N + 1:
-        record("case1_get_after_length", False, f"got {len(images2)}, expected {N+1}")
-        return None, None, None
-    record("case1_get_after_length", True, f"images.length={len(images2)}")
-
-    if images2[N] != edited_b64:
-        record("case1_images_N_matches", False, f"images[{N}] differs from returned image_base64 (lens {len(images2[N])} vs {len(edited_b64)})")
-        return None, None, None
-    record("case1_images_N_matches", True, f"images[{N}] == returned image_base64 ({len(edited_b64)} chars)")
-
-    return GEN_ID, new_index, edited_b64
-
-
-def case2():
-    # 1x1 transparent PNG
-    tiny_png = base64.b64encode(bytes.fromhex(
-        "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4"
-        "890000000A49444154789C6300010000000500010D0A2DB40000000049454E44"
-        "AE426082"
-    )).decode("ascii")
-    body = {
-        "image_base64": tiny_png,
-        "edit_prompt": "Make it brighter",
-        "add_price_tags": False,
-    }
-    t0 = time.time()
-    try:
-        r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
-    except Exception as e:
-        record("case2_studio_edit", False, f"exception: {e}")
-        return
-    elapsed = time.time() - t0
-    if r.status_code != 200:
-        if r.status_code in (429, 502, 503):
-            print(f"[case2] retry once after {r.status_code}: {r.text[:200]}")
-            time.sleep(8)
-            r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
-        if r.status_code != 200:
-            record("case2_studio_edit", False, f"status={r.status_code} body={r.text[:200]} (elapsed={elapsed:.1f}s)")
-            return
-    js = r.json()
-    if not js.get("image_base64"):
-        record("case2_has_image_base64", False, "image_base64 missing/empty")
-        return
-    record("case2_has_image_base64", True, f"len={len(js['image_base64'])} elapsed={elapsed:.1f}s")
-
-    val = js.get("image_index")
-    if val is not None:
-        record("case2_image_index_is_null", False, f"image_index={val!r} (expected null)")
-        return
-    record("case2_image_index_is_null", True, f"image_index field present={'image_index' in js}, value=null")
-
-
-def ensure_telegram_channel():
-    # Read current setting
-    r = requests.get(f"{BASE_URL}/user-settings", headers=HEADERS, timeout=30)
-    if r.status_code != 200:
-        return None
-    prev = (r.json() or {}).get("telegram_channel") or ""
-    if not prev:
-        # set to a test channel — value isn't actually used for short_link minting,
-        # but the strict-channel guard requires non-empty.
-        rp = requests.put(
-            f"{BASE_URL}/user-settings",
-            headers=HEADERS,
-            json={"telegram_channel": "@frammenti_pe"},
-            timeout=30,
-        )
-        print(f"[setup] set telegram_channel @frammenti_pe -> {rp.status_code}")
+def report(name, ok, detail=""):
+    global PASS, FAIL
+    icon = "PASS" if ok else "FAIL"
+    line = f"[{icon}] {name}"
+    if detail:
+        line += f"  --  {detail}"
+    print(line)
+    if ok:
+        PASS += 1
     else:
-        print(f"[setup] telegram_channel already set to {prev!r}")
-    return prev
+        FAIL += 1
+        FAILURES.append((name, detail))
 
 
-def case3():
-    if not GEN_ID:
-        record("case3", False, "no gen_id")
-        return None, None, None
+async def cleanup_short_links():
+    """Wipe any existing short links for GEN_ID so we always exercise the
+    NEW-mint code path on every test run."""
+    await db.short_links.delete_many({"user_id": "user_demo01", "gen_id": GEN_ID})
 
-    ensure_telegram_channel()
 
-    r0 = requests.get(f"{BASE_URL}/generations/{GEN_ID}", headers=HEADERS, timeout=60)
-    if r0.status_code != 200:
-        record("case3_get_before", False, f"status={r0.status_code}")
-        return None, None, None
-    images0 = r0.json().get("images") or []
-    N = len(images0)
-    if N == 0:
-        record("case3_setup", False, "no images in gen")
-        return None, None, None
-    record("case3_get_before", True, f"images.length={N}")
-
-    body = {
-        "image_base64": images0[0],
-        "edit_prompt": "Slightly enhance contrast",
-        "gen_id": GEN_ID,
-        "add_price_tags": False,
-    }
-    t0 = time.time()
-    r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
-    elapsed = time.time() - t0
+async def test_1a_localhost_direct():
+    """Case 1: Direct call (no proxy) → public_url MUST start with
+    http://localhost:8001/api/r/..."""
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        r = await http.post(
+            f"{LOCAL_BASE}/short-links",
+            headers={**AUTH, "Content-Type": "application/json"},
+            json={"gen_id": GEN_ID, "image_index": 0, "look_name": "Test"},
+        )
     if r.status_code != 200:
-        if r.status_code in (429, 502, 503):
-            print(f"[case3] retry once after {r.status_code}")
-            time.sleep(8)
-            r = requests.post(f"{BASE_URL}/studio/edit", headers=HEADERS, json=body, timeout=120)
-        if r.status_code != 200:
-            record("case3_studio_edit", False, f"status={r.status_code} body={r.text[:200]}")
-            return None, None, None
-    js = r.json()
-    edited_b64 = js["image_base64"]
-    new_index = js["image_index"]
-    if new_index != N:
-        record("case3_image_index", False, f"got {new_index}, expected {N}")
-        return None, None, None
-    record("case3_studio_edit", True, f"new_index={new_index} elapsed={elapsed:.1f}s")
+        report("1a-localhost-direct-status", False, f"status={r.status_code} body={r.text[:200]}")
+        return None
+    body = r.json()
+    pu = body.get("public_url") or ""
+    ok = pu.startswith("http://localhost:8001/api/r/")
+    detail = f"public_url={pu}"
+    report("1a-localhost-direct-public_url-prefix", ok, detail)
+    not_preview = "outfit-gen-11.preview.emergentagent.com" not in pu
+    report("1a-localhost-direct-not-preview", not_preview, detail)
+    return body
 
-    pub_body = {
-        "image_base64": edited_b64,
-        "media_type": "photo",
-        "caption": "Test fix studio_edit image_index",
-        "gen_id": GEN_ID,
-        "image_index": new_index,
-    }
-    rp = requests.post(f"{BASE_URL}/telegram/publish", headers=HEADERS, json=pub_body, timeout=120)
-    record("case3_publish_response", rp.status_code == 200, f"status={rp.status_code} body={rp.text[:200]}")
 
-    sl = db.short_links.find_one({"gen_id": GEN_ID, "image_index": new_index})
+async def test_1b_forwarded_host():
+    """Case 1b: X-Forwarded-Host=my-custom-domain.test + X-Forwarded-Proto=https
+    → public_url MUST start with https://my-custom-domain.test/api/r/..."""
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        r = await http.post(
+            f"{LOCAL_BASE}/short-links",
+            headers={
+                **AUTH,
+                "Content-Type": "application/json",
+                "X-Forwarded-Host": "my-custom-domain.test",
+                "X-Forwarded-Proto": "https",
+            },
+            json={"gen_id": GEN_ID, "image_index": 1, "look_name": "Custom domain"},
+        )
+    if r.status_code != 200:
+        report("1b-forwarded-host-status", False, f"status={r.status_code} body={r.text[:200]}")
+        return None
+    body = r.json()
+    pu = body.get("public_url") or ""
+    ok = pu.startswith("https://my-custom-domain.test/api/r/")
+    report("1b-forwarded-host-public_url-prefix", ok, f"public_url={pu}")
+    return body
+
+
+async def test_2_idempotent_host_change():
+    """Case 2: same (gen_id, image_index) called twice with different hosts.
+    Second call's public_url must use hostB and DB row's public_base_at_creation
+    must == 'https://hostB.test'."""
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        r1 = await http.post(
+            f"{LOCAL_BASE}/short-links",
+            headers={
+                **AUTH,
+                "Content-Type": "application/json",
+                "X-Forwarded-Host": "hostA.test",
+                "X-Forwarded-Proto": "https",
+            },
+            json={"gen_id": GEN_ID, "image_index": 2, "look_name": "Look A"},
+        )
+    if r1.status_code != 200:
+        report("2-hostA-status", False, f"status={r1.status_code} body={r1.text[:200]}")
+        return
+    b1 = r1.json()
+    short_id = b1.get("short_id")
+    ok_a = (b1.get("public_url") or "").startswith("https://hostA.test/api/r/")
+    report("2-hostA-public_url", ok_a, f"public_url={b1.get('public_url')}")
+
+    doc_a = await db.short_links.find_one({"short_id": short_id}, {"_id": 0})
+    pbac_a = (doc_a or {}).get("public_base_at_creation")
+    report(
+        "2-hostA-public_base_at_creation",
+        pbac_a == "https://hostA.test",
+        f"db.public_base_at_creation={pbac_a!r}",
+    )
+    tiny_a = (doc_a or {}).get("tiny_url")
+
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        r2 = await http.post(
+            f"{LOCAL_BASE}/short-links",
+            headers={
+                **AUTH,
+                "Content-Type": "application/json",
+                "X-Forwarded-Host": "hostB.test",
+                "X-Forwarded-Proto": "https",
+            },
+            json={"gen_id": GEN_ID, "image_index": 2, "look_name": "Look B"},
+        )
+    if r2.status_code != 200:
+        report("2-hostB-status", False, f"status={r2.status_code} body={r2.text[:200]}")
+        return
+    b2 = r2.json()
+    ok_b = (b2.get("public_url") or "").startswith("https://hostB.test/api/r/")
+    report("2-hostB-public_url", ok_b, f"public_url={b2.get('public_url')}")
+
+    same_sid = b2.get("short_id") == short_id
+    report("2-hostB-idempotent-short_id", same_sid, f"sid1={short_id} sid2={b2.get('short_id')}")
+
+    doc_b = await db.short_links.find_one({"short_id": short_id}, {"_id": 0})
+    pbac_b = (doc_b or {}).get("public_base_at_creation")
+    report(
+        "2-hostB-public_base_at_creation",
+        pbac_b == "https://hostB.test",
+        f"db.public_base_at_creation={pbac_b!r}",
+    )
+
+    # tiny_url should be present in response (re-minted) — per spec: "tiny_url
+    # field in the response and in the DB row MUST have been REGENERATED (or
+    # remain present and non-empty)".
+    tu_resp = b2.get("tiny_url")
+    tu_db = (doc_b or {}).get("tiny_url")
+    report(
+        "2-hostB-tiny_url-response-present",
+        "tiny_url" in b2,
+        f"response.tiny_url={tu_resp!r}",
+    )
+    report(
+        "2-hostB-tiny_url-db-present",
+        "tiny_url" in (doc_b or {}),
+        f"db.tiny_url={tu_db!r} (prev hostA tiny_url={tiny_a!r})",
+    )
+
+
+async def test_3_db_public_base_at_creation_new_create():
+    """Case 3: A brand-new (gen, image_index) combo → DB doc must include
+    public_base_at_creation as non-empty string."""
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        r = await http.post(
+            f"{LOCAL_BASE}/short-links",
+            headers={
+                **AUTH,
+                "Content-Type": "application/json",
+                "X-Forwarded-Host": "fresh-host.test",
+                "X-Forwarded-Proto": "https",
+            },
+            json={"gen_id": GEN_ID, "image_index": 3, "look_name": "Fresh"},
+        )
+    if r.status_code != 200:
+        report("3-fresh-mint-status", False, f"status={r.status_code} body={r.text[:200]}")
+        return
+    body = r.json()
+    sid = body.get("short_id")
+    doc = await db.short_links.find_one({"short_id": sid}, {"_id": 0})
+    pbac = (doc or {}).get("public_base_at_creation")
+    ok = isinstance(pbac, str) and len(pbac) > 0
+    report("3-new-create-public_base_at_creation-nonempty", ok, f"public_base_at_creation={pbac!r}")
+    report(
+        "3-new-create-public_base_at_creation-matches",
+        pbac == "https://fresh-host.test",
+        f"public_base_at_creation={pbac!r}",
+    )
+
+
+async def test_4_telegram_publish_live_host():
+    """Case 4: POST /api/telegram/publish with X-Forwarded-Host=test-host.test.
+    At minimum: 200 OK + short_link row minted with public_base_at_creation
+    == 'https://test-host.test'.
+    We use image_index=4 so a NEW short_link is minted (no idempotent reuse)."""
+    gen = await db.generations.find_one({"id": GEN_ID}, {"_id": 0, "images": 1})
+    if not gen or not gen.get("images"):
+        report("4-tg-setup-images", False, "no images on gen")
+        return
+    images = gen["images"]
+    if len(images) < 5:
+        report("4-tg-setup-images-count", False, f"need 5 images, got {len(images)}")
+        return
+    img_idx = 4
+    img_b64 = images[img_idx]
+
+    async with httpx.AsyncClient(timeout=60.0) as http:
+        r = await http.post(
+            f"{LOCAL_BASE}/telegram/publish",
+            headers={
+                **AUTH,
+                "Content-Type": "application/json",
+                "X-Forwarded-Host": "test-host.test",
+                "X-Forwarded-Proto": "https",
+            },
+            json={
+                "image_base64": img_b64,
+                "media_type": "photo",
+                "caption": "Backend test live-host verification — please ignore",
+                "gen_id": GEN_ID,
+                "image_index": img_idx,
+            },
+        )
+    if r.status_code != 200:
+        report("4-tg-publish-status", False, f"status={r.status_code} body={r.text[:300]}")
+        return
+    body = r.json()
+    report("4-tg-publish-200-ok", body.get("ok") is True, f"resp={body}")
+
+    sl = await db.short_links.find_one(
+        {"user_id": "user_demo01", "gen_id": GEN_ID, "image_index": img_idx},
+        {"_id": 0},
+    )
+    report("4-tg-short_link-row-exists", sl is not None, f"sl={sl}")
+    if sl is None:
+        return
+    pbac = sl.get("public_base_at_creation")
+    report(
+        "4-tg-short_link-public_base_at_creation",
+        pbac == "https://test-host.test",
+        f"public_base_at_creation={pbac!r}  (expected 'https://test-host.test')",
+    )
+
+    tg_pub = await db.tg_publications.find_one(
+        {"gen_id": GEN_ID, "image_index": img_idx, "user_id": "user_demo01"},
+        sort=[("created_at", -1)],
+    )
+    report(
+        "4-tg-tg_publications-row-exists",
+        tg_pub is not None and tg_pub.get("channel_message_id"),
+        f"tg_pub.channel_message_id={tg_pub.get('channel_message_id') if tg_pub else None}",
+    )
+
+
+async def test_5_landing_page_live_host():
+    """Case 5: GET /api/r/{short_id} with X-Forwarded-Host=hostC.test →
+    HTML <img src> contains https://hostC.test/api/r/{short_id}/image"""
+    sl = await db.short_links.find_one(
+        {"user_id": "user_demo01", "gen_id": GEN_ID, "image_index": 0},
+        {"_id": 0},
+    )
     if not sl:
-        record("case3_short_link_exists", False, f"no short_link row for gen_id={GEN_ID} idx={new_index}")
-        return None, None, None
-    short_id = sl.get("short_id")
-    if not short_id:
-        record("case3_short_link_exists", False, f"short_link row exists but missing short_id: {sl}")
-        return None, None, None
-    record("case3_short_link_exists", True, f"short_id={short_id}")
-
-    return short_id, new_index, edited_b64
-
-
-def case4(short_id, new_index, edited_b64):
-    if not short_id:
-        record("case4", False, "no short_id from case3")
+        report("5-landing-setup", False, "no short_link for image_index=0")
         return
-    r = requests.get(f"{BASE_URL}/r/{short_id}/image", timeout=60)
+    sid = sl["short_id"]
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        r = await http.get(
+            f"{LOCAL_BASE}/r/{sid}",
+            headers={
+                "X-Forwarded-Host": "hostC.test",
+                "X-Forwarded-Proto": "https",
+            },
+        )
     if r.status_code != 200:
-        record("case4_get_image", False, f"status={r.status_code} body={r.text[:200]}")
+        report("5-landing-status", False, f"status={r.status_code} body={r.text[:200]}")
         return
-    record("case4_get_image", True, f"status=200 ctype={r.headers.get('content-type')} len={len(r.content)}")
-
-    try:
-        expected_raw = base64.b64decode(edited_b64)
-    except Exception as e:
-        record("case4_decode_edited", False, f"could not b64decode edited image: {e}")
-        return
-    if len(r.content) != len(expected_raw):
-        record("case4_length_match", False, f"got {len(r.content)} bytes, expected {len(expected_raw)} bytes")
-        return
-    record("case4_length_match", True, f"raw size={len(r.content)} bytes")
-
-    if r.content[:100] != expected_raw[:100]:
-        record("case4_prefix_match", False, "first 100 bytes differ")
-        return
-    record("case4_prefix_match", True, "first 100 bytes match")
-
-    if r.content != expected_raw:
-        record("case4_full_match", False, "full byte buffers differ")
-        return
-    record("case4_full_match", True, "full byte-for-byte match — landing serves the EDITED image")
+    html = r.text
+    ct_ok = "text/html" in (r.headers.get("content-type") or "")
+    report("5-landing-content-type", ct_ok, f"content-type={r.headers.get('content-type')}")
+    expected = f"https://hostC.test/api/r/{sid}/image"
+    has_img_src = expected in html
+    report(
+        "5-landing-img-src-live-host",
+        has_img_src,
+        f"expected substring {expected!r} in HTML body (len={len(html)})",
+    )
 
 
-def case5():
-    r1 = requests.get(f"{BASE_URL}/generations", headers=HEADERS, timeout=30)
-    record("case5_generations", r1.status_code == 200, f"status={r1.status_code} count={len(r1.json()) if r1.status_code==200 else 'n/a'}")
-    r2 = requests.get(f"{BASE_URL}/garments", headers=HEADERS, timeout=30)
-    record("case5_garments", r2.status_code == 200, f"status={r2.status_code} count={len(r2.json()) if r2.status_code==200 else 'n/a'}")
+async def test_6_regression():
+    """Regression: image PNG + providers + garments."""
+    sl = await db.short_links.find_one(
+        {"user_id": "user_demo01", "gen_id": GEN_ID, "image_index": 0},
+        {"_id": 0},
+    )
+    if sl:
+        sid = sl["short_id"]
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            r = await http.get(f"{LOCAL_BASE}/r/{sid}/image")
+        ok = r.status_code == 200 and (r.headers.get("content-type") or "").startswith("image/")
+        report(
+            "6-image-200-png",
+            ok,
+            f"status={r.status_code} content-type={r.headers.get('content-type')} bytes={len(r.content)}",
+        )
+
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        rp = await http.get(f"{LOCAL_BASE}/providers", headers=AUTH)
+    report("6-providers-200", rp.status_code == 200, f"status={rp.status_code}")
+
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        rg = await http.get(f"{LOCAL_BASE}/garments", headers=AUTH)
+    report("6-garments-200", rg.status_code == 200, f"status={rg.status_code}")
 
 
-print(f"\n=== Testing studio/edit image_index fix at {BASE_URL} ===\n")
-case1_out = case1()
-print()
-case2()
-print()
-case3_out = case3()
-print()
-if case3_out and case3_out[0]:
-    case4(*case3_out)
-else:
-    print("[case4] skipped (case3 failed)")
-print()
-case5()
+async def main():
+    print("=" * 70)
+    print("WhatsApp short-link 404 fix — backend verification")
+    print(f"Target: {LOCAL_BASE}")
+    print("=" * 70)
 
-print("\n=== SUMMARY ===")
-passed = sum(1 for _, ok, _ in results if ok)
-total = len(results)
-print(f"{passed}/{total} PASS")
-for name, ok, info in results:
-    flag = "[PASS]" if ok else "[FAIL]"
-    print(f"  {flag} {name}")
-sys.exit(0 if passed == total else 1)
+    await cleanup_short_links()
+
+    await test_1a_localhost_direct()
+    await test_1b_forwarded_host()
+    await test_2_idempotent_host_change()
+    await test_3_db_public_base_at_creation_new_create()
+    await test_4_telegram_publish_live_host()
+    await test_5_landing_page_live_host()
+    await test_6_regression()
+
+    print("=" * 70)
+    print(f"RESULT: {PASS} passed, {FAIL} failed")
+    if FAILURES:
+        print("FAILURES:")
+        for name, det in FAILURES:
+            print(f"  - {name}: {det}")
+    return 0 if FAIL == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
