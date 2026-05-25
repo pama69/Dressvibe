@@ -20,7 +20,6 @@ import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
-import { useNotifications } from "@/src/contexts/NotificationsContext";
 
 // Module-level flag: the welcome splash should appear only the first time
 // the user lands on the gallery during a session. Tabbing away and coming
@@ -50,7 +49,6 @@ export default function Galleria() {
   const router = useRouter();
   const { user } = useAuth();
   const confirm = useConfirm();
-  const { unread } = useNotifications();
   const [items, setItems] = useState<Garment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -59,15 +57,15 @@ export default function Galleria() {
   const tileW = Math.floor((winW - PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
   const tileH = Math.round(tileW / 0.78);
 
-  // Welcome splash — shown only the first time per session.
-  // It stays visible until the user picks one of the 4 quick-action buttons.
+  // Welcome splash — minimalist intro shown only the first time per session.
+  // Just the animated "DressVibe" logo, then auto-dismisses with a soft fade.
   const [showSplash, setShowSplash] = useState(!SPLASH_SHOWN_ONCE);
   const splashFade = useRef(new Animated.Value(1)).current;
   const splashPulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!showSplash) return;
-    // Soft pulsing animation on the logo (keeps running until dismissed)
+    // Soft pulsing animation on the logo
     const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(splashPulse, {
@@ -79,19 +77,23 @@ export default function Galleria() {
       ])
     );
     pulseLoop.start();
-    return () => { pulseLoop.stop(); };
+
+    // Auto-dismiss after ~1.6s with a smooth fade — gallery becomes interactive.
+    const timer = setTimeout(() => {
+      Animated.timing(splashFade, {
+        toValue: 0, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true,
+      }).start(() => {
+        SPLASH_SHOWN_ONCE = true;
+        setShowSplash(false);
+      });
+    }, 1600);
+
+    return () => {
+      pulseLoop.stop();
+      clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSplash]);
-
-  const dismissSplashAndGo = useCallback((target: string | null) => {
-    Animated.timing(splashFade, {
-      toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true,
-    }).start(() => {
-      SPLASH_SHOWN_ONCE = true;
-      setShowSplash(false);
-      if (target) router.push(target as any);
-    });
-  }, [router, splashFade]);
 
   const load = useCallback(async () => {
     try {
@@ -144,20 +146,7 @@ export default function Galleria() {
             {user?.name?.split(" ")[0] || "Atelier"}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-          <TouchableOpacity
-            style={styles.bell}
-            onPress={() => router.push("/notifications")}
-            testID="bell-btn"
-            activeOpacity={0.7}
-          >
-            <Text style={styles.bellEmoji}>🔔</Text>
-            {unread > 0 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unread > 99 ? "99+" : String(unread)}</Text>
-              </View>
-            ) : null}
-          </TouchableOpacity>
+        <View style={{ flexDirection: "row", gap: 10, alignItems: "center", marginRight: 56 }}>
           <TouchableOpacity
             style={styles.uploadFab}
             onPress={() => router.push("/upload")}
@@ -261,10 +250,13 @@ export default function Galleria() {
 
       {/* "Carica un capo" CTA removed per user request — already in header (+) */}
 
-      {/* Welcome splash — full-screen black overlay with animated logo + 4
-          quick-action buttons. Stays visible until the user picks an action. */}
+      {/* Welcome splash — minimal black overlay with the animated DressVibe
+          logo. Auto-fades after ~1.6s and reveals the gallery. No buttons. */}
       {showSplash ? (
-        <Animated.View style={[styles.splash, { opacity: splashFade }]}>
+        <Animated.View
+          style={[styles.splash, { opacity: splashFade }]}
+          pointerEvents="none"
+        >
           <LinearGradient
             colors={["#050505", "#0b0b0b", "#050505"]}
             style={StyleSheet.absoluteFill}
@@ -304,54 +296,6 @@ export default function Galleria() {
                 ]}
               />
             </Animated.View>
-
-            <View style={styles.splashActions}>
-              <TouchableOpacity
-                style={styles.splashAction}
-                onPress={() => dismissSplashAndGo("/(app)/generate")}
-                testID="splash-generate"
-                activeOpacity={0.85}
-              >
-                <Text style={styles.splashActionEmoji}>✨</Text>
-                <Text style={styles.splashActionLabel}>Genera</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.splashAction}
-                onPress={() => dismissSplashAndGo("/upload")}
-                testID="splash-upload"
-                activeOpacity={0.85}
-              >
-                <Text style={styles.splashActionEmoji}>＋</Text>
-                <Text style={styles.splashActionLabel}>Carica capo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.splashAction}
-                onPress={() => dismissSplashAndGo("/(app)/history")}
-                testID="splash-history"
-                activeOpacity={0.85}
-              >
-                <Text style={styles.splashActionEmoji}>📂</Text>
-                <Text style={styles.splashActionLabel}>Storico</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.splashAction}
-                onPress={() => dismissSplashAndGo("/(app)/profile")}
-                testID="splash-profile"
-                activeOpacity={0.85}
-              >
-                <Text style={styles.splashActionEmoji}>👤</Text>
-                <Text style={styles.splashActionLabel}>Profilo</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => dismissSplashAndGo(null)}
-              style={styles.splashSkip}
-              testID="splash-skip"
-              activeOpacity={0.7}
-            >
-              <Text style={styles.splashSkipText}>Vai alla galleria</Text>
-            </TouchableOpacity>
           </View>
         </Animated.View>
       ) : null}

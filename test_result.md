@@ -1642,3 +1642,35 @@ agent_communication:
       db.short_links.insert_one(...) call and the inserted dict includes
       public_base_at_creation. Nothing to fix. Main agent can summarize
       and finish.
+
+
+  - agent: "main"
+    message: |
+      UI polish (Msg 715) — 3 P0 frontend fixes implemented:
+
+      1. Hidden "Garment" tab from the bottom tab bar (`/app/frontend/app/
+         (app)/_layout.tsx`): added `<Tabs.Screen name="garment/[id]"
+         options={{ href: null }} />`. The Garment detail route remains
+         reachable via `router.push("/(app)/garment/<id>")` from the
+         gallery cards.
+
+      2. Notification bell moved to a GLOBAL floating overlay rendered
+         inside `(app)/_layout.tsx`. It now floats at `top: insets.top +
+         10, right: 16` (40x40) with `zIndex: 50` and is visible on every
+         (app)-group screen (Galleria, Genera, Storia, Profilo, garment
+         detail, studio, results, upload, notifications). Unread badge
+         reuses `useNotifications().unread`. testID: `global-bell-btn`.
+
+      3. Splash on Gallery simplified — only the animated "DressVibe"
+         logo + underline pulse remains. The four quick-action buttons
+         (Genera/Carica/Storico/Profilo) and the "Vai alla galleria"
+         skip link are removed. Splash now auto-dismisses with a 450ms
+         fade after ~1.6s. `pointerEvents="none"` so the gallery (and
+         global bell) stays interactive during the brief intro.
+
+      Companion change in `(app)/index.tsx`: dropped the local bell from
+      the gallery header (the global one replaces it) and added a
+      `marginRight: 56` to the gallery header's right-side group so the
+      local "+" upload FAB doesn't overlap the global bell.
+
+      No backend changes. Frontend testing not requested by user yet.
