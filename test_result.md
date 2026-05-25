@@ -1674,3 +1674,32 @@ agent_communication:
       local "+" upload FAB doesn't overlap the global bell.
 
       No backend changes. Frontend testing not requested by user yet.
+
+
+  - agent: "main"
+    message: |
+      FEATURE — Google VEO image-to-video generation activated (no new key
+      required, reuses GEMINI_API_KEY).
+
+      Backend changes:
+      * `backend/providers.py` — google_veo provider now gated by
+        `GEMINI_API_KEY` (was `GOOGLE_VEO_API_KEY`). `GET /api/providers`
+        confirms `video_gen.google_veo.enabled == true`.
+
+      * `backend/server.py` — added a full `google_veo` branch in the
+        `POST /api/videos` dispatcher:
+        - Model: `veo-3.1-fast-generate-preview` (fast & cheap, fashion-fit)
+        - Endpoint: `POST {base}/models/{model}:predictLongRunning`
+          header `x-goog-api-key: $GEMINI_API_KEY`
+        - Body: `instances[].prompt` + `instances[].image.bytesBase64Encoded`
+          + parameters `aspectRatio=9:16`, `durationSeconds=4|6|8`,
+          `resolution=720p`, `personGeneration=allow_adult`,
+          `numberOfVideos=1`.
+        - Polls operation every 8s up to ~10 min (hard cap).
+        - Extracts `response.generateVideoResponse.generatedSamples[0].video.uri`.
+        - Downloads the MP4 server-side (VEO URIs need the API key, must
+          NOT be leaked to the client) with `follow_redirects=True` and
+          archives to `db.videos.video_b64`. `playback_url` returns
+          `/api/videos/{id}/file` for the client player.
+        - Strips any `data:image/...;base64,` prefix from the input.
+        - Clamps `duration_seconds` to VEO's discrete set 4/6/8.

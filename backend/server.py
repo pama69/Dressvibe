@@ -1899,6 +1899,146 @@ async def create_video(payload: VideoGenerateRequest, request: Request, authoriz
         doc["playback_url"] = f"/api/videos/{video_id}/file" if video_bytes_b64 else video_url
         return doc
 
+    # -----------------------------------------------------------------
+    # Google VEO 3.1 — image-to-video via the Gemini API (predictLongRunning).
+    # Uses the same GEMINI_API_KEY already configured for Nano Banana, so no
+    # extra credential is required. Fashion default: 9:16 portrait, 8s, 720p,
+    # `veo-3.1-fast-generate-preview` (fast & cheaper, good for ecommerce clips).
+    # -----------------------------------------------------------------
+    if provider_id == "google_veo":
+        veo_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if not veo_key:
+            raise HTTPException(status_code=503, detail="GEMINI_API_KEY mancante per Google VEO.")
+
+        veo_base = "https://generativelanguage.googleapis.com/v1beta"
+        # Veo allows duration 4 / 6 / 8 seconds. Clamp the client value.
+        duration_choice = 4 if payload.duration_seconds <= 4 else (6 if payload.duration_seconds <= 6 else 8)
+        # `personGeneration` MUST be `allow_adult` for image-to-video.
+        veo_model = "veo-3.1-fast-generate-preview"
+
+        # Strip a potential "data:image/...;base64," prefix the front-end may attach.
+        raw_b64 = payload.image_base64 or ""
+        if raw_b64.startswith("data:"):
+            raw_b64 = raw_b64.split(",", 1)[-1]
+        # Guess mime from the original prefix; Nano Banana outputs are PNG.
+        mime_type = "image/jpeg" if (payload.image_base64 or "").lower().startswith("data:image/jpeg") else "image/png"
+
+        start_body = {
+            "instances": [{
+                "prompt": final_prompt,
+                "image": {
+                    "bytesBase64Encoded": raw_b64,
+                    "mimeType": mime_type,
+                },
+            }],
+            "parameters": {
+                "aspectRatio": "9:16",
+                "durationSeconds": duration_choice,
+                "resolution": "720p",
+                "personGeneration": "allow_adult",
+            },
+        }
+
+        # 1. Submit the long-running operation
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as http:
+                start_resp = await http.post(
+                    f"{veo_base}/models/{veo_model}:predictLongRunning",
+                    headers={"x-goog-api-key": veo_key, "Content-Type": "application/json"},
+                    json=start_body,
+                )
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"VEO network error: {e}") from e
+
+        if start_resp.status_code != 200:
+            logger.error(f"VEO start error {start_resp.status_code}: {start_resp.text[:600]}")
+            raise HTTPException(status_code=502, detail=f"VEO start error: {start_resp.text[:300]}")
+        start_data = start_resp.json()
+        op_name = start_data.get("name")
+        if not op_name:
+            raise HTTPException(status_code=502, detail=f"VEO: nessun operation name nella risposta: {start_data}")
+        logger.info(f"[VEO] operation started: {op_name} (model={veo_model}, duration={duration_choice}s)")
+
+        # 2. Poll the operation until done (latency: 11s … 6 min during peak hours)
+        video_uri: Optional[str] = None
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                for attempt in range(75):  # 75 * 8s ≈ 10 minutes hard cap
+                    await asyncio.sleep(8)
+                    poll = await http.get(
+                        f"{veo_base}/{op_name}",
+                        headers={"x-goog-api-key": veo_key},
+                    )
+                    if poll.status_code != 200:
+                        logger.warning(f"[VEO] poll {attempt} status={poll.status_code}: {poll.text[:200]}")
+                        continue
+                    pd = poll.json()
+                    if pd.get("error"):
+                        raise HTTPException(status_code=502, detail=f"VEO generation failed: {pd['error']}")
+                    if pd.get("done"):
+                        # response.generateVideoResponse.generatedSamples[0].video.uri
+                        resp = pd.get("response") or {}
+                        samples = (
+                            (resp.get("generateVideoResponse") or {}).get("generatedSamples")
+                            or resp.get("generatedVideos")
+                            or resp.get("generated_videos")
+                            or []
+                        )
+                        if samples:
+                            first = samples[0]
+                            video_obj = first.get("video") or {}
+                            video_uri = video_obj.get("uri") or first.get("uri")
+                        break
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"VEO polling error: {e}") from e
+
+        if not video_uri:
+            raise HTTPException(status_code=504, detail="Timeout: VEO non ha restituito un video entro 10 minuti.")
+
+        # 3. Download the MP4 — VEO files require the API key on the GET too and
+        # may issue a 302 redirect to a signed CDN URL, so enable redirect following.
+        video_bytes_b64: Optional[str] = None
+        try:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as http:
+                vr = await http.get(video_uri, headers={"x-goog-api-key": veo_key})
+                if vr.status_code == 200 and len(vr.content) < 18 * 1024 * 1024:
+                    video_bytes_b64 = base64.b64encode(vr.content).decode("ascii")
+                    logger.info(f"[VEO] archived bytes={len(vr.content)}")
+                else:
+                    logger.warning(f"[VEO] download status={vr.status_code} size={len(vr.content)}")
+        except Exception as e:
+            logger.warning(f"[VEO] download failed: {e}")
+
+        # 4. Persist
+        video_id = f"vid_{uuid.uuid4().hex[:12]}"
+        doc = {
+            "id": video_id,
+            "user_id": user["user_id"],
+            "provider": provider_id,
+            "model": veo_model,
+            "gen_id": payload.gen_id,
+            "image_index": payload.image_index,
+            "video_url": video_uri,
+            "video_b64": video_bytes_b64,
+            "archived": bool(video_bytes_b64),
+            "duration_seconds": duration_choice,
+            "prompt": final_prompt,
+            "created_at": datetime.now(timezone.utc),
+        }
+        await db.videos.insert_one(doc.copy())
+        doc.pop("_id", None)
+        doc.pop("video_b64", None)
+        # NOTE: We deliberately self-host. VEO URIs require the API key in
+        # the request header — we cannot leak that to the client. If the
+        # archive succeeded, the player fetches /api/videos/{id}/file (public,
+        # but token-style id) instead.
+        doc["playback_url"] = (
+            f"/api/videos/{video_id}/file" if video_bytes_b64 else None
+        )
+        return doc
+
     raise HTTPException(
         status_code=501,
         detail=f"Implementazione provider '{p['name']}' in arrivo. Forniscimi la chiave API e completo l'integrazione.",

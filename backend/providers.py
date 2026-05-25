@@ -90,7 +90,7 @@ def list_providers() -> Dict[str, List[dict]]:
                 id="google_veo",
                 name="Google VEO",
                 description="8s clip cinematografiche di alta qualità.",
-                env_keys=["GOOGLE_VEO_API_KEY"],
+                env_keys=["GEMINI_API_KEY"],
             ),
             _provider(
                 id="kling",
