@@ -18,6 +18,8 @@ import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
 import VideoCard from "@/src/components/VideoCard";
+import { saveVideoToGallery } from "@/src/utils/gallery";
+import { useNotify } from "@/src/contexts/ConfirmContext";
 
 const GAP = 10;
 const CONTENT_PADDING = 24;
@@ -45,6 +47,7 @@ export default function Results() {
   const [videos, setVideos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const confirm = useConfirm();
+  const notify = useNotify();
   const { width: winW } = useWindowDimensions();
   const numColumns = columnsFor(winW);
   const tileW = Math.floor((winW - CONTENT_PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
@@ -150,6 +153,17 @@ export default function Results() {
                         width={videoTileW}
                         height={videoTileH}
                         onDelete={() => handleDeleteVideo(v.id)}
+                        onSaveToGallery={async () => {
+                          const url = v.playback_url || v.video_url;
+                          if (!url) return;
+                          const saved = await saveVideoToGallery(url, `dressvibe_${gen.id}_${v.image_index ?? 0}_${v.id || Date.now()}`);
+                          if (saved.ok) {
+                            const where = saved.where === "gallery" ? "nella galleria del telefono" : "tra i download";
+                            notify({ title: "Salvato ✅", message: `Video salvato ${where}.` });
+                          } else {
+                            notify({ title: "Salvataggio fallito", message: saved.error || "Riprova fra qualche istante." });
+                          }
+                        }}
                         onOpenStudio={() =>
                           router.push({
                             pathname: "/studio/[id]",

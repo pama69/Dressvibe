@@ -23,7 +23,7 @@ import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import VideoCard from "@/src/components/VideoCard";
 import InstagramShareSheet from "@/src/components/InstagramShareSheet";
 import { shareToInstagram, shareGeneric } from "@/src/utils/share";
-import { saveImageToGallery } from "@/src/utils/gallery";
+import { saveImageToGallery, saveVideoToGallery } from "@/src/utils/gallery";
 import { useNotify } from "@/src/contexts/ConfirmContext";
 
 const QUICK_EDITS = [
@@ -331,8 +331,27 @@ export default function Studio() {
         setVideos((prev) => [...prev, res]);
       }
       await loadVideos();
-      const msg = "Il tuo video è pronto qui sotto. Premi play per vederlo.";
-      if (Platform.OS === "web") notify({ title: "Video pronto", message: msg }); else notify({ title: "Video pronto", message: msg });
+      // Auto-save the freshly archived clip to the device gallery so the
+      // shop owner can attach it to a story/post without extra taps.
+      const playUrl: string | undefined = res?.playback_url || res?.video_url;
+      if (playUrl && res?.archived !== false) {
+        try {
+          const saved = await saveVideoToGallery(playUrl, `dressvibe_${id}_${idx}_${res.id || Date.now()}`);
+          if (saved.ok) {
+            const where = saved.where === "gallery" ? "nella galleria del telefono" : "tra i download";
+            notify({
+              title: "Video pronto ✅",
+              message: `Video generato e salvato ${where}. Trovi anche le scorciatoie WhatsApp / Telegram / Instagram qui sotto.`,
+            });
+          } else {
+            notify({ title: "Video pronto", message: "Il tuo video è pronto qui sotto. Premi play per vederlo." });
+          }
+        } catch {
+          notify({ title: "Video pronto", message: "Il tuo video è pronto qui sotto. Premi play per vederlo." });
+        }
+      } else {
+        notify({ title: "Video pronto", message: "Il tuo video è pronto qui sotto. Premi play per vederlo." });
+      }
     } catch (e: any) {
       const msg = e?.message || "Errore generazione video";
       if (Platform.OS === "web") notify({ title: "Errore video", message: msg }); else notify({ title: "Errore video", message: msg });
@@ -351,7 +370,6 @@ export default function Studio() {
   };
 
   const handlePublishVideoTelegram = async (video: any) => {
-    if (!video?.video_url) return;
     if (!(await ensureTelegramConfigured())) return;
     setPublishingTgVideoId(video.id);
     try {
@@ -373,6 +391,126 @@ export default function Studio() {
       if (Platform.OS === "web") notify({ title: "Errore Telegram", message: m }); else notify({ title: "Errore Telegram", message: m });
     } finally {
       setPublishingTgVideoId(null);
+    }
+  };
+
+  // ── Per-video state for the new actions on VideoCard ──────────────────────
+  // Tracks which video is currently being WhatsApp-shared (so the button can
+  // show a busy state without blocking the other clips on the page).
+  const [waVideoId, setWaVideoId] = useState<string | null>(null);
+
+  /** Save a generated video to the device gallery (or trigger a download on
+   * web). Wraps `saveVideoToGallery` so we can surface a friendly toast. */
+  const handleSaveVideoToGallery = async (video: any) => {
+    const url: string | undefined = video?.playback_url || video?.video_url;
+    if (!url) {
+      notify({ title: "Video non disponibile", message: "Il file non è più archiviato sul server." });
+      return;
+    }
+    const saved = await saveVideoToGallery(url, `dressvibe_${id}_${idx}_${video.id || Date.now()}`);
+    if (saved.ok) {
+      const where = saved.where === "gallery" ? "nella galleria del telefono" : "tra i download";
+      notify({ title: "Salvato ✅", message: `Video salvato ${where}.` });
+    } else {
+      notify({
+        title: "Salvataggio fallito",
+        message: saved.error?.includes("Permesso")
+          ? "Concedi a DressVibe il permesso di accedere alle foto nelle impostazioni del telefono."
+          : (saved.error || "Riprova fra qualche istante."),
+      });
+    }
+  };
+
+  /** Share a generated video on WhatsApp: save to gallery, copy the message
+   * (with the public short-link) to the clipboard, and open the configured
+   * channel so the user can paste it as a new post. */
+  const shareVideoToWhatsApp = async (video: any) => {
+    if (!id || waVideoId === video?.id) return;
+    setWaVideoId(video.id);
+    try {
+      // 1. Verify the channel is configured
+      let channelUrl = "";
+      try {
+        const settings = await api.getUserSettings();
+        channelUrl = (settings.whatsapp_channel_url || "").trim();
+      } catch {}
+      if (!channelUrl) {
+        await notify({
+          title: "Canale WhatsApp non configurato",
+          message: "Vai in Profilo → Canale WhatsApp e incolla il link del tuo canale.",
+        });
+        return;
+      }
+
+      // 2. Save the clip to the gallery (so the user can attach it in WA)
+      const url: string | undefined = video?.playback_url || video?.video_url;
+      const saved = url
+        ? await saveVideoToGallery(url, `dressvibe_${id}_${idx}_${video.id || Date.now()}`)
+        : { ok: false, where: "none" as const };
+
+      // 3. Generate (or reuse) a public short link for this look + image
+      const link = await api.createShortLink({
+        gen_id: id,
+        image_index: idx,
+        look_name: genTitle || "Look DressVibe",
+      });
+
+      const shareUrl = link.public_url;
+      const desc = (tgDescription || "").trim();
+      const clipboardText = (desc ? `${desc}\n\n` : "") +
+        `👇 Premi qui per ricevere info 👇\n${shareUrl}`;
+      try { await Clipboard.setStringAsync(clipboardText); } catch {}
+
+      // 4. Open WhatsApp channel
+      let opened = false;
+      if (Platform.OS === "web") {
+        try {
+          if (typeof document !== "undefined") {
+            const a = document.createElement("a");
+            a.href = channelUrl;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { try { a.remove(); } catch {} }, 1000);
+            opened = true;
+          }
+        } catch {}
+      } else {
+        try { await Linking.openURL(channelUrl); opened = true; }
+        catch {
+          try {
+            await Linking.openURL(channelUrl.replace("whatsapp.com/channel/", "wa.me/channel/"));
+            opened = true;
+          } catch {}
+        }
+      }
+
+      const savedMsg = saved.ok
+        ? (saved.where === "gallery" ? "🎬 Video salvato nella galleria.\n" : "📥 Video scaricato.\n")
+        : "";
+
+      if (opened) {
+        await notify({
+          title: "Pronto per WhatsApp ✅",
+          message: savedMsg +
+            (desc ? `Testo:\n${desc}\n\n` : "") +
+            `Link copiato:\n${shareUrl}\n\n` +
+            "Nel canale: nuovo post → allega il video dalla galleria → incolla il testo.",
+        });
+      } else {
+        await notify({
+          title: "Apri WhatsApp manualmente",
+          message: savedMsg +
+            `Canale: ${channelUrl}\n\nTesto copiato:\n` +
+            (desc ? `${desc}\n\n` : "") +
+            `👇 Premi qui per ricevere info 👇\n${shareUrl}`,
+        });
+      }
+    } catch (e: any) {
+      notify({ title: "Errore", message: e?.message || "Impossibile condividere il video" });
+    } finally {
+      setWaVideoId(null);
     }
   };
 
@@ -632,7 +770,10 @@ export default function Studio() {
                       onDelete={() => handleDeleteVideo(v.id)}
                       onPublishTelegram={() => handlePublishVideoTelegram(v)}
                       publishingTelegram={publishingTgVideoId === v.id}
-                      onShare={() => setIgSheet({ video: v.playback_url || v.video_url })}
+                      onShareWhatsApp={() => shareVideoToWhatsApp(v)}
+                      publishingWhatsApp={waVideoId === v.id}
+                      onShareInstagram={() => setIgSheet({ video: v.playback_url || v.video_url })}
+                      onSaveToGallery={() => handleSaveVideoToGallery(v)}
                     />
                   ))}
                 </View>

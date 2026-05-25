@@ -83,3 +83,82 @@ export async function saveImageToGallery(
     return { ok: false, where: "none", error: e?.message || "Errore di salvataggio" };
   }
 }
+
+/**
+ * Scarica un video da una URL (es. /api/videos/{id}/file) e lo salva nella
+ * galleria del dispositivo (Foto su iOS, album "DressVibe" su Android).
+ * Su web triggera un download via tag <a> con il blob fetchato.
+ *
+ * Si occupa di:
+ *  - risolvere URL relativi (`/api/...`) verso EXPO_PUBLIC_BACKEND_URL così
+ *    il download funziona anche da Expo Go;
+ *  - copiare i bytes via `FileSystem.downloadAsync` per evitare di tenere
+ *    l'intero MP4 in memoria;
+ *  - chiedere il permesso MediaLibrary una sola volta.
+ */
+export async function saveVideoToGallery(
+  videoUrl: string,
+  fileBaseName: string = "dressvibe"
+): Promise<SaveResult> {
+  if (!videoUrl) return { ok: false, where: "none", error: "URL vuoto" };
+
+  // Risolvi URL relativi (es. "/api/videos/xxx/file") verso il backend
+  let absUrl = videoUrl;
+  if (absUrl.startsWith("/")) {
+    const base = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
+    absUrl = base + absUrl;
+  }
+
+  // ---------- WEB ----------
+  if (Platform.OS === "web") {
+    try {
+      const filename = `${fileBaseName}.mp4`;
+      const resp = await fetch(absUrl);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { a.remove(); URL.revokeObjectURL(url); } catch {}
+      }, 4000);
+      return { ok: true, where: "download" };
+    } catch (e: any) {
+      return { ok: false, where: "none", error: e?.message };
+    }
+  }
+
+  // ---------- NATIVE (iOS / Android) ----------
+  try {
+    const perm = await MediaLibrary.requestPermissionsAsync(true);
+    if (perm.status !== "granted") {
+      return { ok: false, where: "none", error: "Permesso galleria negato" };
+    }
+
+    const target = `${FileSystem.cacheDirectory}${fileBaseName}_${Date.now()}.mp4`;
+    const dl = await FileSystem.downloadAsync(absUrl, target);
+    if (!dl?.uri) {
+      return { ok: false, where: "none", error: "Download fallito" };
+    }
+    const asset = await MediaLibrary.createAssetAsync(dl.uri);
+    try {
+      const album = await MediaLibrary.getAlbumAsync("DressVibe");
+      if (album) {
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      } else {
+        await MediaLibrary.createAlbumAsync("DressVibe", asset, false);
+      }
+    } catch (e) {
+      // su alcuni Android l'album fallisce ma l'asset è già nella galleria
+      console.warn("video album save failed", e);
+    }
+    return { ok: true, where: "gallery" };
+  } catch (e: any) {
+    return { ok: false, where: "none", error: e?.message || "Errore di salvataggio" };
+  }
+}
