@@ -260,6 +260,22 @@ export default function Studio() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadVideos(); }, [loadVideos]);
 
+  // Sync local `idx` with the URL `index` param. `useState(initialIdx)` only
+  // captures the value on first mount — but Expo Router REUSES the same
+  // Studio instance when you re-navigate to /studio/[id] with a different
+  // image index (or after an edit bumped the idx). Without this effect the
+  // screen would stick on whichever image was last opened/edited, which
+  // matches the user-reported bug "always shows the second of the two
+  // images, no matter which one I tap".
+  useEffect(() => {
+    const next = parseInt(index || "0", 10);
+    if (!Number.isNaN(next) && next !== idx) {
+      setIdx(next);
+      setEdited(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, id]);
+
   useEffect(() => {
     (async () => {
       try {
