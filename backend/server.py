@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
 import os
+import json
 import logging
 import asyncio
 from pathlib import Path
@@ -889,8 +890,18 @@ def build_outfit_prompt(
     return (
         subject_line
         + f"FULL BODY SHOT from head to feet, the entire figure must be visible including the shoes and the floor under them. "
-        f"The model is wearing EXACTLY the clothing items shown in the reference images, "
+        f"The model is wearing EXACTLY and ONLY the clothing items shown in the reference images, "
         f"preserving every detail: color, pattern, texture, cut, logo, prints. "
+        f"CRITICAL — do NOT add, invent or hallucinate any clothing item, accessory, layer or "
+        f"piece of apparel that is NOT visible in the reference images. Specifically: do not add a "
+        f"jacket, blazer, coat, cardigan, shirt, t-shirt, sweater, vest, scarf, belt, hat, bag, "
+        f"jewellery, glasses, gloves, socks, tights or any other garment unless it is clearly "
+        f"present in the references. If the reference shows only a top, the lower body must wear "
+        f"plain neutral basics (simple slim trousers or jeans) — never a skirt, dress or shorts. "
+        f"If the reference shows only bottoms, the upper body must wear a plain neutral fitted "
+        f"top — never a jacket, coat or layering piece. NEVER LAYER additional clothing on top of "
+        f"or under the referenced items. The number of garments visible on the model must match "
+        f"the number provided in the references (plus the minimal neutral basic just described). "
         f"Footwear: {shoes}. "
         f"Pose: {pose}. {background_instruction} "
         f"Shot with a 35mm lens, soft natural lighting, magazine-quality, "
@@ -3178,6 +3189,42 @@ app.add_middleware(
 )
 
 
+# ---------- Auto-seed Model Presets -----------------------------------------
+# The face library is shipped as a static JSON snapshot in `backend/seed/`
+# so a freshly provisioned database (or a wipe) doesn't lock new users out
+# of the picker. We only insert what's missing — never overwrite admin edits.
+_PRESETS_SEED_PATH = os.path.join(os.path.dirname(__file__), "seed", "model_presets_seed.json")
+
+
+async def _ensure_model_presets_seed():
+    try:
+        if not os.path.exists(_PRESETS_SEED_PATH):
+            logger.info("[presets-seed] no snapshot file at %s — skipping", _PRESETS_SEED_PATH)
+            return
+        with open(_PRESETS_SEED_PATH, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+        existing_ids = {
+            d["id"]
+            for d in await db.model_presets.find({}, {"_id": 0, "id": 1}).to_list(200)
+        }
+        to_insert = [p for p in catalog if p.get("id") and p["id"] not in existing_ids]
+        if not to_insert:
+            logger.info("[presets-seed] OK — %d presets already in DB", len(existing_ids))
+            return
+        now = datetime.now(timezone.utc)
+        for p in to_insert:
+            p.setdefault("active", True)
+            p.setdefault("created_at", now)
+        await db.model_presets.insert_many(to_insert, ordered=False)
+        logger.info(
+            "[presets-seed] inserted %d new presets (total now %d)",
+            len(to_insert), len(existing_ids) + len(to_insert),
+        )
+    except Exception as e:
+        logger.warning("[presets-seed] failed: %s", e)
+
+
+
 async def _backfill_thumbnails():
     """Generate thumbnails for legacy docs that pre-date this feature.
 
@@ -3257,12 +3304,20 @@ async def startup_db():
     await db.info_requests.create_index("id", unique=True)
     await db.info_requests.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
     await db.info_requests.create_index("created_at")
+    await db.model_presets.create_index("id", unique=True)
+    await db.model_presets.create_index([("gender", 1), ("active", 1), ("order", 1)])
     logger.info("DressVibe API started")
 
     # One-shot thumbnail backfill — generate `thumb_base64` for any garment
     # and `thumbs[]` for any generation that was created BEFORE this feature
     # landed. Runs in the background so it never blocks the startup hot path.
     asyncio.create_task(_backfill_thumbnails())
+
+    # Auto-seed the universal Model Presets catalogue (15 curated faces).
+    # This makes the face library available on a fresh database without
+    # the admin having to run `seed_model_presets.py` manually. Runs in the
+    # background, idempotent — only inserts what's missing.
+    asyncio.create_task(_ensure_model_presets_seed())
 
     # Register Telegram webhook (best-effort)
     if TELEGRAM_BOT_TOKEN and PUBLIC_BASE_URL and TELEGRAM_WEBHOOK_SECRET:

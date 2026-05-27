@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api/client";
@@ -52,6 +52,12 @@ export default function ModelPicker() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Re-fetch every time the picker comes into focus. This handles the case
+  // where the user logs out and logs in with a different account: the screen
+  // can be kept mounted by the Tabs navigator, so a one-shot mount effect
+  // would never refresh the catalogue with the new auth token.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const goBackToGenerate = () => {
     // `router.back()` is unreliable here because the hidden tab "model-picker"
