@@ -46,6 +46,11 @@ export default function GarmentDetail() {
   const { width: winW } = useWindowDimensions();
   const imgSize = Math.min(winW - 32, 460);
 
+  // Aspect ratio of the original photo — detected via Image.getSize so we
+  // preserve the natural shape instead of forcing a square crop (which would
+  // chop off the top of tall portraits / sides of wide flat-lays).
+  const [imgAspect, setImgAspect] = useState(1);
+
   const [loading, setLoading] = useState(true);
   const [garment, setGarment] = useState<any>(null);
   const [description, setDescription] = useState("");
@@ -71,6 +76,23 @@ export default function GarmentDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Detect the natural aspect ratio of the garment photo so we render it
+  // without cropping. Falls back to 1:1 if the metadata can't be read.
+  useEffect(() => {
+    const b64 = garment?.image_base64;
+    if (!b64) return;
+    const uri = `data:image/png;base64,${b64}`;
+    Image.getSize(
+      uri,
+      (w, h) => {
+        if (w > 0 && h > 0) setImgAspect(w / h);
+      },
+      () => {
+        /* leave fallback 1:1 */
+      }
+    );
+  }, [garment?.image_base64]);
 
   const handleSave = async (opts?: { thenGenerate?: boolean }) => {
     if (!id) return;
@@ -168,12 +190,14 @@ export default function GarmentDetail() {
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Garment photo */}
-          <View style={[s.imgWrap, { width: imgSize, height: imgSize }]}>
+          {/* Garment photo — keep the original aspect ratio so portrait
+              shots aren't cropped to a square. `contain` makes sure
+              flat-lay wide photos also fit fully inside the frame. */}
+          <View style={[s.imgWrap, { width: imgSize, aspectRatio: imgAspect }]}>
             <Image
               source={{ uri: `data:image/png;base64,${garment.image_base64}` }}
               style={s.img}
-              resizeMode="cover"
+              resizeMode="contain"
             />
           </View>
 

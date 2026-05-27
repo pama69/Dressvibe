@@ -53,6 +53,14 @@ export default function ModelPicker() {
 
   useEffect(() => { load(); }, [load]);
 
+  const goBackToGenerate = () => {
+    // `router.back()` is unreliable here because the hidden tab "model-picker"
+    // lives inside the same Tabs navigator as /generate — the back stack can
+    // pop to the gallery (the default tab) instead of /generate. We force the
+    // navigation explicitly with `replace` so we always land on the generator.
+    router.replace("/generate");
+  };
+
   const pick = (p: Preset) => {
     try { Haptics.selectionAsync(); } catch {}
     presetSelectionStore.set({
@@ -60,7 +68,7 @@ export default function ModelPicker() {
       name: p.name,
       thumb_base64: p.thumb_base64,
     });
-    router.back();
+    goBackToGenerate();
   };
 
   const ethnicityLabel = (e: string) =>
@@ -71,7 +79,7 @@ export default function ModelPicker() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} testID="model-picker-back" activeOpacity={0.7}>
+        <TouchableOpacity onPress={goBackToGenerate} style={styles.backBtn} testID="model-picker-back" activeOpacity={0.7}>
           <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
