@@ -27,6 +27,7 @@ import {
   Option,
 } from "@/src/constants/options";
 import { genStore } from "@/src/state/genStore";
+import { presetSelectionStore } from "@/src/state/presetSelection";
 
 // Aesthetic modifiers shown as a 5-button toggle row in Step 4 (Look).
 // IDs must match the LOOK_STYLES_PROMPTS dict on the backend (server.py).
@@ -104,6 +105,14 @@ export default function Generate() {
   const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
   const [customBgId, setCustomBgId] = useState<string | null>(null);
 
+  // Selected model preset (face library). When set, etnia/corporatura/età
+  // are hidden, body is forced to slim, and the preset's face description is
+  // injected server-side into the generation prompt. `presetThumb` is shown
+  // in the picker chip so the shop owner sees who they picked.
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const [presetName, setPresetName] = useState<string | null>(null);
+  const [presetThumb, setPresetThumb] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
       const list = await api.listGarments();
@@ -123,6 +132,34 @@ export default function Generate() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
   useEffect(() => { load(); }, [load]);
+
+  // Sync to preset selection changes coming from the model picker screen.
+  // We also re-read on focus so the chip refreshes when navigating back.
+  useEffect(() => {
+    const apply = () => {
+      const sel = presetSelectionStore.get();
+      if (sel) {
+        setPresetId(sel.id);
+        setPresetName(sel.name);
+        setPresetThumb(sel.thumb_base64);
+      } else {
+        setPresetId(null);
+        setPresetName(null);
+        setPresetThumb(null);
+      }
+    };
+    apply();
+    return presetSelectionStore.subscribe(apply);
+  }, []);
+
+  // Switching back to gender = uomo (no presets available) clears any female
+  // preset selection so we don't end up generating a male model with a female
+  // face description still attached.
+  useEffect(() => {
+    if (gender !== "donna" && presetId) {
+      presetSelectionStore.clear();
+    }
+  }, [gender, presetId]);
 
   // Apply ?preselect=<garment_id> once after the garment list loads.
   // This makes the "Salva e genera" button on the garment detail screen
@@ -150,7 +187,9 @@ export default function Generate() {
       garment_ids: selected,
       model_gender: gender,
       model_age: age,
-      model_body: body,
+      // Force slim body when a face preset is locked-in (also enforced
+      // server-side; the duplication here keeps the request consistent).
+      model_body: presetId ? "slim" : body,
       model_ethnicity: eth,
       pose,
       background: bg,
@@ -160,6 +199,9 @@ export default function Generate() {
       custom_background_id: customBgId || undefined,
       look_styles: lookStyles.length > 0 ? lookStyles : undefined,
       add_price_tags: addPriceTags || undefined,
+      model_preset_id: presetId || undefined,
+      model_preset_name: presetName || undefined,
+      model_preset_thumb: presetThumb || undefined,
     });
     router.push("/generating");
   };
@@ -222,9 +264,72 @@ export default function Generate() {
         <View style={styles.step}>
           <Text style={styles.stepLabel}>2 — Modello</Text>
           <ChipRow label="Genere" options={GENDERS} value={gender} onChange={setGender} testIDPrefix="gender" />
-          <ChipRow label="Età" options={AGES} value={age} onChange={setAge} testIDPrefix="age" />
-          <ChipRow label="Corporatura" options={BODIES} value={body} onChange={setBody} testIDPrefix="body" />
-          <ChipRow label="Etnia" options={ETHNICITIES} value={eth} onChange={setEth} testIDPrefix="eth" />
+
+          {/* Face-library picker — only when gender = donna (no male
+              presets yet). When a face is selected, the demographic chips
+              below are hidden because the preset embeds them. */}
+          {gender === "donna" ? (
+            presetId ? (
+              <View style={styles.presetCard} testID="preset-selected-card">
+                {presetThumb ? (
+                  <Image
+                    source={{ uri: `data:image/jpeg;base64,${presetThumb}` }}
+                    style={styles.presetThumb}
+                  />
+                ) : (
+                  <View style={[styles.presetThumb, { alignItems: "center", justifyContent: "center" }]}>
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 18 }}>👤</Text>
+                  </View>
+                )}
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={styles.presetLabel}>Modella scelta</Text>
+                  <Text style={styles.presetName}>{presetName}</Text>
+                  <Text style={styles.presetHint}>
+                    Età, etnia e corporatura sono fissati per coerenza.
+                  </Text>
+                </View>
+                <View style={{ gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={() => router.push("/model-picker")}
+                    style={styles.presetChange}
+                    testID="preset-change"
+                    activeOpacity={0.75}
+                  >
+                    <Text style={styles.presetChangeText}>Cambia</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => presetSelectionStore.clear()}
+                    style={styles.presetClear}
+                    testID="preset-clear"
+                    activeOpacity={0.75}
+                  >
+                    <Text style={styles.presetClearText}>Rimuovi</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => router.push("/model-picker")}
+                style={styles.pickModelBtn}
+                testID="open-model-picker"
+                activeOpacity={0.85}
+              >
+                <Ionicons name="people-outline" size={16} color={theme.colors.text} />
+                <Text style={styles.pickModelBtnText}>Scegli modella</Text>
+                <Text style={styles.pickModelBtnHint}>15 volti curati • opzionale</Text>
+              </TouchableOpacity>
+            )
+          ) : null}
+
+          {/* Demographic chips — hidden when a face preset is locked-in.
+              Without a preset the AI uses these to invent the model. */}
+          {!(gender === "donna" && presetId) ? (
+            <>
+              <ChipRow label="Età" options={AGES} value={age} onChange={setAge} testIDPrefix="age" />
+              <ChipRow label="Corporatura" options={BODIES} value={body} onChange={setBody} testIDPrefix="body" />
+              <ChipRow label="Etnia" options={ETHNICITIES} value={eth} onChange={setEth} testIDPrefix="eth" />
+            </>
+          ) : null}
         </View>
 
         {/* Step 3 — Scene */}
@@ -549,6 +654,74 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   ctaText: { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: 0.6 },
+
+  // Model preset picker styles
+  pickModelBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    marginTop: 4,
+  },
+  pickModelBtnText: { color: theme.colors.text, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
+  pickModelBtnHint: { color: theme.colors.textMuted, fontSize: 11, marginLeft: "auto" },
+  presetCard: {
+    flexDirection: "row",
+    gap: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.text,
+    backgroundColor: theme.colors.surface,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  presetThumb: {
+    width: 56,
+    height: 84,
+    backgroundColor: "#111",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  presetLabel: {
+    color: theme.colors.textMuted,
+    fontSize: 9,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  presetName: { color: theme.colors.text, fontSize: 16, fontWeight: "700" },
+  presetHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 14 },
+  presetChange: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
+  },
+  presetChangeText: {
+    color: theme.colors.text,
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  presetClear: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.error,
+  },
+  presetClearText: {
+    color: theme.colors.error,
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
 });
 
 const chipStyles = StyleSheet.create({

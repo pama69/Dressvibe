@@ -120,6 +120,7 @@ export default function AppTabs() {
         <Tabs.Screen name="results/[id]" options={{ href: null }} />
         <Tabs.Screen name="studio/[id]" options={{ href: null }} />
         <Tabs.Screen name="garment/[id]" options={{ href: null }} />
+        <Tabs.Screen name="model-picker" options={{ href: null }} />
         <Tabs.Screen name="notifications" options={{ href: null }} />
       </Tabs>
       {/* Global bell overlay — always on top, reachable from every screen */}

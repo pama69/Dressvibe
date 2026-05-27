@@ -1703,3 +1703,52 @@ agent_communication:
           `/api/videos/{id}/file` for the client player.
         - Strips any `data:image/...;base64,` prefix from the input.
         - Clamps `duration_seconds` to VEO's discrete set 4/6/8.
+
+  - agent: "main"
+    message: |
+      FEATURE — Face library (model presets) for image generation.
+
+      WHAT: 15 curated Caucasian female faces (age 20-30, Mediterranean +
+      Nordic mix) generated once with Nano Banana and stored as thumbnails
+      in MongoDB. The shop owner can tap "Scegli modella" in the Generator
+      to pick one — when a face is selected the demographic chips (Età,
+      Corporatura, Etnia) disappear and the AI uses the preset's detailed
+      face description with body forced to "slim".
+
+      BACKEND:
+      * GENDERS reduced to Donna/Uomo only (`frontend/src/constants/options.ts`).
+      * `GenerationCreate.model_preset_id` added (optional). When set:
+        - Server resolves preset from `db.model_presets`
+        - `payload.model_body` is forced to "slim"
+        - `build_outfit_prompt` receives `model_preset_face` and emits a
+          subject line using the preset description instead of the generic
+          "{age}, with {eth}, {body}" template.
+      * New endpoint `GET /api/model-presets?gender=female` (auth required)
+        returns `[{id, name, gender, ethnicity, age, thumb_base64, order}]`.
+        The `face_prompt` stays server-side (no prompt leakage).
+      * Seed script `backend/seed_model_presets.py` (idempotent): generates
+        the 15 faces via the existing Nano Banana pipeline, makes 2:3 JPEG
+        thumbnails (~10-25 KB each), upserts to `db.model_presets`. Already
+        executed once → 15/15 rows created.
+
+      FRONTEND:
+      * New screen `app/(app)/model-picker.tsx`: 3-column grid of cards
+        (face thumb + Name + "Age • Mediterranea / Nord Europa"), tap to
+        select. Selection is written to `presetSelectionStore` and the
+        screen pops back to /generate.
+      * New tiny pub/sub store `src/state/presetSelection.ts` to bridge
+        the picker → generator without inflating route params with base64.
+      * Generator Step 2 redesigned:
+        - When `gender = donna`: show a dashed "Scegli modella" button OR,
+          if a preset is selected, a compact preset card with thumb + name
+          + "Età, etnia e corporatura sono fissati per coerenza." + Cambia
+          + Rimuovi buttons.
+        - When a preset is locked-in, the Età/Corporatura/Etnia chips are
+          NOT rendered.
+        - Switching `gender` to "uomo" auto-clears the female preset.
+      * `genStore` extended with `model_preset_id`, `model_preset_name`,
+        `model_preset_thumb` — model_preset_id is forwarded to the
+        backend in `POST /api/generations` via the existing flow.
+      * Hidden tab `<Tabs.Screen name="model-picker" options={{ href: null }} />`
+        registered in `app/(app)/_layout.tsx`.
+

@@ -148,7 +148,7 @@ class BackgroundCreate(BaseModel):
 
 class GenerationCreate(BaseModel):
     garment_ids: List[str]
-    model_gender: str  # uomo/donna/ragazzo/ragazza
+    model_gender: str  # uomo/donna
     model_age: str  # giovane/adulto/maturo
     model_body: str  # slim/atletico/curvy
     model_ethnicity: str  # caucasica/africana/asiatica/latina/mediorientale
@@ -161,6 +161,7 @@ class GenerationCreate(BaseModel):
     custom_background_id: Optional[str] = None  # if set, overrides `background`
     look_styles: Optional[List[str]] = None  # optional aesthetic modifiers (warm/depth/vivid/dynamic/premium)
     add_price_tags: bool = False  # opt-in: when True, garment "Descrizione e prezzi" names are used to overlay price tags in the photo
+    model_preset_id: Optional[str] = None  # when set, forces a specific pre-generated face (locks ethnicity/body/age to preset defaults)
 
 
 class Generation(BaseModel):
@@ -851,6 +852,7 @@ def build_outfit_prompt(
     variation_idx: int,
     custom_bg_label: Optional[str] = None,
     price_descriptions: Optional[List[str]] = None,
+    model_preset_face: Optional[str] = None,
 ) -> str:
     gender = GENDER_IT.get(p.model_gender, p.model_gender)
     age = AGE_IT.get(p.model_age, p.model_age)
@@ -869,10 +871,24 @@ def build_outfit_prompt(
     else:
         background_instruction = f"Setting: {bg}."
 
+    # When a model preset is selected, the preset's face_prompt overrides the
+    # generic "{age}, with {eth}, {body}" description. Body is forced to slim
+    # upstream (in /api/generations dispatcher), so the prompt here can simply
+    # use the preset description and skip generic demographics.
+    if model_preset_face:
+        subject_line = (
+            f"Create a hyper-realistic, high-end fashion editorial photograph of a "
+            f"{model_preset_face}, slim body. "
+        )
+    else:
+        subject_line = (
+            f"Create a hyper-realistic, high-end fashion editorial photograph of {gender}, "
+            f"{age}, with {eth}, {body}. "
+        )
+
     return (
-        f"Create a hyper-realistic, high-end fashion editorial photograph of {gender}, "
-        f"{age}, with {eth}, {body}. "
-        f"FULL BODY SHOT from head to feet, the entire figure must be visible including the shoes and the floor under them. "
+        subject_line
+        + f"FULL BODY SHOT from head to feet, the entire figure must be visible including the shoes and the floor under them. "
         f"The model is wearing EXACTLY the clothing items shown in the reference images, "
         f"preserving every detail: color, pattern, texture, cut, logo, prints. "
         f"Footwear: {shoes}. "
@@ -1230,6 +1246,43 @@ async def _generate_single_image_raw(prompt: str, reference_images_b64: List[str
     return None
 
 
+# ---------- Model Presets (face library) ----------
+# Curated, server-side collection of 15 Caucasian female faces (ages 20-30,
+# Mediterranean + Nordic mix). Each preset hides demographic chips in the UI
+# and injects a precise face description into the AI prompt for consistent
+# results across generations.
+@api_router.get("/model-presets")
+async def list_model_presets(
+    gender: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """Return the active face presets, ordered by `order` then `name`.
+
+    Response shape (per item): {id, name, gender, ethnicity, age, thumb_base64}.
+    `face_prompt` is deliberately NOT returned to the client — it stays
+    server-side to prevent prompt leakage / abuse.
+    """
+    # Touch the user record so this endpoint enforces auth like the rest of
+    # the app (avoids leaking the curated catalog publicly).
+    await get_current_user(authorization)
+
+    query: dict = {"active": {"$ne": False}}
+    if gender:
+        query["gender"] = gender
+
+    cursor = db.model_presets.find(
+        query,
+        {
+            "_id": 0,
+            "id": 1, "name": 1, "gender": 1,
+            "ethnicity": 1, "age": 1,
+            "thumb_base64": 1, "order": 1,
+        },
+    ).sort([("order", 1), ("name", 1)])
+    return await cursor.to_list(100)
+
+
+
 # ---------- Generations ----------
 @api_router.post("/generations")
 async def create_generation(payload: GenerationCreate, authorization: Optional[str] = Header(None)):
@@ -1267,6 +1320,22 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
             refs.append(bg["image_base64"])
             custom_bg_label = bg.get("description") or bg.get("name") or "custom background"
 
+    # Resolve model preset (face library): when set, override
+    # age/body/ethnicity with the preset's face_prompt and force a slim body.
+    # Presets are server-side curated (15 Caucasian women, age 20-30) so the
+    # client cannot inject arbitrary descriptions through this field.
+    model_preset_face: Optional[str] = None
+    if payload.model_preset_id:
+        preset = await db.model_presets.find_one(
+            {"id": payload.model_preset_id, "active": {"$ne": False}},
+            {"_id": 0, "face_prompt": 1},
+        )
+        if preset and preset.get("face_prompt"):
+            model_preset_face = preset["face_prompt"]
+            # Force the locked attributes — keeps the response consistent
+            # with what the UI advertises and prevents prompt drift.
+            payload.model_body = "slim"
+
     gen_id = f"gen_{uuid.uuid4().hex[:12]}"
     gen_doc = {
         "id": gen_id,
@@ -1289,7 +1358,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     async def _bounded(i: int):
         async with sem:
             return await generate_single_image(
-                build_outfit_prompt(payload, i, custom_bg_label, price_descriptions),
+                build_outfit_prompt(payload, i, custom_bg_label, price_descriptions, model_preset_face),
                 refs,
                 f"{gen_id}_{i}",
             )

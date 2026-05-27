@@ -90,8 +90,7 @@ export const api = {
 
   // garments
   listGarments: () => request<any[]>("/garments"),
-  getGarment: (id: string) => request<any>(`/garments/${id}`),
-  createGarment: (g: any) =>
+  getGarment: (id: string) => request<any>(`/garments/${id}`),  createGarment: (g: any) =>
     request<any>("/garments", { method: "POST", body: g }),
   updateGarment: (id: string, patch: { name?: string }) =>
     request<{ updated: number; name?: string }>(`/garments/${id}`, {
@@ -125,6 +124,18 @@ export const api = {
     request<any>("/clients", { method: "POST", body: c }),
   deleteClient: (id: string) =>
     request<any>(`/clients/${id}`, { method: "DELETE" }),
+
+  // model presets (curated face library for AI generation)
+  listModelPresets: (gender?: string) =>
+    request<Array<{
+      id: string;
+      name: string;
+      gender: string;
+      ethnicity: string;
+      age: number;
+      thumb_base64: string;
+      order?: number;
+    }>>(`/model-presets${gender ? `?gender=${encodeURIComponent(gender)}` : ""}`),
 
   // custom backgrounds
   listBackgrounds: () => request<any[]>("/backgrounds"),

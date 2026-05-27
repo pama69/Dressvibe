@@ -4,8 +4,6 @@ export type Option = { value: string; label: string; emoji?: string };
 export const GENDERS: Option[] = [
   { value: "donna", label: "Donna", emoji: "👩" },
   { value: "uomo", label: "Uomo", emoji: "👨" },
-  { value: "ragazza", label: "Ragazza", emoji: "🧒" },
-  { value: "ragazzo", label: "Ragazzo", emoji: "👦" },
 ];
 
 export const AGES: Option[] = [
