@@ -16,6 +16,7 @@ import { api } from "@/src/api/client";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { theme } from "@/src/theme";
 import { GENDERS, AGES, BODIES, ETHNICITIES, Option } from "@/src/constants/options";
+import TelegramBotSetup from "@/src/components/TelegramBotSetup";
 
 type Client = {
   id: string;
@@ -414,43 +415,9 @@ export default function Profile() {
           ) : null}
         </View>
 
-        {/* Telegram channel selector */}
-        <View style={s.tgBlock}>
-          <Text style={s.tgTitle}>📣 Canale Telegram per pubblicazioni</Text>
-          <Text style={s.tgHint}>
-            Dove il bot @instapost_mybot pubblicherà le foto e i video.
-            Scrivi il nome del canale (es. <Text style={{ fontWeight: "700" }}>@frammenti_pe</Text>) o l'ID numerico.
-            Il bot deve essere amministratore del canale con permesso di pubblicare.
-          </Text>
-          <TextInput
-            value={channelInput}
-            onChangeText={setChannelInput}
-            placeholder={channelDefault || "@nomecanale"}
-            placeholderTextColor={theme.colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={s.channelInput}
-            testID="tg-channel-input"
-          />
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <TouchableOpacity
-              style={[s.tgBtn, channelSaving && { opacity: 0.5 }]}
-              onPress={saveChannel}
-              disabled={channelSaving}
-              testID="tg-channel-save"
-            >
-              {channelSaving ? <ActivityIndicator color="#000" /> : (
-                <>
-                  <Ionicons name="save-outline" size={16} color="#000" />
-                  <Text style={s.tgBtnText}>Salva canale</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-          {channelDefault ? (
-            <Text style={s.tgInfoText}>Default sistema: {channelDefault}</Text>
-          ) : null}
-        </View>
+        {/* Telegram bot onboarding — 3-step guided flow with ToS acceptance,
+            replaces the previous static channel input block. */}
+        <TelegramBotSetup />
 
         {/* Telegram diagnostics — fix for deployed env */}
         <View style={s.tgBlock}>

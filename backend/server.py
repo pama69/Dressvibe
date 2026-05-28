@@ -2259,6 +2259,14 @@ async def telegram_publish(payload: TelegramPublishRequest, request: Request, au
             status_code=400,
             detail="Canale Telegram non inserito. Vai su Profilo → Impostazioni per configurare il tuo canale Telegram.",
         )
+    # Gate: bot ToS must be accepted before publishing through @instapost_mybot.
+    accepted = us.get("telegram_terms_accepted_at")
+    accepted_v = us.get("telegram_terms_version")
+    if not accepted or accepted_v != TELEGRAM_TERMS_VERSION:
+        raise HTTPException(
+            status_code=403,
+            detail="Termini di servizio del bot non accettati. Vai su Profilo → Canale Telegram e accetta i termini per attivare la pubblicazione.",
+        )
 
     media_type = (payload.media_type or "photo").lower()
     if media_type == "video":
@@ -3141,6 +3149,135 @@ def normalize_channel(value: Optional[str]) -> Optional[str]:
     return f"@{s}" if s else ""
 
 
+# Version string for the Telegram Bot Terms of Service. Bump this whenever
+# the legal text shown in the modal changes substantially: existing users
+# whose `telegram_terms_version` is stale will be re-prompted to accept.
+TELEGRAM_TERMS_VERSION = "v1.0"
+
+
+@api_router.get("/telegram/bot-info")
+async def tg_bot_info(authorization: Optional[str] = Header(None)):
+    """Tell the client which Telegram bot is the platform default and give
+    a deep link that lets the shop owner add it as channel admin with a
+    single tap. The deep link uses the official `startchannel` parameter,
+    which makes Telegram show the "add to channel" picker pre-filled."""
+    await get_current_user(authorization)
+    if not TELEGRAM_BOT_TOKEN:
+        return {"configured": False}
+    username: Optional[str] = None
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.get(f"{TELEGRAM_API}/getMe")
+            if r.status_code == 200:
+                username = ((r.json() or {}).get("result") or {}).get("username")
+    except Exception as e:
+        logger.warning(f"tg getMe failed: {e}")
+    return {
+        "configured": True,
+        "username": username,
+        "deep_link_add_to_channel": (
+            f"https://t.me/{username}?startchannel&admin=post_messages"
+            if username else None
+        ),
+    }
+
+
+class TgVerifyChannelPayload(BaseModel):
+    channel: str
+
+
+@api_router.post("/telegram/verify-channel")
+async def tg_verify_channel(
+    payload: TgVerifyChannelPayload,
+    authorization: Optional[str] = Header(None),
+):
+    """Check whether the default DressVibe bot is administrator of the
+    given channel and can post messages there. Returns a normalised
+    `{ok, admin, can_post, channel, channel_title, error}` envelope so the
+    frontend can show actionable feedback without parsing Telegram errors."""
+    await get_current_user(authorization)
+    if not TELEGRAM_BOT_TOKEN:
+        raise HTTPException(503, "Telegram bot non configurato sul server")
+    channel = normalize_channel((payload.channel or "").strip())
+    if not channel:
+        raise HTTPException(400, "Indica il canale (es. @nomecanale)")
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            me = await http.get(f"{TELEGRAM_API}/getMe")
+            bot_id = ((me.json() or {}).get("result") or {}).get("id")
+            if not bot_id:
+                return {"ok": False, "error": "Bot non raggiungibile, riprova fra qualche istante."}
+
+            # 1. getChat — verifica che il canale esista e che il bot lo veda
+            chat_resp = await http.post(
+                f"{TELEGRAM_API}/getChat",
+                json={"chat_id": channel},
+            )
+            chat_json = chat_resp.json() or {}
+            if not chat_json.get("ok"):
+                desc = (chat_json.get("description") or "").lower()
+                msg = (
+                    "Il bot non è ancora stato aggiunto a questo canale. "
+                    "Aggiungilo come amministratore e riprova."
+                    if "not found" in desc or "chat not found" in desc
+                    else (chat_json.get("description") or "Canale non raggiungibile.")
+                )
+                return {"ok": False, "error": msg}
+            chat_info = chat_json.get("result") or {}
+
+            # 2. getChatMember — il bot è admin con permesso di post?
+            mem_resp = await http.post(
+                f"{TELEGRAM_API}/getChatMember",
+                json={"chat_id": channel, "user_id": bot_id},
+            )
+            mem_json = mem_resp.json() or {}
+            if not mem_json.get("ok"):
+                return {"ok": False, "error": mem_json.get("description") or "Impossibile verificare il ruolo del bot."}
+            mem = mem_json.get("result") or {}
+            status = mem.get("status")
+            is_admin = status in ("administrator", "creator")
+            can_post = mem.get("can_post_messages", False) or status == "creator"
+
+            return {
+                "ok": True,
+                "admin": is_admin,
+                "can_post": bool(can_post),
+                "channel": channel,
+                "channel_title": chat_info.get("title") or channel,
+                "channel_username": chat_info.get("username"),
+                "channel_type": chat_info.get("type"),
+            }
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": f"Errore di rete verso Telegram: {e}"}
+    except Exception as e:
+        logger.exception("tg verify-channel failed")
+        return {"ok": False, "error": str(e)}
+
+
+@api_router.post("/telegram/accept-terms")
+async def tg_accept_terms(authorization: Optional[str] = Header(None)):
+    """Record that this user has accepted the current bot Terms of Service.
+    Saved on the user's `user_settings` document with a version string so
+    we can re-prompt the user when the terms change."""
+    user = await get_current_user(authorization)
+    now = datetime.now(timezone.utc)
+    await db.user_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "user_id": user["user_id"],
+            "telegram_terms_accepted_at": now,
+            "telegram_terms_version": TELEGRAM_TERMS_VERSION,
+            "updated_at": now,
+        }},
+        upsert=True,
+    )
+    return {
+        "ok": True,
+        "version": TELEGRAM_TERMS_VERSION,
+        "accepted_at": now.isoformat(),
+    }
+
+
 @api_router.get("/user-settings")
 async def get_user_settings(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
@@ -3148,6 +3285,13 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
     return {
         "telegram_channel": s.get("telegram_channel") or "",
         "telegram_channel_default": TELEGRAM_CHANNEL_ID or "",
+        "telegram_terms_accepted_at": (
+            s.get("telegram_terms_accepted_at").isoformat()
+            if isinstance(s.get("telegram_terms_accepted_at"), datetime)
+            else (s.get("telegram_terms_accepted_at") or None)
+        ),
+        "telegram_terms_version": s.get("telegram_terms_version") or None,
+        "telegram_terms_current_version": TELEGRAM_TERMS_VERSION,
         "whatsapp_channel_url": s.get("whatsapp_channel_url") or "",
         "whatsapp_business_phone": s.get("whatsapp_business_phone") or "",
         "shop_name": s.get("shop_name") or "Frammenti",

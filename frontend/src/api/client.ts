@@ -125,7 +125,6 @@ export const api = {
   deleteClient: (id: string) =>
     request<any>(`/clients/${id}`, { method: "DELETE" }),
 
-  // model presets (curated face library for AI generation)
   listModelPresets: (gender?: string) =>
     request<Array<{
       id: string;
@@ -202,11 +201,45 @@ export const api = {
   telegramWebhookInfo: () =>
     request<{ ok: boolean; info: any }>("/telegram/webhook-info"),
 
+  // Bot onboarding (multi-channel, single platform bot @instapost_mybot)
+  telegramBotInfo: () =>
+    request<{
+      configured: boolean;
+      username?: string;
+      deep_link_add_to_channel?: string | null;
+    }>("/telegram/bot-info"),
+
+  telegramVerifyChannel: (channel: string) =>
+    request<{
+      ok: boolean;
+      admin?: boolean;
+      can_post?: boolean;
+      channel?: string;
+      channel_title?: string;
+      channel_username?: string;
+      channel_type?: string;
+      error?: string;
+    }>("/telegram/verify-channel", { method: "POST", body: { channel } }),
+
+  telegramAcceptTerms: () =>
+    request<{ ok: boolean; version: string; accepted_at: string }>(
+      "/telegram/accept-terms",
+      { method: "POST", body: {} }
+    ),
+
   // user settings (per-shop preferences)
   getUserSettings: () =>
-    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string }>(
-      "/user-settings"
-    ),
+    request<{
+      telegram_channel: string;
+      telegram_channel_default: string;
+      telegram_terms_accepted_at: string | null;
+      telegram_terms_version: string | null;
+      telegram_terms_current_version: string;
+      whatsapp_channel_url: string;
+      whatsapp_business_phone: string;
+      shop_name: string;
+      city: string;
+    }>("/user-settings"),
   updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; whatsapp_business_phone?: string; shop_name?: string; city?: string }) =>
     request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string }>(
       "/user-settings",
