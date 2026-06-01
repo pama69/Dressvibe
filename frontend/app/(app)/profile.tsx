@@ -17,6 +17,7 @@ import { useAuth } from "@/src/contexts/AuthContext";
 import { theme } from "@/src/theme";
 import { GENDERS, AGES, BODIES, ETHNICITIES, Option } from "@/src/constants/options";
 import TelegramBotSetup from "@/src/components/TelegramBotSetup";
+import { useConfirm } from "@/src/contexts/ConfirmContext";
 
 type Client = {
   id: string;
@@ -50,6 +51,7 @@ function pickerRow(opts: Option[], value: string, onChange: (v: string) => void,
 
 export default function Profile() {
   const { user, signOut } = useAuth();
+  const confirm = useConfirm();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -323,11 +325,20 @@ export default function Profile() {
 
         <TouchableOpacity
           style={s.logout}
-          onPress={() => {
-            Alert.alert("Esci", "Vuoi disconnetterti?", [
-              { text: "Annulla", style: "cancel" },
-              { text: "Esci", style: "destructive", onPress: signOut },
-            ]);
+          onPress={async () => {
+            // Use the cross-platform confirm modal — the native Alert.alert
+            // multi-button variant doesn't work on web (the OK callback is
+            // never invoked from inside the iframe), which is exactly what
+            // made "Esci dall'account" appear unresponsive.
+            const ok = await confirm({
+              title: "Esci dall'account",
+              message: "Vuoi disconnetterti? Dovrai accedere di nuovo per usare DressVibe.",
+              destructiveText: "Esci",
+              cancelText: "Annulla",
+            });
+            if (ok) {
+              await signOut();
+            }
           }}
           testID="logout-button"
         >
