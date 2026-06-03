@@ -3493,24 +3493,28 @@ async def zernio_publish(
             "Vai su Profilo → Pubblicazione Social per collegarlo.",
         )
 
-    # 3. Build a public image URL that Zernio can fetch. We use the same
-    # public base used for short-links (the live host the request arrived
-    # at), so this works both in dev preview and in production.
+    # 3. Build a public image URL that Zernio can fetch. The endpoint is
+    # mounted under `/api/zmedia/...` so the Kubernetes ingress routes it
+    # back to this FastAPI process (paths outside `/api/*` go to the Expo
+    # bundler on port 3000 and would 404).
     public_base = (request.headers.get("x-forwarded-host") or request.url.hostname or "")
     scheme = request.headers.get("x-forwarded-proto", "https")
     public_base = f"{scheme}://{public_base}" if public_base else ""
-    media_url = f"{public_base}/zmedia/{payload.gen_id}/{payload.image_index}.jpg"
+    media_url = f"{public_base}/api/zmedia/{payload.gen_id}/{payload.image_index}.jpg"
 
-    # 4. Send the post — Zernio rejects empty content, so fall back to a
-    # minimal placeholder when the user didn't write a description.
+    # 4. Send the post — Zernio rejects empty content, so we always generate
+    # an AI caption when the user didn't write one manually. We reuse the
+    # same "Instagram caption" copywriter the Studio already exposes via
+    # /api/instagram/caption, so the post text matches the rest of the app.
     caption = (payload.caption or "").strip()
     if not caption:
-        # Try to use the generation title as a friendly default
-        gen_full = await db.generations.find_one(
-            {"id": payload.gen_id, "user_id": user["user_id"]},
-            {"_id": 0, "title": 1},
-        )
-        caption = (gen_full or {}).get("title") or "Nuovo look DressVibe ✨"
+        try:
+            caption = await _ai_caption_for_generation(user, payload.gen_id)
+        except Exception as e:
+            logger.warning(f"[zernio] AI caption fallback failed: {e}")
+        if not caption:
+            caption = "Nuovo look DressVibe ✨"
+
     body = {
         "content": caption[:2200],
         "publishNow": True,
@@ -3542,11 +3546,77 @@ async def zernio_publish(
         raise HTTPException(502, f"Zernio publish error: {e}") from e
 
 
+async def _ai_caption_for_generation(user: dict, gen_id: str) -> str:
+    """Generate an AI caption for a generation, reusing the same Italian
+    copywriter prompt the Studio screen uses. Returns the assembled caption
+    (hook + body + hashtags) ready for Instagram/Facebook. Empty string on
+    failure so the caller can fall back to a static placeholder."""
+    try:
+        # Build context similar to /api/instagram/caption
+        gen = await db.generations.find_one(
+            {"id": gen_id, "user_id": user["user_id"]},
+            {"_id": 0, "params": 1, "garment_ids": 1, "title": 1},
+        )
+        ctx_parts: List[str] = []
+        if gen:
+            params = gen.get("params") or {}
+            for k in ("model_gender", "model_age", "model_body", "model_ethnicity", "pose", "background"):
+                v = params.get(k)
+                if v:
+                    ctx_parts.append(f"{k}={v}")
+            if gen.get("garment_ids"):
+                grms = await db.garments.find(
+                    {"id": {"$in": gen["garment_ids"]}, "user_id": user["user_id"]},
+                    {"_id": 0, "name": 1, "category": 1, "color": 1, "season": 1},
+                ).to_list(10)
+                for g in grms:
+                    bits = [g.get("name"), g.get("category"), g.get("color"), g.get("season")]
+                    s = " ".join([b for b in bits if b]).strip()
+                    if s:
+                        ctx_parts.append(f"capo={s}")
+
+        settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+        shop = (settings.get("shop_name") or "Frammenti").strip()
+        city = (settings.get("city") or "Pescara").strip()
+        ctx_line = " · ".join(ctx_parts) if ctx_parts else "look della collezione"
+
+        system_msg = (
+            "Sei un copywriter italiano per boutique indipendenti. "
+            "Rispondi SOLO con la caption finale, in italiano, senza intro né commenti."
+        )
+        user_prompt = (
+            f"Boutique: {shop} — {city}.\n"
+            f"Contesto del look: {ctx_line}.\n\n"
+            "Scrivi una caption pronta per Instagram con questa struttura:\n"
+            "1) Hook breve (max 60 caratteri) sulla prima riga\n"
+            "2) Due righe descrittive con dettagli (taglio, materiale o sensazione)\n"
+            "3) Una riga di CTA (es. 'Vienilo a scoprire in boutique' o 'Scrivici per la tua taglia')\n"
+            "4) Una riga vuota e poi 6-10 hashtag pertinenti (italiani + moda + città se rilevante)\n\n"
+            "Tono: elegante, italiano colto, mai inglese. No emoji ovunque, max 2-3 ben piazzate."
+        )
+
+        chat = (
+            LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"zernio_caption_{gen_id}", system_message=system_msg)
+            .with_model("gemini", "gemini-2.5-flash")
+        )
+        resp = await chat.send_message(UserMessage(text=user_prompt))
+        text = (resp or "").strip() if isinstance(resp, str) else str(resp).strip()
+        # Strip leading/trailing markdown code fences if the LLM wrapped it
+        if text.startswith("```"):
+            text = text.strip("`")
+            text = text.split("\n", 1)[-1] if "\n" in text else text
+            text = text.rstrip("`").strip()
+        return text[:2200]
+    except Exception as e:
+        logger.warning(f"[zernio] AI caption helper failed: {e}")
+        return ""
+
+
 # Public, unauthenticated endpoint Zernio uses to fetch the photo. The
 # gen_id is a random 12-hex token (~48 bits of entropy) so the URL is
-# effectively unguessable, but we still scope it to the most recent N
-# generations to limit exposure if a token leaks.
-@app.get("/zmedia/{gen_id}/{index}.jpg", include_in_schema=False)
+# effectively unguessable. The route lives under `/api/zmedia/...` because
+# Kubernetes ingress only forwards `/api/*` to this FastAPI process.
+@app.get("/api/zmedia/{gen_id}/{index}.jpg", include_in_schema=False)
 async def serve_zernio_media(gen_id: str, index: int):
     gen = await db.generations.find_one(
         {"id": gen_id},
