@@ -3518,14 +3518,21 @@ async def zernio_publish(
     body = {
         "content": caption[:2200],
         "publishNow": True,
-        "mediaUrls": [media_url],
+        "mediaItems": [{"type": "image", "url": media_url}],
         "platforms": targets,
+    }
+    headers = {
+        **_zernio_headers(),
+        # Force a fresh idempotency key per call so retries from the
+        # frontend aren't merged with an earlier "media-content-required"
+        # failure that Zernio cached for 5 minutes.
+        "x-request-id": str(uuid.uuid4()),
     }
     try:
         async with httpx.AsyncClient(timeout=60) as http:
             r = await http.post(
                 f"{ZERNIO_BASE}/posts",
-                headers=_zernio_headers(),
+                headers=headers,
                 json=body,
             )
         if r.status_code not in (200, 201):
