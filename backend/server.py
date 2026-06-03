@@ -3501,9 +3501,18 @@ async def zernio_publish(
     public_base = f"{scheme}://{public_base}" if public_base else ""
     media_url = f"{public_base}/zmedia/{payload.gen_id}/{payload.image_index}.jpg"
 
-    # 4. Send the post
+    # 4. Send the post — Zernio rejects empty content, so fall back to a
+    # minimal placeholder when the user didn't write a description.
+    caption = (payload.caption or "").strip()
+    if not caption:
+        # Try to use the generation title as a friendly default
+        gen_full = await db.generations.find_one(
+            {"id": payload.gen_id, "user_id": user["user_id"]},
+            {"_id": 0, "title": 1},
+        )
+        caption = (gen_full or {}).get("title") or "Nuovo look DressVibe ✨"
     body = {
-        "content": (payload.caption or "")[:2200],
+        "content": caption[:2200],
         "publishNow": True,
         "mediaUrls": [media_url],
         "platforms": targets,
