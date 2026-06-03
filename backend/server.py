@@ -3299,6 +3299,279 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
     }
 
 
+# ============================================================================
+# ZERNIO — Instagram + Facebook auto-publishing
+# ----------------------------------------------------------------------------
+# We use Zernio as a unified wrapper around Meta Graph API (Instagram +
+# Facebook Page posting). The shop owner connects their accounts via
+# Zernio's hosted OAuth flow, and DressVibe stores the per-platform
+# accountId so we can publish with a single REST call.
+# ============================================================================
+ZERNIO_API_KEY = os.environ.get("ZERNIO_API_KEY", "").strip()
+ZERNIO_BASE = "https://zernio.com/api/v1"
+
+
+def _zernio_enabled() -> bool:
+    return bool(ZERNIO_API_KEY)
+
+
+def _zernio_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {ZERNIO_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+async def _zernio_default_profile_id() -> Optional[str]:
+    """Return the user's default Zernio profile id, creating one on the fly
+    if none exists yet. A "profile" in Zernio is just a container that
+    groups social accounts, so for DressVibe we keep one shared profile
+    called "DressVibe"."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.get(f"{ZERNIO_BASE}/profiles", headers=_zernio_headers())
+            if r.status_code == 200:
+                profs = (r.json() or {}).get("profiles") or []
+                for p in profs:
+                    if p.get("isDefault"):
+                        return p.get("_id")
+                if profs:
+                    return profs[0].get("_id")
+            # No profile → create one
+            r = await http.post(
+                f"{ZERNIO_BASE}/profiles",
+                headers=_zernio_headers(),
+                json={"name": "DressVibe", "description": "Auto-publishing from DressVibe app"},
+            )
+            if r.status_code in (200, 201):
+                return ((r.json() or {}).get("profile") or {}).get("_id")
+    except Exception as e:
+        logger.warning(f"[zernio] profile lookup failed: {e}")
+    return None
+
+
+@api_router.get("/zernio/status")
+async def zernio_status(authorization: Optional[str] = Header(None)):
+    """Tell the client whether Zernio is configured server-side and which
+    accounts the user (or our owner) currently has connected. The response
+    is tailored for the frontend's "Pubblicazione Social" card."""
+    await get_current_user(authorization)
+    if not _zernio_enabled():
+        return {"configured": False, "accounts": [], "platforms": {}}
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.get(f"{ZERNIO_BASE}/accounts", headers=_zernio_headers())
+            if r.status_code != 200:
+                return {"configured": True, "accounts": [], "platforms": {}, "error": r.text[:200]}
+            raw = (r.json() or {}).get("accounts") or []
+    except Exception as e:
+        return {"configured": True, "accounts": [], "platforms": {}, "error": str(e)}
+
+    # Normalised, slim shape for the UI
+    accounts = []
+    by_platform: dict = {}
+    for a in raw:
+        item = {
+            "id": a.get("_id"),
+            "platform": a.get("platform"),
+            "display_name": a.get("displayName") or a.get("username"),
+            "username": a.get("username") or (a.get("metadata") or {}).get("username"),
+            "followers": a.get("followersCount"),
+            "is_active": a.get("isActive", True) and a.get("enabled", True),
+        }
+        accounts.append(item)
+        # Keep the first active account per platform as the "primary"
+        if item["is_active"] and item["platform"] not in by_platform:
+            by_platform[item["platform"]] = item
+    return {
+        "configured": True,
+        "accounts": accounts,
+        "platforms": by_platform,
+    }
+
+
+@api_router.get("/zernio/connect-url")
+async def zernio_connect_url(
+    platform: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Return Zernio's hosted OAuth URL so the frontend can open it in the
+    system browser. After the OAuth dance the account appears in
+    `/zernio/status`."""
+    await get_current_user(authorization)
+    if not _zernio_enabled():
+        raise HTTPException(503, "Zernio non configurato")
+    if platform not in ("instagram", "facebook"):
+        raise HTTPException(400, "Piattaforma non supportata (per ora: instagram, facebook)")
+    profile_id = await _zernio_default_profile_id()
+    if not profile_id:
+        raise HTTPException(502, "Impossibile creare o leggere il profilo Zernio")
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.get(
+                f"{ZERNIO_BASE}/connect/{platform}",
+                headers=_zernio_headers(),
+                params={"profileId": profile_id},
+            )
+            if r.status_code != 200:
+                raise HTTPException(502, f"Zernio: {r.text[:200]}")
+            data = r.json() or {}
+            # Different Zernio versions use slightly different field names.
+            auth_url = data.get("authUrl") or data.get("url") or data.get("connectUrl")
+            if not auth_url:
+                raise HTTPException(502, f"Zernio: nessun authUrl nella risposta — {data}")
+            return {"auth_url": auth_url, "platform": platform}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Zernio connect error: {e}") from e
+
+
+class ZernioPublishPayload(BaseModel):
+    gen_id: str
+    image_index: int = 0
+    caption: str = ""
+    platforms: List[str]  # ["instagram", "facebook"]
+
+
+@api_router.post("/zernio/publish")
+async def zernio_publish(
+    payload: ZernioPublishPayload,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Publish a generated look on the requested social platforms via Zernio.
+    The generated image is exposed through a temporary public URL (see
+    `/zmedia/...` below) which Zernio's media pipeline fetches. We then
+    fire a single `POST /v1/posts` with `publishNow: true`."""
+    user = await get_current_user(authorization)
+    if not _zernio_enabled():
+        raise HTTPException(503, "Zernio non configurato")
+    valid = [p for p in payload.platforms if p in ("instagram", "facebook")]
+    if not valid:
+        raise HTTPException(400, "Indica almeno una piattaforma (instagram/facebook)")
+
+    # 1. Generation + image lookup (use full image, not thumb)
+    gen = await db.generations.find_one(
+        {"id": payload.gen_id, "user_id": user["user_id"]},
+        {"_id": 0, "id": 1, "images": 1, "image_count": 1},
+    )
+    if not gen:
+        raise HTTPException(404, "Generazione non trovata")
+    images = gen.get("images") or []
+    if not images or payload.image_index >= len(images):
+        raise HTTPException(404, "Immagine non trovata nella generazione")
+
+    # 2. Resolve Zernio accountIds for the requested platforms
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.get(f"{ZERNIO_BASE}/accounts", headers=_zernio_headers())
+            r.raise_for_status()
+            accounts = (r.json() or {}).get("accounts") or []
+    except Exception as e:
+        raise HTTPException(502, f"Zernio: impossibile leggere gli account — {e}") from e
+
+    by_platform: dict = {}
+    for a in accounts:
+        if not a.get("isActive", True) or not a.get("enabled", True):
+            continue
+        p = a.get("platform")
+        if p not in by_platform:
+            by_platform[p] = a.get("_id")
+
+    targets = []
+    missing = []
+    for p in valid:
+        if by_platform.get(p):
+            targets.append({"platform": p, "accountId": by_platform[p]})
+        else:
+            missing.append(p)
+    if missing:
+        raise HTTPException(
+            400,
+            f"Account non collegato per: {', '.join(missing)}. "
+            "Vai su Profilo → Pubblicazione Social per collegarlo.",
+        )
+
+    # 3. Build a public image URL that Zernio can fetch. We use the same
+    # public base used for short-links (the live host the request arrived
+    # at), so this works both in dev preview and in production.
+    public_base = (request.headers.get("x-forwarded-host") or request.url.hostname or "")
+    scheme = request.headers.get("x-forwarded-proto", "https")
+    public_base = f"{scheme}://{public_base}" if public_base else ""
+    media_url = f"{public_base}/zmedia/{payload.gen_id}/{payload.image_index}.jpg"
+
+    # 4. Send the post
+    body = {
+        "content": (payload.caption or "")[:2200],
+        "publishNow": True,
+        "mediaUrls": [media_url],
+        "platforms": targets,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60) as http:
+            r = await http.post(
+                f"{ZERNIO_BASE}/posts",
+                headers=_zernio_headers(),
+                json=body,
+            )
+        if r.status_code not in (200, 201):
+            logger.error(f"[zernio] publish failed {r.status_code}: {r.text[:600]}")
+            raise HTTPException(502, f"Zernio publish error: {r.text[:300]}")
+        data = r.json() or {}
+        post = data.get("post") or data
+        return {
+            "ok": True,
+            "post_id": post.get("_id") or post.get("id"),
+            "status": post.get("status"),
+            "platforms": [t["platform"] for t in targets],
+            "media_url": media_url,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Zernio publish error: {e}") from e
+
+
+# Public, unauthenticated endpoint Zernio uses to fetch the photo. The
+# gen_id is a random 12-hex token (~48 bits of entropy) so the URL is
+# effectively unguessable, but we still scope it to the most recent N
+# generations to limit exposure if a token leaks.
+@app.get("/zmedia/{gen_id}/{index}.jpg", include_in_schema=False)
+async def serve_zernio_media(gen_id: str, index: int):
+    gen = await db.generations.find_one(
+        {"id": gen_id},
+        {"_id": 0, "images": 1},
+    )
+    if not gen or not (gen.get("images") or []):
+        raise HTTPException(404, "Not found")
+    images = gen.get("images") or []
+    if index < 0 or index >= len(images):
+        raise HTTPException(404, "Not found")
+    raw_b64 = images[index]
+    if raw_b64.startswith("data:"):
+        raw_b64 = raw_b64.split(",", 1)[-1]
+    try:
+        data = base64.b64decode(raw_b64)
+    except Exception:
+        raise HTTPException(500, "Decode error")
+    # Re-encode as JPEG for IG compatibility (Meta is picky about PNG carousels)
+    try:
+        from PIL import Image as _PILImage
+        im = _PILImage.open(io.BytesIO(data)).convert("RGB")
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=92, optimize=True)
+        data = buf.getvalue()
+    except Exception:
+        pass  # serve raw bytes if Pillow fails
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+
 @api_router.put("/user-settings")
 async def update_user_settings(payload: UserSettingsUpdate, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)

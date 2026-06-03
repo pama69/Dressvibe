@@ -227,6 +227,41 @@ export const api = {
       { method: "POST", body: {} }
     ),
 
+  // Zernio — Instagram + Facebook auto-publishing
+  zernioStatus: () =>
+    request<{
+      configured: boolean;
+      accounts: Array<{
+        id: string;
+        platform: string;
+        display_name: string;
+        username?: string;
+        followers?: number;
+        is_active: boolean;
+      }>;
+      platforms: Record<string, any>;
+      error?: string;
+    }>("/zernio/status"),
+
+  zernioConnectUrl: (platform: "instagram" | "facebook") =>
+    request<{ auth_url: string; platform: string }>(
+      `/zernio/connect-url?platform=${platform}`
+    ),
+
+  zernioPublish: (body: {
+    gen_id: string;
+    image_index: number;
+    caption: string;
+    platforms: Array<"instagram" | "facebook">;
+  }) =>
+    request<{
+      ok: boolean;
+      post_id?: string;
+      status?: string;
+      platforms: string[];
+      media_url: string;
+    }>("/zernio/publish", { method: "POST", body }),
+
   // user settings (per-shop preferences)
   getUserSettings: () =>
     request<{

@@ -17,6 +17,7 @@ import { useAuth } from "@/src/contexts/AuthContext";
 import { theme } from "@/src/theme";
 import { GENDERS, AGES, BODIES, ETHNICITIES, Option } from "@/src/constants/options";
 import TelegramBotSetup from "@/src/components/TelegramBotSetup";
+import ZernioSocialSetup from "@/src/components/ZernioSocialSetup";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
 
 type Client = {
@@ -429,6 +430,8 @@ export default function Profile() {
         {/* Telegram bot onboarding — 3-step guided flow with ToS acceptance,
             replaces the previous static channel input block. */}
         <TelegramBotSetup />
+
+        <ZernioSocialSetup />
 
         {/* Telegram diagnostics — fix for deployed env */}
         <View style={s.tgBlock}>

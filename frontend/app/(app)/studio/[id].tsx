@@ -415,6 +415,47 @@ export default function Studio() {
   // show a busy state without blocking the other clips on the page).
   const [waVideoId, setWaVideoId] = useState<string | null>(null);
 
+  /** Auto-publish to Instagram / Facebook via Zernio. The image is exposed
+   * publicly through /zmedia/<gen>/<idx>.jpg so Meta can fetch it. The
+   * caption is reused from the "Descrizione Post" textarea above. */
+  const [igFbBusy, setIgFbBusy] = useState<null | "instagram" | "facebook">(null);
+
+  const publishToSocial = async (platform: "instagram" | "facebook") => {
+    if (igFbBusy) return;
+    if (!id) return;
+    const caption = (tgDescription || "").trim();
+    setIgFbBusy(platform);
+    try {
+      const r = await api.zernioPublish({
+        gen_id: id,
+        image_index: idx,
+        caption,
+        platforms: [platform],
+      });
+      if (r?.ok) {
+        await notify({
+          title: `Pubblicato su ${platform === "instagram" ? "Instagram" : "Facebook"} ✅`,
+          message: "Il post è in coda di pubblicazione su Meta. Apparirà sul tuo profilo entro 1-2 minuti.",
+        });
+      }
+    } catch (e: any) {
+      const msg = e?.message || "";
+      if (msg.toLowerCase().includes("account non collegato")) {
+        await notify({
+          title: `${platform === "instagram" ? "Instagram" : "Facebook"} non collegato`,
+          message: "Vai in Profilo → Pubblicazione Social e tocca Collega.",
+        });
+      } else {
+        await notify({
+          title: "Pubblicazione fallita",
+          message: msg || "Riprova fra qualche istante.",
+        });
+      }
+    } finally {
+      setIgFbBusy(null);
+    }
+  };
+
   /** Save a generated video to the device gallery (or trigger a download on
    * web). Wraps `saveVideoToGallery` so we can surface a friendly toast. */
   const handleSaveVideoToGallery = async (video: any) => {
@@ -866,6 +907,48 @@ export default function Studio() {
             <Text style={s.tgCounter}>{tgDescription.length}/1000</Text>
           </View>
 
+          {/* Auto-publish (Instagram + Facebook via Zernio) */}
+          <View style={s.section}>
+            <Text style={s.sectionLabel}>📤 Pubblica automaticamente</Text>
+            <Text style={s.tgHint}>
+              Pubblica direttamente sui tuoi profili social. La descrizione del post qui sopra viene usata come caption.
+            </Text>
+            <View style={[s.shareRow, { gap: 10 }]}>
+              <TouchableOpacity
+                style={[s.autoPubBtn, { borderColor: "#dd2a7b" }, igFbBusy === "instagram" && { opacity: 0.5 }]}
+                onPress={() => publishToSocial("instagram")}
+                disabled={igFbBusy !== null}
+                testID="zernio-publish-ig"
+                activeOpacity={0.85}
+              >
+                {igFbBusy === "instagram" ? (
+                  <ActivityIndicator color="#dd2a7b" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-instagram" size={18} color="#dd2a7b" />
+                    <Text style={[s.autoPubText, { color: "#dd2a7b" }]}>Instagram</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.autoPubBtn, { borderColor: "#1877F2" }, igFbBusy === "facebook" && { opacity: 0.5 }]}
+                onPress={() => publishToSocial("facebook")}
+                disabled={igFbBusy !== null}
+                testID="zernio-publish-fb"
+                activeOpacity={0.85}
+              >
+                {igFbBusy === "facebook" ? (
+                  <ActivityIndicator color="#1877F2" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-facebook" size={18} color="#1877F2" />
+                    <Text style={[s.autoPubText, { color: "#1877F2" }]}>Facebook</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* Share */}
           <View style={s.section}>
             <Text style={s.sectionLabel}>Condividi</Text>
@@ -988,6 +1071,18 @@ const s = StyleSheet.create({
   },
   copyText: { color: theme.colors.text, fontSize: 12 },
   shareRow: { flexDirection: "row", gap: 10, justifyContent: "center" },
+  autoPubBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+    borderWidth: 1.5,
+    backgroundColor: theme.colors.surface,
+    minHeight: 48,
+  },
+  autoPubText: { fontSize: 13, fontWeight: "700", letterSpacing: 0.4 },
   shareIconBtn: {
     width: 64, height: 64,
     alignItems: "center", justifyContent: "center",
