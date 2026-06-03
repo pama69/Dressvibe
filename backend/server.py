@@ -3585,21 +3585,47 @@ async def _ai_caption_for_generation(user: dict, gen_id: str) -> str:
         settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
         shop = (settings.get("shop_name") or "Frammenti").strip()
         city = (settings.get("city") or "Pescara").strip()
-        ctx_line = " · ".join(ctx_parts) if ctx_parts else "look della collezione"
+
+        # Pick a CTA at random (deterministic on gen_id so the same look
+        # always gets the same one — avoids the impression that captions
+        # change between previews).
+        import random as _rnd
+        rng = _rnd.Random(gen_id)
+        ctas = [
+            "Passa in negozio",
+            "Chiedici informazioni qui",
+            "Scrivici per la tua taglia",
+            "Disponibile in boutique",
+            "Vienilo a provare",
+        ]
+        cta = rng.choice(ctas)
 
         system_msg = (
             "Sei un copywriter italiano per boutique indipendenti. "
-            "Rispondi SOLO con la caption finale, in italiano, senza intro né commenti."
+            "Scrivi caption Instagram MINIMALI. "
+            "Rispondi SOLO con la caption finale, senza intro né commenti né markdown."
         )
         user_prompt = (
-            f"Boutique: {shop} — {city}.\n"
-            f"Contesto del look: {ctx_line}.\n\n"
-            "Scrivi una caption pronta per Instagram con questa struttura:\n"
-            "1) Hook breve (max 60 caratteri) sulla prima riga\n"
-            "2) Due righe descrittive con dettagli (taglio, materiale o sensazione)\n"
-            "3) Una riga di CTA (es. 'Vienilo a scoprire in boutique' o 'Scrivici per la tua taglia')\n"
-            "4) Una riga vuota e poi 6-10 hashtag pertinenti (italiani + moda + città se rilevante)\n\n"
-            "Tono: elegante, italiano colto, mai inglese. No emoji ovunque, max 2-3 ben piazzate."
+            f"Boutique: {shop} — {city}.\n\n"
+            "Scrivi una caption Instagram corta e minimale per la pubblicazione di "
+            "una foto di moda. NON descrivere il capo (i colori, il taglio, il tessuto "
+            "non ti sono noti — qualsiasi descrizione sarebbe inventata e sbagliata).\n\n"
+            "Formato esatto richiesto:\n"
+            "  • Riga 1: una frase breve evocativa (max 6 parole, niente descrizioni del capo)\n"
+            "  • Riga 2: VUOTA\n"
+            f"  • Riga 3: la CTA esatta «{cta}.»\n"
+            "  • Riga 4: VUOTA\n"
+            f"  • Riga 5: 6 hashtag pertinenti in italiano (es. #{shop.lower().replace(' ','')} "
+            f"#boutique #{city.lower()} #modaitaliana #shoplocal #madeinitaly), tutti su una "
+            "riga separati da spazi.\n\n"
+            "Esempi accettabili di Riga 1:\n"
+            "  - «Nuovo arrivo in boutique.»\n"
+            "  - «Disponibile da oggi.»\n"
+            "  - «Per te, oggi.»\n"
+            "  - «Selezione del giorno.»\n"
+            "  - «Appena arrivato.»\n\n"
+            "Tono: elegante, sobrio, italiano. NIENTE emoji. NIENTE descrizioni del capo. "
+            "NIENTE aggettivi inventati su taglio/colore/materiale. Solo evocazione + CTA + hashtag."
         )
 
         chat = (
