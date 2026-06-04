@@ -89,6 +89,9 @@ credentials.json
 *.pem
 *.key
 .credentials
-.env
-.env.*
-*.env
+# NOTE: .env files are intentionally tracked — Emergent rewrites them at
+# deploy time. Do NOT re-enable the .env blocks below or the deployed
+# backend will lose its MONGO_URL / API keys.
+# .env
+# .env.*
+# *.env
