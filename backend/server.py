@@ -3347,6 +3347,32 @@ async def debug_whoami(authorization: Optional[str] = Header(None)):
     }
 
 
+@app.get("/api/debug/garments-by-email", include_in_schema=False)
+async def debug_garments_by_email(email: str):
+    """Public debug endpoint (no auth) that returns the garment count and
+    a sample of garment ids for the given email. Used to verify Atlas data
+    is correctly visible from the deploy backend."""
+    email_norm = (email or "").lower().strip()
+    user = await db.users.find_one({"email": email_norm}, {"_id": 0, "user_id": 1, "email": 1})
+    if not user:
+        return {"email": email_norm, "user_found": False, "garments_count": 0, "sample": []}
+    g = await db.garments.count_documents({"user_id": user["user_id"]})
+    sample = await db.garments.find(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "id": 1, "name": 1, "created_at": 1},
+    ).sort("created_at", -1).limit(3).to_list(3)
+    for s in sample:
+        if "created_at" in s and hasattr(s["created_at"], "isoformat"):
+            s["created_at"] = s["created_at"].isoformat()
+    return {
+        "email": user["email"],
+        "user_id": user["user_id"],
+        "user_found": True,
+        "garments_count": g,
+        "sample": sample,
+    }
+
+
 
 # ----------------------------------------------------------------------------
 # We use Zernio as a unified wrapper around Meta Graph API (Instagram +
