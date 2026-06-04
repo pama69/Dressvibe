@@ -3299,8 +3299,55 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
     }
 
 
-# ============================================================================
-# ZERNIO — Instagram + Facebook auto-publishing
+# Temporary debug endpoint to diagnose deploy-vs-preview DB mismatch.
+# Sanitized output (no credentials), safe to remove after the migration
+# story is closed.
+@app.get("/api/debug/db-info", include_in_schema=False)
+async def debug_db_info():
+    mongo = os.environ.get("MONGO_URL", "")
+    # Hide credentials, only keep "atlas/local" flag + host hint
+    flag = "atlas" if "mongodb+srv" in mongo else ("local" if "localhost" in mongo else "other")
+    host = mongo.split("@")[-1][:60] if "@" in mongo else mongo[:60]
+    counts = {}
+    try:
+        counts["users"] = await db.users.count_documents({})
+        counts["garments"] = await db.garments.count_documents({})
+        counts["generations"] = await db.generations.count_documents({})
+    except Exception as e:
+        counts["error"] = str(e)
+    return {
+        "flag": flag,
+        "host_hint": host,
+        "db_name": os.environ.get("DB_NAME"),
+        "counts": counts,
+    }
+
+
+
+@app.get("/api/debug/whoami", include_in_schema=False)
+async def debug_whoami(authorization: Optional[str] = Header(None)):
+    """Echo back the user_id resolved from the Bearer token so the deploy
+    issue (galleria vuota) can be diagnosed: confirms whether the token in
+    use maps to the right user_id with the expected garment count."""
+    try:
+        user = await get_current_user(authorization)
+    except Exception as e:
+        return {
+            "error": str(e),
+            "auth_header_received": bool(authorization),
+            "auth_header_prefix": (authorization or "")[:25],
+        }
+    g = await db.garments.count_documents({"user_id": user["user_id"]})
+    gen = await db.generations.count_documents({"user_id": user["user_id"]})
+    return {
+        "user_id": user.get("user_id"),
+        "email": user.get("email"),
+        "garments_count": g,
+        "generations_count": gen,
+    }
+
+
+
 # ----------------------------------------------------------------------------
 # We use Zernio as a unified wrapper around Meta Graph API (Instagram +
 # Facebook Page posting). The shop owner connects their accounts via
