@@ -14,7 +14,7 @@ import {
   KeyboardAvoidingView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
@@ -260,21 +260,24 @@ export default function Studio() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadVideos(); }, [loadVideos]);
 
-  // Sync local `idx` with the URL `index` param. `useState(initialIdx)` only
-  // captures the value on first mount — but Expo Router REUSES the same
-  // Studio instance when you re-navigate to /studio/[id] with a different
-  // image index (or after an edit bumped the idx). Without this effect the
-  // screen would stick on whichever image was last opened/edited, which
-  // matches the user-reported bug "always shows the second of the two
-  // images, no matter which one I tap".
-  useEffect(() => {
-    const next = parseInt(index || "0", 10);
-    if (!Number.isNaN(next) && next !== idx) {
-      setIdx(next);
-      setEdited(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, id]);
+  // Sync local `idx` with the URL `index` param. We use useFocusEffect (not
+  // a plain useEffect on [index, id]) because the URL `index` value can be
+  // IDENTICAL between two visits to this screen — e.g., the user opens
+  // image 0, edits it (idx is bumped to 5 locally, URL still says 0),
+  // goes back to the results gallery, and taps image 0 again. The URL
+  // doesn't change, so a [index, id] effect never fires and the screen
+  // stays stuck on image 5 ("doesn't let me select previous creations,
+  // only the last one"). useFocusEffect re-runs every time the user
+  // returns to this screen so we always re-anchor idx to the URL value.
+  useFocusEffect(
+    useCallback(() => {
+      const next = parseInt(index || "0", 10);
+      if (!Number.isNaN(next)) {
+        setIdx((curr) => (curr !== next ? next : curr));
+        setEdited(false);
+      }
+    }, [index, id])
+  );
 
   useEffect(() => {
     (async () => {

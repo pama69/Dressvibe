@@ -1,6 +1,25 @@
 import { storage } from "@/src/utils/storage";
+import { Platform } from "react-native";
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+/**
+ * Resolve the backend base URL.
+ *
+ * On WEB we always trust the browser's current origin (e.g. the deploy
+ * URL `https://20fa349a-...preview.emergentagent.com` OR the preview URL
+ * `https://outfit-gen-11.preview.emergentagent.com`). The Kubernetes
+ * ingress routes `/api/*` of each environment to its own backend, so
+ * relying on `EXPO_PUBLIC_BACKEND_URL` (which is baked at build time)
+ * was making the deployed web app talk to the preview backend → that's
+ * what caused the empty gallery after migration.
+ *
+ * On NATIVE (Expo Go / standalone build) there is no `window.location`,
+ * so we keep using the build-time env var.
+ */
+const ENV_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+const BACKEND_URL =
+  Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
+    ? window.location.origin
+    : ENV_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 const TOKEN_KEY = "dv_session_token";
 

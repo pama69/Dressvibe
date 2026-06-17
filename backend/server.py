@@ -1425,35 +1425,36 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
 async def list_generations(authorization: Optional[str] = Header(None)):
     """Return only metadata + small thumbnails for the history screen.
 
-    The history grid only needs a small preview per row, so we explicitly
-    EXCLUDE the heavy `images` (full base64) and `video_b64` fields and
-    fall back to the first thumb (≈10 KB) for the preview. The full image
-    list is fetched on demand via GET /api/generations/{id}.
+    The history grid only needs a small preview per row, so we use an
+    aggregation pipeline that projects ONLY the lightweight fields
+    BEFORE the in-memory sort. Otherwise MongoDB Atlas (free tier) blows
+    its 32 MB sort memory budget on the heavy base64 `images` blobs and
+    returns `QueryExceededMemoryLimitNoDiskUseAllowed`, leaving the
+    Storia/Archivio screen empty with a 500 error.
     """
     user = await get_current_user(authorization)
-    items = await db.generations.find(
-        {"user_id": user["user_id"]},
-        # Exclude heavy blobs from the list response. We still need
-        # `thumbs` and `images.length` though, so we project `images` only
-        # to count it client-side via a small placeholder.
-        {"_id": 0, "video_b64": 0, "prompt": 0},
-    ).sort("created_at", -1).to_list(200)
-    for it in items:
-        images = it.get("images") or []
-        thumbs = it.get("thumbs") or []
-        it["image_count"] = len(images)
-        # Prefer the small thumb; fall back to the full image only for
-        # legacy generations that haven't been thumbnailed yet (the
-        # migration on startup will fix them on the next reload).
-        if thumbs:
-            it["thumbnail"] = thumbs[0]
-        elif images:
-            it["thumbnail"] = images[0]
-        else:
-            it["thumbnail"] = None
-        # Strip the heavy arrays before sending over the wire.
-        it.pop("images", None)
-        it.pop("thumbs", None)
+    pipeline = [
+        {"$match": {"user_id": user["user_id"]}},
+        {
+            "$project": {
+                "_id": 0,
+                "id": 1,
+                "title": 1,
+                "status": 1,
+                "created_at": 1,
+                "image_count": {"$size": {"$ifNull": ["$images", []]}},
+                "thumbnail": {
+                    "$ifNull": [
+                        {"$arrayElemAt": ["$thumbs", 0]},
+                        {"$arrayElemAt": ["$images", 0]},
+                    ]
+                },
+            }
+        },
+        {"$sort": {"created_at": -1}},
+        {"$limit": 200},
+    ]
+    items = await db.generations.aggregate(pipeline).to_list(200)
     return items
 
 
@@ -3895,6 +3896,10 @@ async def startup_db():
     await db.garments.create_index("id", unique=True)
     await db.generations.create_index("user_id")
     await db.generations.create_index("id", unique=True)
+    # Composite index used by GET /api/generations to fetch the user's
+    # history sorted by creation date without forcing MongoDB to do an
+    # in-memory sort over the heavy base64 image blobs.
+    await db.generations.create_index([("user_id", 1), ("created_at", -1)])
     await db.virtual_clients.create_index("user_id")
     await db.virtual_clients.create_index("id", unique=True)
     await db.tg_publications.create_index("token", unique=True)
