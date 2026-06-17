@@ -7,12 +7,14 @@ import {
   ScrollView,
   Image,
   Alert,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import {
@@ -26,8 +28,49 @@ import {
   VARIATIONS,
   Option,
 } from "@/src/constants/options";
-import { genStore } from "@/src/state/genStore";
+import { genStore, type AccessoryItem } from "@/src/state/genStore";
 import { presetSelectionStore } from "@/src/state/presetSelection";
+
+// Accessory categories shown in the "Aggiungi accessori" picker. The `id`
+// values are sent verbatim to the backend, where ACCESSORY_CAT_INSTRUCTION
+// maps each one to a focused "must be worn on the X" prompt addendum.
+const ACCESSORY_CATEGORIES: { id: string; label: string; emoji: string }[] = [
+  { id: "scarpe",   label: "Scarpe",   emoji: "👟" },
+  { id: "borse",    label: "Borse",    emoji: "👜" },
+  { id: "gioielli", label: "Gioielli", emoji: "💎" },
+  { id: "cappelli", label: "Cappelli", emoji: "🎩" },
+  { id: "occhiali", label: "Occhiali", emoji: "🕶️" },
+  { id: "cinture",  label: "Cinture",  emoji: "🪢" },
+  { id: "sciarpe",  label: "Sciarpe",  emoji: "🧣" },
+  { id: "altro",    label: "Altro",    emoji: "✨" },
+];
+
+// Hard cap so a single generation doesn't ship dozens of base64 photos
+// to the backend (and to Gemini, which has a per-request budget).
+const ACCESSORY_MAX = 5;
+
+// Robust base64 extractor — handles native (asset.base64) and web
+// (blob/data URI). Same logic as Upload screen.
+async function assetToB64(asset: ImagePicker.ImagePickerAsset): Promise<string | null> {
+  if (asset.base64 && asset.base64.length > 0) return asset.base64;
+  if (!asset.uri) return null;
+  try {
+    const res = await fetch(asset.uri);
+    const blob = await res.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        const comma = dataUrl.indexOf(",");
+        resolve(comma >= 0 ? dataUrl.slice(comma + 1) : null);
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
 
 // Aesthetic modifiers shown as a 5-button toggle row in Step 4 (Look).
 // IDs must match the LOOK_STYLES_PROMPTS dict on the backend (server.py).
@@ -100,6 +143,17 @@ export default function Generate() {
   const [variations, setVariations] = useState(4);
   const [lookStyles, setLookStyles] = useState<string[]>([]);
   const [addPriceTags, setAddPriceTags] = useState(false);
+  // Aggiungi accessori — when the checkbox is on, the shop owner can attach
+  // up to ACCESSORY_MAX extra photos (shoes, bags, jewelry, hats, glasses,
+  // belts, scarves, etc.) that the AI MUST include in the generated photo.
+  // Each entry has a category that drives a focused, per-body-part prompt
+  // addendum on the backend (see ACCESSORY_CAT_INSTRUCTION in server.py).
+  const [addAccessories, setAddAccessories] = useState(false);
+  const [accessories, setAccessories] = useState<AccessoryItem[]>([]);
+  // Currently selected category in the picker. Tapping a chip just selects
+  // the category — the actual photo step (gallery/camera) follows.
+  const [accCategory, setAccCategory] = useState<string>("scarpe");
+  const [accBusy, setAccBusy] = useState(false);
   const [providers, setProviders] = useState<any[]>([]);
   const [aiProvider, setAiProvider] = useState<string>("gemini_nano_banana");
   const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
@@ -177,6 +231,86 @@ export default function Generate() {
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
+  // ── Accessory helpers ─────────────────────────────────────────────────
+  // Both pickers funnel the chosen photo through the same
+  // `appendAccessory` so we keep the "max N" guard in a single place and
+  // the category attached at click time stays consistent.
+  const appendAccessory = (b64: string) => {
+    if (!b64) return;
+    setAccessories((curr) => {
+      if (curr.length >= ACCESSORY_MAX) return curr;
+      return [...curr, { category: accCategory, image_base64: b64 }];
+    });
+  };
+
+  const pickAccessoryFromGallery = async () => {
+    if (accBusy) return;
+    if (accessories.length >= ACCESSORY_MAX) {
+      Alert.alert("Limite raggiunto", `Puoi aggiungere al massimo ${ACCESSORY_MAX} accessori per generazione.`);
+      return;
+    }
+    setAccBusy(true);
+    try {
+      if (Platform.OS !== "web") {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== "granted") {
+          Alert.alert("Permesso negato", "Concedi l'accesso alla galleria per aggiungere un accessorio.");
+          return;
+        }
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        base64: true,
+        quality: 0.55,
+        allowsEditing: false,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const b64 = await assetToB64(res.assets[0]);
+      if (!b64) {
+        Alert.alert("Errore", "Impossibile leggere la foto. Prova un'altra immagine.");
+        return;
+      }
+      appendAccessory(b64);
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile aprire la galleria");
+    } finally {
+      setAccBusy(false);
+    }
+  };
+
+  const takeAccessoryPhoto = async () => {
+    if (accBusy) return;
+    if (accessories.length >= ACCESSORY_MAX) {
+      Alert.alert("Limite raggiunto", `Puoi aggiungere al massimo ${ACCESSORY_MAX} accessori per generazione.`);
+      return;
+    }
+    setAccBusy(true);
+    try {
+      if (Platform.OS !== "web") {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== "granted") {
+          Alert.alert("Permesso negato", "Concedi l'accesso alla fotocamera per scattare la foto.");
+          return;
+        }
+      }
+      const res = await ImagePicker.launchCameraAsync({
+        base64: true,
+        quality: 0.55,
+        allowsEditing: false,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const b64 = await assetToB64(res.assets[0]);
+      if (b64) appendAccessory(b64);
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile aprire la fotocamera");
+    } finally {
+      setAccBusy(false);
+    }
+  };
+
+  const removeAccessory = (idx: number) =>
+    setAccessories((curr) => curr.filter((_, i) => i !== idx));
+
   const onGenerate = () => {
     if (selected.length === 0) {
       Alert.alert("Seleziona almeno un capo", "Tocca uno o più capi dalla tua galleria per continuare.");
@@ -199,6 +333,11 @@ export default function Generate() {
       custom_background_id: customBgId || undefined,
       look_styles: lookStyles.length > 0 ? lookStyles : undefined,
       add_price_tags: addPriceTags || undefined,
+      // Only ship the accessory list when (a) the checkbox is on AND
+      // (b) at least one accessory was actually picked. Otherwise we
+      // send `undefined` so the backend prompt stays untouched.
+      accessories:
+        addAccessories && accessories.length > 0 ? accessories : undefined,
       model_preset_id: presetId || undefined,
       model_preset_name: presetName || undefined,
       model_preset_thumb: presetThumb || undefined,
@@ -394,7 +533,7 @@ export default function Generate() {
             <Text style={styles.stepHint}>{lookStyles.length > 0 ? `${lookStyles.length} attivi` : "facoltativo"}</Text>
           </View>
           <Text style={styles.lookHint}>
-            Personalizza l'estetica della foto. Tocca uno o più stili — si combinano tra loro.
+            Personalizza l&apos;estetica della foto. Tocca uno o più stili — si combinano tra loro.
           </Text>
           <View style={styles.lookGrid}>
             {LOOK_STYLES.map((ls) => {
@@ -435,12 +574,141 @@ export default function Generate() {
               {addPriceTags ? <Text style={styles.checkboxMark}>✓</Text> : null}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.priceToggleLabel}>Inserisci prezzi nell'immagine</Text>
+              <Text style={styles.priceToggleLabel}>Inserisci prezzi nell&apos;immagine</Text>
               <Text style={styles.priceToggleHint}>
-                Aggiunge cartellini con i prezzi (presi dalla "Descrizione e prezzi" del capo) accanto ai capi corrispondenti nella foto generata.
+                Aggiunge cartellini con i prezzi (presi dalla &quot;Descrizione e prezzi&quot; del capo) accanto ai capi corrispondenti nella foto generata.
               </Text>
             </View>
           </TouchableOpacity>
+        </View>
+
+        {/* Aggiungi accessori — opt-in toggle. When ON, the shop owner can
+            attach up to ACCESSORY_MAX extra photos that the AI MUST wear on
+            the model. Each photo carries a category that drives a focused
+            "worn on the X" instruction in the backend prompt. */}
+        <View style={styles.step}>
+          <TouchableOpacity
+            onPress={() => {
+              setAddAccessories((v) => !v);
+              // When toggling OFF we keep the list around so the user can
+              // toggle back without losing already-picked accessories.
+            }}
+            activeOpacity={0.8}
+            style={styles.priceToggleRow}
+            testID="generate-toggle-accessories"
+          >
+            <View style={[styles.checkbox, addAccessories && styles.checkboxOn]}>
+              {addAccessories ? <Text style={styles.checkboxMark}>✓</Text> : null}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.priceToggleLabel}>Aggiungi accessori</Text>
+              <Text style={styles.priceToggleHint}>
+                Carica foto di scarpe, borse, gioielli, cappelli, occhiali ecc. che la modella DEVE indossare nella foto generata.
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {addAccessories ? (
+            <View style={styles.accBox}>
+              {/* Category picker */}
+              <Text style={styles.accSubLabel}>Categoria accessorio</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, paddingRight: 12 }}
+              >
+                {ACCESSORY_CATEGORIES.map((c) => {
+                  const active = accCategory === c.id;
+                  return (
+                    <TouchableOpacity
+                      key={c.id}
+                      onPress={() => setAccCategory(c.id)}
+                      style={[chipStyles.chip, active && chipStyles.chipActive]}
+                      activeOpacity={0.85}
+                      testID={`acc-cat-${c.id}`}
+                    >
+                      <Text style={[chipStyles.chipText, active && chipStyles.chipTextActive]}>
+                        {c.emoji}  {c.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Pickers */}
+              <View style={styles.accBtnRow}>
+                <TouchableOpacity
+                  onPress={pickAccessoryFromGallery}
+                  disabled={accBusy || accessories.length >= ACCESSORY_MAX}
+                  style={[
+                    styles.accBtn,
+                    (accBusy || accessories.length >= ACCESSORY_MAX) && { opacity: 0.45 },
+                  ]}
+                  activeOpacity={0.85}
+                  testID="acc-pick-gallery"
+                >
+                  <Ionicons name="images-outline" size={16} color={theme.colors.text} />
+                  <Text style={styles.accBtnText}>Galleria</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={takeAccessoryPhoto}
+                  disabled={accBusy || accessories.length >= ACCESSORY_MAX}
+                  style={[
+                    styles.accBtn,
+                    (accBusy || accessories.length >= ACCESSORY_MAX) && { opacity: 0.45 },
+                  ]}
+                  activeOpacity={0.85}
+                  testID="acc-take-photo"
+                >
+                  <Ionicons name="camera-outline" size={16} color={theme.colors.text} />
+                  <Text style={styles.accBtnText}>Scatta foto</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* List of added accessories */}
+              {accessories.length > 0 ? (
+                <View style={{ gap: 8 }}>
+                  <Text style={styles.accSubLabel}>
+                    Accessori aggiunti ({accessories.length}/{ACCESSORY_MAX})
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 10, paddingRight: 12 }}
+                  >
+                    {accessories.map((acc, idx) => {
+                      const meta = ACCESSORY_CATEGORIES.find((c) => c.id === acc.category);
+                      return (
+                        <View key={idx} style={styles.accThumbWrap}>
+                          <Image
+                            source={{ uri: `data:image/jpeg;base64,${acc.image_base64}` }}
+                            style={styles.accThumb}
+                          />
+                          <View style={styles.accThumbLabelWrap}>
+                            <Text style={styles.accThumbLabel} numberOfLines={1}>
+                              {meta ? `${meta.emoji} ${meta.label}` : acc.category}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => removeAccessory(idx)}
+                            style={styles.accRemoveBtn}
+                            hitSlop={8}
+                            testID={`acc-remove-${idx}`}
+                          >
+                            <Ionicons name="close" size={14} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : (
+                <Text style={styles.accEmpty}>
+                  Nessun accessorio aggiunto. Seleziona una categoria e tocca Galleria o Scatta foto.
+                </Text>
+              )}
+            </View>
+          ) : null}
         </View>
 
         {/* Step 5 — Variations */}
@@ -633,6 +901,51 @@ const styles = StyleSheet.create({
   },
   priceToggleHint: {
     color: theme.colors.textMuted, fontSize: 11, lineHeight: 15, marginTop: 3,
+  },
+  // Accessory picker box (revealed when "Aggiungi accessori" is on)
+  accBox: {
+    marginTop: 8,
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  accSubLabel: {
+    color: theme.colors.textSecondary,
+    fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
+  },
+  accBtnRow: { flexDirection: "row", gap: 10 },
+  accBtn: {
+    flex: 1,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    paddingVertical: 12,
+    borderWidth: 1, borderStyle: "dashed", borderColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
+  },
+  accBtnText: { color: theme.colors.text, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
+  accEmpty: {
+    color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, fontStyle: "italic",
+  },
+  accThumbWrap: {
+    width: 90, height: 110,
+    backgroundColor: theme.colors.bg,
+    borderWidth: 1, borderColor: theme.colors.border,
+    overflow: "hidden",
+    position: "relative",
+  },
+  accThumb: { width: "100%", height: 80 },
+  accThumbLabelWrap: {
+    paddingHorizontal: 6, paddingVertical: 4,
+    borderTopWidth: 1, borderTopColor: theme.colors.border,
+  },
+  accThumbLabel: { color: theme.colors.text, fontSize: 10, letterSpacing: 0.2 },
+  accRemoveBtn: {
+    position: "absolute", top: 4, right: 4,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.3)",
   },
   providerChip: {
     padding: 14, borderWidth: 1, borderColor: theme.colors.border,

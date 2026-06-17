@@ -147,6 +147,17 @@ class BackgroundCreate(BaseModel):
     description: Optional[str] = None  # short, e.g. "boutique vetrina sera"
 
 
+class AccessoryItem(BaseModel):
+    """One extra accessory the shop owner wants the model to wear.
+
+    The image is a plain base64 JPEG/PNG (no `data:` prefix). The category
+    drives a focused "must be worn on the X" instruction in the prompt
+    (e.g. shoes go on the feet, a bag is carried, glasses on the face).
+    """
+    category: str  # scarpe/borse/gioielli/cappelli/occhiali/cinture/sciarpe/altro
+    image_base64: str
+
+
 class GenerationCreate(BaseModel):
     garment_ids: List[str]
     model_gender: str  # uomo/donna
@@ -162,6 +173,7 @@ class GenerationCreate(BaseModel):
     custom_background_id: Optional[str] = None  # if set, overrides `background`
     look_styles: Optional[List[str]] = None  # optional aesthetic modifiers (warm/depth/vivid/dynamic/premium)
     add_price_tags: bool = False  # opt-in: when True, garment "Descrizione e prezzi" names are used to overlay price tags in the photo
+    accessories: Optional[List[AccessoryItem]] = None  # optional extra items to wear (shoes/bag/jewelry/hat/glasses/belt/scarf)
     model_preset_id: Optional[str] = None  # when set, forces a specific pre-generated face (locks ethnicity/body/age to preset defaults)
 
 
@@ -854,6 +866,7 @@ def build_outfit_prompt(
     custom_bg_label: Optional[str] = None,
     price_descriptions: Optional[List[str]] = None,
     model_preset_face: Optional[str] = None,
+    num_garments: int = 0,
 ) -> str:
     gender = GENDER_IT.get(p.model_gender, p.model_gender)
     age = AGE_IT.get(p.model_age, p.model_age)
@@ -910,6 +923,7 @@ def build_outfit_prompt(
         f"STRICT vertical 4:5 aspect ratio (portrait, ratio 1080x1350 — the native Instagram feed format). "
         f"The composition must fit the model fully inside the 4:5 frame with comfortable margins on top and bottom. "
         f"Variation seed {variation_idx}."
+        f"{_compose_accessories_suffix(p.accessories, num_garments)}"
         f"{_compose_price_tags_suffix(price_descriptions)}"
         f"{_compose_look_styles_suffix(p.look_styles)}"
     )
@@ -975,6 +989,122 @@ def _compose_look_styles_suffix(look_styles: Optional[List[str]]) -> str:
         return ""
     # Each snippet already starts with ", " — join naturally.
     return " " + " ".join(parts)
+
+
+# ----- Accessories (Aggiungi accessori) ----------------------------------
+# Maps each accessory category the UI exposes to a focused, peremptory
+# instruction that tells the AI exactly how the item must be worn or
+# carried by the model. The mapping is what makes the "Aggiungi
+# accessori" feature reliable — without per-category guidance the model
+# often pastes accessories floating in the scene instead of on the body.
+ACCESSORY_CAT_INSTRUCTION = {
+    "scarpe": (
+        "worn on the feet, replacing any default footwear — both shoes must "
+        "be visible on the model's feet, matching the exact color, material, "
+        "shape and any logo from the reference"
+    ),
+    "borse": (
+        "carried by the model in a natural way — held in the hand, on the "
+        "shoulder, or as a crossbody, fully visible, matching the exact "
+        "color, material, hardware and any logo from the reference"
+    ),
+    "gioielli": (
+        "worn as jewelry on the appropriate body part — a necklace must be "
+        "around the neck, earrings on the ears, a ring on a finger, a "
+        "bracelet on the wrist — matching the exact shape, metal and stones "
+        "from the reference"
+    ),
+    "cappelli": (
+        "worn on the model's head in a natural, well-fitted way, matching "
+        "the exact color, shape and any logo from the reference"
+    ),
+    "occhiali": (
+        "worn on the model's face, sitting correctly on the eyes/nose, "
+        "matching the exact frame color, lens tint and shape from the "
+        "reference (do not hide the eyes unless the reference is clearly "
+        "tinted)"
+    ),
+    "cinture": (
+        "worn around the waist over the appropriate garment, with the "
+        "buckle visible at the front, matching the exact color, material "
+        "and buckle style from the reference"
+    ),
+    "sciarpe": (
+        "worn naturally around the neck or shoulders, draped or wrapped in "
+        "a stylish way, matching the exact color, pattern and material "
+        "from the reference"
+    ),
+    "altro": (
+        "worn or carried by the model in a natural and visible way, "
+        "matching the reference image exactly"
+    ),
+}
+
+ACCESSORY_CAT_LABEL = {
+    "scarpe": "shoes",
+    "borse": "handbag/bag",
+    "gioielli": "jewelry",
+    "cappelli": "hat/cap",
+    "occhiali": "eyewear (glasses or sunglasses)",
+    "cinture": "belt",
+    "sciarpe": "scarf",
+    "altro": "accessory",
+}
+
+
+def _compose_accessories_suffix(
+    accessories: Optional[List[AccessoryItem]],
+    num_garments: int,
+) -> str:
+    """Append a peremptory accessory instruction to the outfit prompt.
+
+    When the shop owner adds extra accessories on the Generation screen,
+    each accessory image is appended to the reference list right AFTER
+    the garment references and BEFORE any custom background. This helper
+    builds the matching text instruction so the AI knows:
+      * which reference indexes correspond to accessories
+      * which body part each must be worn on (driven by category)
+      * that it is MANDATORY to render every single one of them
+
+    Without this dedicated block the existing "do NOT add any accessory
+    not visible in the references" instruction would still apply, but
+    Gemini sometimes drops a referenced accessory if it doesn't see an
+    explicit "must wear" command — so we make the instruction strong
+    and listed item-by-item.
+    """
+    items = [a for a in (accessories or []) if a and a.image_base64]
+    if not items:
+        return ""
+
+    lines: List[str] = []
+    for i, acc in enumerate(items, start=1):
+        # `num_garments + i` is the 1-based position of this accessory in
+        # the reference image list as seen by Gemini.
+        ref_idx = num_garments + i
+        label = ACCESSORY_CAT_LABEL.get(acc.category, "accessory")
+        guidance = ACCESSORY_CAT_INSTRUCTION.get(
+            acc.category, ACCESSORY_CAT_INSTRUCTION["altro"]
+        )
+        lines.append(
+            f"  - Reference image #{ref_idx} ({label}): {guidance}."
+        )
+
+    bullets = "\n".join(lines)
+    return (
+        f" MANDATORY ACCESSORIES — the next {len(items)} reference image"
+        f"{'s' if len(items) != 1 else ''} (right after the clothing references) "
+        f"show extra accessories the model MUST wear or carry in the final photo. "
+        f"You MUST render EVERY ONE of these accessories on the model, in addition "
+        f"to the clothing items already required. Failure to include any of them "
+        f"is NOT allowed. Each accessory must appear naturally and visibly, in the "
+        f"correct position on the body, preserving 100% of its visual identity "
+        f"(color, material, shape, hardware, logo, finish):\n"
+        f"{bullets}\n"
+        f"These mandatory accessory instructions OVERRIDE the earlier list of "
+        f"forbidden accessories — the categories listed above are explicitly "
+        f"requested and MUST be present in the generated photo. All other "
+        f"accessories not shown in any reference image remain forbidden."
+    )
 
 
 def make_thumb_b64(image_b64: str, max_size: int = 280, quality: int = 70) -> Optional[str]:
@@ -1309,6 +1439,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     if not garments:
         raise HTTPException(status_code=404, detail="Capi non trovati")
     refs = [g["image_base64"] for g in garments]
+    num_garments = len(refs)  # remembered before appending accessories/bg so the prompt can reference them by 1-based index
 
     # Collect real (non-auto-placeholder) descriptions from the selected
     # garments — but ONLY if the user explicitly opted in via the
@@ -1319,6 +1450,15 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
         price_descriptions = [
             g["name"] for g in garments if is_real_description(g.get("name"))
         ]
+
+    # Append optional accessory references (Aggiungi accessori). They sit
+    # AFTER the garments and BEFORE the custom background so the prompt
+    # block in _compose_accessories_suffix can refer to them by index
+    # "right after the clothing references".
+    if payload.accessories:
+        for acc in payload.accessories:
+            if acc and acc.image_base64:
+                refs.append(acc.image_base64)
 
     # Custom background: append its image as the LAST reference and pass label to prompt.
     custom_bg_label: Optional[str] = None
@@ -1353,7 +1493,10 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
         "user_id": user["user_id"],
         "garment_ids": payload.garment_ids,
         "title": payload.title or f"Generazione del {fmt_rome('%d/%m %H:%M')}",
-        "params": payload.dict(exclude={"garment_ids", "title"}),
+        # We strip `accessories` from the persisted params because they are
+        # disposable, one-shot uploads (a single generation can attach up
+        # to 5 base64 photos that we don't want to keep in the DB forever).
+        "params": payload.dict(exclude={"garment_ids", "title", "accessories"}),
         "images": [],
         "status": "pending",
         "created_at": datetime.now(timezone.utc),
@@ -1369,7 +1512,10 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     async def _bounded(i: int):
         async with sem:
             return await generate_single_image(
-                build_outfit_prompt(payload, i, custom_bg_label, price_descriptions, model_preset_face),
+                build_outfit_prompt(
+                    payload, i, custom_bg_label, price_descriptions,
+                    model_preset_face, num_garments=num_garments,
+                ),
                 refs,
                 f"{gen_id}_{i}",
             )

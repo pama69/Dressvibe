@@ -1,4 +1,11 @@
 // Tiny in-memory store for cross-screen generation params (kept simple).
+export type AccessoryItem = {
+  // One of: scarpe / borse / gioielli / cappelli / occhiali / cinture / sciarpe / altro
+  category: string;
+  // Plain base64 (no data: prefix), same convention as garment images.
+  image_base64: string;
+};
+
 type GenParams = {
   garment_ids: string[];
   model_gender: string;
@@ -13,6 +20,11 @@ type GenParams = {
   custom_background_id?: string;
   look_styles?: string[];
   add_price_tags?: boolean;
+  /** Optional list of extra accessories (shoes, bags, hats, etc.) that the
+   *  shop owner wants the AI to render onto the generated model. Each item
+   *  carries its own image plus a category tag used to build a focused
+   *  "worn naturally on the X" instruction in the prompt. */
+  accessories?: AccessoryItem[];
   /** Optional face preset id (e.g. "preset_sofia"). When set the AI uses
    *  the preset's face description and locks the demographic chips in the UI. */
   model_preset_id?: string | null;
