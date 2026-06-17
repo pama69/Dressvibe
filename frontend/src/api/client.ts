@@ -130,10 +130,25 @@ export const api = {
     request<any>(`/generations/${id}/images/${index}`, { method: "DELETE" }),
 
   // studio
-  studioEdit: (image_base64: string, edit_prompt: string, gen_id?: string, add_price_tags?: boolean) =>
+  studioEdit: (
+    image_base64: string,
+    edit_prompt: string,
+    gen_id?: string,
+    add_price_tags?: boolean,
+    accessories?: { category: string; image_base64: string }[],
+  ) =>
     request<{ image_base64: string; image_index?: number | null }>("/studio/edit", {
       method: "POST",
-      body: { image_base64, edit_prompt, gen_id, add_price_tags: !!add_price_tags },
+      body: {
+        image_base64,
+        edit_prompt,
+        gen_id,
+        add_price_tags: !!add_price_tags,
+        // Only forward the array when it has at least one item — the
+        // backend treats `undefined` / `null` as "no accessories" and we
+        // want to keep the payload small for the common case.
+        accessories: accessories && accessories.length > 0 ? accessories : undefined,
+      },
       timeoutMs: 90000,
     }),
 

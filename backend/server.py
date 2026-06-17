@@ -194,6 +194,7 @@ class StudioEditRequest(BaseModel):
     gen_id: Optional[str] = None  # if provided, append the edited image to that generation's gallery
     provider: Optional[str] = None  # image_edit provider id; None = default
     add_price_tags: bool = False  # if True, append price tag instruction using descriptions from the source generation's garments
+    accessories: Optional[List[AccessoryItem]] = None  # optional extra items to wear (shoes/bag/jewelry/etc.) — same UX as on the Generation screen
 
 
 class VideoGenerateRequest(BaseModel):
@@ -1706,7 +1707,23 @@ async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] =
         f"Keep photorealistic quality, high-end fashion photography aesthetic."
         f"{price_suffix}"
     )
-    result = await generate_single_image(prompt, [payload.image_base64], session_id)
+    # Build the reference list. Position #1 is ALWAYS the source photo being
+    # edited. When the user attaches accessories, each one is appended after
+    # the source — so from the AI's point of view #2..#N are the mandatory
+    # accessory references. We mirror this in `_compose_accessories_suffix`
+    # by passing `num_garments=1` (where "garments" is actually "previous
+    # non-accessory refs" — i.e. the source photo) so the per-item line
+    # reads "Reference image #2 (shoes): worn on the feet…", etc.
+    refs: List[str] = [payload.image_base64]
+    if payload.accessories:
+        accessory_count = 0
+        for acc in payload.accessories:
+            if acc and acc.image_base64:
+                refs.append(acc.image_base64)
+                accessory_count += 1
+        if accessory_count > 0:
+            prompt += _compose_accessories_suffix(payload.accessories, num_garments=1)
+    result = await generate_single_image(prompt, refs, session_id)
     if not result:
         raise HTTPException(status_code=502, detail="Modifica non riuscita, riprova")
     # If linked to a generation, append the edited image AND its small

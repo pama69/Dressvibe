@@ -22,9 +22,11 @@ import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import VideoCard from "@/src/components/VideoCard";
 import InstagramShareSheet from "@/src/components/InstagramShareSheet";
+import AccessoryPicker from "@/src/components/AccessoryPicker";
 import { shareToInstagram, shareGeneric } from "@/src/utils/share";
 import { saveImageToGallery, saveVideoToGallery } from "@/src/utils/gallery";
 import { useNotify } from "@/src/contexts/ConfirmContext";
+import type { AccessoryItem } from "@/src/state/genStore";
 
 const QUICK_EDITS = [
   { label: "Rimuovi sfondo", prompt: "Remove the background completely and replace it with a clean white studio background." },
@@ -101,6 +103,13 @@ export default function Studio() {
   // Tapping a chip only SELECTS it visually — the user must then press
   // "Applica modifica" to actually run the edit.
   const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
+
+  // "Aggiungi accessori" toggle + list — identical UX to the Generation
+  // screen. Each applied edit consumes the list (it's one-shot per
+  // request) and clears it on success so the user doesn't unknowingly
+  // double-apply the same accessories on the next iteration.
+  const [addAccessories, setAddAccessories] = useState(false);
+  const [accessories, setAccessories] = useState<AccessoryItem[]>([]);
 
   /** When the user taps the Instagram button we immediately save the active
    * image into the device gallery so they don't have to wait until the
@@ -292,14 +301,25 @@ export default function Studio() {
     // The studio_edit backend requires a non-empty edit_prompt. When the
     // user is only toggling "Inserisci prezzi nell'immagine" (no custom
     // text and no look selected) we send a neutral instruction so the
-    // backend's price-tags suffix is the only meaningful change.
+    // backend's price-tags suffix is the only meaningful change. The same
+    // neutral instruction also covers "only-accessories" edits where the
+    // user just attached extra items without describing anything else.
     const finalPrompt = (prompt && prompt.trim()) || "Keep the photo unchanged.";
     if (!image) return;
     setBusy(true);
     try {
-      const res = await api.studioEdit(image, finalPrompt, id, addPriceTags);
+      // Forward the accessories only when the toggle is on AND at least
+      // one item has been attached — otherwise we send `undefined` so
+      // the backend skips the accessory prompt block entirely.
+      const accs =
+        addAccessories && accessories.length > 0 ? accessories : undefined;
+      const res = await api.studioEdit(image, finalPrompt, id, addPriceTags, accs);
       setImage(res.image_base64);
       setEdited(true);
+      // One-shot: clear the accessory list so the user has to re-attach
+      // them on the next edit. The checkbox itself stays on so they can
+      // immediately add new ones if they want to iterate.
+      if (accs) setAccessories([]);
       // Bump local index to the just-appended position so subsequent
       // shares (Telegram URL button, WhatsApp short link, gallery save)
       // reference the edited image, not the original at the old idx.
@@ -330,9 +350,15 @@ export default function Studio() {
     applyEdit(combined);
   };
 
-  // Manual-apply button is enabled when ANY of the three sources is set:
-  // user typed text, user picked a look, or user ticked "metti i prezzi".
-  const canApplyManual = !!(editPrompt.trim() || selectedLookId || addPriceTags);
+  // Manual-apply button is enabled when ANY of the four sources is set:
+  // user typed text, picked a look, ticked "metti i prezzi", or attached
+  // at least one accessory through the "Aggiungi accessori" toggle.
+  const canApplyManual = !!(
+    editPrompt.trim() ||
+    selectedLookId ||
+    addPriceTags ||
+    (addAccessories && accessories.length > 0)
+  );
 
   const handleGenerateVideo = async (providerId: string) => {
     if (!image) return;
@@ -766,12 +792,44 @@ export default function Studio() {
                 {addPriceTags ? <Text style={s.checkboxMark}>✓</Text> : null}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.priceToggleLabel}>Inserisci prezzi nell'immagine</Text>
+                <Text style={s.priceToggleLabel}>Inserisci prezzi nell&apos;immagine</Text>
                 <Text style={s.priceToggleHint}>
                   Aggiunge cartellini con i prezzi (presi dalla descrizione del capo) accanto ai capi corrispondenti, durante le modifiche.
                 </Text>
               </View>
             </TouchableOpacity>
+          </View>
+
+          {/* "Aggiungi accessori" toggle — same UX as on the Generation
+              screen. When ON, the user can attach up to 5 accessory
+              photos (shoes, bags, jewelry, etc.) that the AI MUST
+              include in the edited photo. Each apply consumes the list
+              so accessories aren't re-applied on the next edit. */}
+          <View style={s.section}>
+            <TouchableOpacity
+              onPress={() => setAddAccessories((v) => !v)}
+              activeOpacity={0.8}
+              style={s.priceToggleRow}
+              testID="studio-toggle-accessories"
+            >
+              <View style={[s.checkbox, addAccessories && s.checkboxOn]}>
+                {addAccessories ? <Text style={s.checkboxMark}>✓</Text> : null}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.priceToggleLabel}>Aggiungi accessori</Text>
+                <Text style={s.priceToggleHint}>
+                  Carica foto di scarpe, borse, gioielli, cappelli, occhiali ecc. che la modella DEVE indossare nella foto modificata.
+                </Text>
+              </View>
+            </TouchableOpacity>
+            {addAccessories ? (
+              <AccessoryPicker
+                enabled={addAccessories}
+                items={accessories}
+                setItems={setAccessories}
+                testIdScope="acc-studio"
+              />
+            ) : null}
           </View>
 
           {/* Custom edit */}
