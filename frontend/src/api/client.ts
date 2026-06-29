@@ -83,13 +83,7 @@ async function request<T>(
 }
 
 export const api = {
-  // auth
-  exchangeSession: (session_id: string) =>
-    request<{ session_token: string; user: any }>("/auth/session", {
-      method: "POST",
-      body: { session_id },
-      auth: false,
-    }),
+  // auth (email/password only — see /auth/email/* endpoints)
   me: () => request<any>("/auth/me"),
   logout: () => request<any>("/auth/logout", { method: "POST" }),
 

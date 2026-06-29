@@ -30,7 +30,6 @@ def fmt_rome(fmt: str = "%d/%m/%Y %H:%M") -> str:
 import httpx
 import base64
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from providers import list_providers, get_provider, default_provider
 
 ROOT_DIR = Path(__file__).parent
@@ -41,8 +40,6 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
-EMERGENT_AUTH_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '')
@@ -96,6 +93,31 @@ if GEMINI_API_KEY:
         logging.getLogger("server").warning(f"Gemini client init failed: {_e}")
         _gemini_client = None
 
+
+async def _gemini_direct_generate_text(system_msg: str, user_prompt: str) -> Optional[str]:
+    """Generate plain text via the shop owner's personal Gemini API key.
+
+    Replaces the former Emergent LLM gateway (LlmChat) for all caption/text
+    generation. Returns the stripped text, or None if no client is configured
+    or the call fails.
+    """
+    if not _gemini_client:
+        return None
+    try:
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: _gemini_client.models.generate_content(
+                model=GEMINI_TEXT_MODEL,
+                contents=f"{system_msg}\n\n{user_prompt}" if system_msg else user_prompt,
+            ),
+        )
+        return (getattr(resp, "text", None) or "").strip()
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning(f"[Gemini-direct-text] failed: {str(e)[:200]}")
+        return None
+
+
 app = FastAPI(title="DressVibe API")
 api_router = APIRouter(prefix="/api")
 
@@ -104,10 +126,6 @@ logger = logging.getLogger(__name__)
 
 
 # =================== Models ===================
-class SessionCreate(BaseModel):
-    session_id: str  # one-time from emergent redirect
-
-
 class User(BaseModel):
     user_id: str
     email: str
@@ -257,51 +275,6 @@ async def health():
 
 
 # ---------- Auth ----------
-@api_router.post("/auth/session")
-async def create_session(payload: SessionCreate):
-    """Verify the one-time session_id with Emergent, persist user + session."""
-    async with httpx.AsyncClient(timeout=10.0) as http:
-        resp = await http.get(
-            EMERGENT_AUTH_SESSION_URL,
-            headers={"X-Session-ID": payload.session_id},
-        )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid session id")
-    data = resp.json()
-    email = data["email"].lower().strip()
-    name = data.get("name", email.split("@")[0])
-    picture = data.get("picture")
-    session_token = data["session_token"]
-
-    existing = await db.users.find_one({"email": email}, {"_id": 0})
-    if existing:
-        user_id = existing["user_id"]
-    else:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({
-            "user_id": user_id,
-            "email": email,
-            "name": name,
-            "picture": picture,
-            "created_at": datetime.now(timezone.utc),
-        })
-
-    await db.user_sessions.update_one(
-        {"session_token": session_token},
-        {"$set": {
-            "session_token": session_token,
-            "user_id": user_id,
-            "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
-            "created_at": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
-    return {
-        "session_token": session_token,
-        "user": {"user_id": user_id, "email": email, "name": name, "picture": picture},
-    }
-
-
 @api_router.get("/auth/me")
 async def auth_me(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
@@ -317,12 +290,12 @@ async def logout(authorization: Optional[str] = Header(None)):
 
 
 # ---------- Email / password authentication ----------
-# In parallel to the Emergent-managed Google OAuth, shop owners can also
-# register with any email address. The flow:
+# Sole authentication method (Google OAuth via Emergent has been removed).
+# Shop owners register with any email address. The flow:
 #   1) POST /auth/email/register {email, password, name?} → 6-digit OTP
 #      mailed via Resend, user row created with is_verified=False.
 #   2) POST /auth/email/verify {email, code}             → activates the
-#      account and returns a session_token (same shape as Google flow).
+#      account and returns a session_token.
 #   3) POST /auth/email/login {email, password}          → returns a fresh
 #      session_token. Refuses unverified users.
 #   4) POST /auth/email/forgot {email}                   → mails a reset code.
@@ -1354,29 +1327,7 @@ async def _generate_single_image_raw(prompt: str, reference_images_b64: List[str
             else:
                 logger.warning(f"[Gemini-direct] failed (non-rate-limit): {str(e)[:200]}")
         if not rate_limit_hit:
-            logger.warning("[Gemini-direct] returned no image, falling back to Emergent gateway")
-
-    try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message="You are an expert fashion photographer and AI image generator.",
-        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
-
-        msg = UserMessage(
-            text=prompt,
-            file_contents=[ImageContent(b64) for b64 in reference_images_b64],
-        )
-        _text, images = await chat.send_message_multimodal_response(msg)
-        if images and len(images) > 0:
-            return images[0]["data"]
-    except Exception as e:
-        emsg = str(e)
-        # Emergent budget exhausted? Don't waste retries.
-        if "Budget has been exceeded" in emsg or "budget" in emsg.lower():
-            logger.warning(f"Emergent budget exhausted: {emsg[:150]}")
-        else:
-            logger.exception(f"Image generation failed via Emergent: {e}")
+            logger.warning("[Gemini-direct] returned no image (no fallback available)")
 
     # If we got here AFTER a rate-limit on the personal key, raise 429 so the
     # frontend can show a friendly "wait ~30s" message instead of a generic fail.
@@ -1789,21 +1740,21 @@ async def delete_client(client_id: str, authorization: Optional[str] = Header(No
 async def generate_caption(payload: CaptionRequest, authorization: Optional[str] = Header(None)):
     await get_current_user(authorization)
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"cap_{uuid.uuid4().hex[:8]}",
-            system_message="Sei un esperto di marketing per negozi di moda italiani. Scrivi caption Instagram brevi, eleganti e accattivanti in italiano, con emoji misurate e 4-6 hashtag in italiano.",
-        ).with_model("gemini", "gemini-3.1-flash-image-preview")
         price_part = f" Il prezzo è {payload.price}€." if payload.price else ""
-        msg = UserMessage(
-            text=(
-                f"Crea una caption Instagram in italiano per questo capo: '{payload.garment_name}' "
-                f"(categoria: {payload.category}).{price_part} Stile: {payload.style}. "
-                f"Massimo 2 frasi più gli hashtag su una riga separata."
-            )
+        system_msg = (
+            "Sei un esperto di marketing per negozi di moda italiani. Scrivi caption "
+            "Instagram brevi, eleganti e accattivanti in italiano, con emoji misurate "
+            "e 4-6 hashtag in italiano."
         )
-        text, _images = await chat.send_message_multimodal_response(msg)
-        return {"caption": (text or "").strip()}
+        user_prompt = (
+            f"Crea una caption Instagram in italiano per questo capo: '{payload.garment_name}' "
+            f"(categoria: {payload.category}).{price_part} Stile: {payload.style}. "
+            f"Massimo 2 frasi più gli hashtag su una riga separata."
+        )
+        text = await _gemini_direct_generate_text(system_msg, user_prompt)
+        if not text:
+            raise RuntimeError("Gemini caption returned empty")
+        return {"caption": text.strip()}
     except Exception as e:
         logger.exception(f"Caption error: {e}")
         # graceful fallback
@@ -1950,26 +1901,8 @@ async def generate_instagram_caption(payload: InstagramCaptionRequest, authoriza
     )
 
     try:
-        if _gemini_client:
-            # Use the shop owner's personal Gemini key — no Emergent budget consumed
-            loop = asyncio.get_running_loop()
-            resp = await loop.run_in_executor(
-                None,
-                lambda: _gemini_client.models.generate_content(
-                    model=GEMINI_TEXT_MODEL,
-                    contents=f"{system_msg}\n\n{user_prompt}",
-                ),
-            )
-            text = (getattr(resp, "text", None) or "").strip()
-        else:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"ig_caption_{user['user_id']}_{uuid.uuid4().hex[:6]}",
-                system_message=system_msg,
-            ).with_model("gemini", "gemini-2.5-flash")
-            msg = UserMessage(text=user_prompt)
-            reply = await chat.send_message(msg)
-            text = (reply or "").strip()
+        # Use the shop owner's personal Gemini key for text generation.
+        text = (await _gemini_direct_generate_text(system_msg, user_prompt)) or ""
         # Strip eventual markdown fences just in case
         if text.startswith("```"):
             text = text.strip("`")
@@ -3865,12 +3798,7 @@ async def _ai_caption_for_generation(user: dict, gen_id: str) -> str:
             "NIENTE aggettivi inventati su taglio/colore/materiale. Solo evocazione + CTA + hashtag."
         )
 
-        chat = (
-            LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"zernio_caption_{gen_id}", system_message=system_msg)
-            .with_model("gemini", "gemini-2.5-flash")
-        )
-        resp = await chat.send_message(UserMessage(text=user_prompt))
-        text = (resp or "").strip() if isinstance(resp, str) else str(resp).strip()
+        text = (await _gemini_direct_generate_text(system_msg, user_prompt)) or ""
         # Strip leading/trailing markdown code fences if the LLM wrapped it
         if text.startswith("```"):
             text = text.strip("`")

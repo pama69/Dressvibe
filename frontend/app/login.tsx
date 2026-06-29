@@ -1,39 +1,24 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ImageBackground,
-  ActivityIndicator,
-  Alert,
   Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useAuth } from "@/src/contexts/AuthContext";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 
+// TODO(asset migration): host this hero locally / on dressvibe.app.
 const HERO_BG =
   "https://static.prod-images.emergentagent.com/jobs/c1b3d46b-a98d-4423-a9d4-2841a2073b32/images/ed6e2d9050a5c6379f9a25571187e3c6ec908017286a2484188d806b5f2598bc.png";
 
 export default function Login() {
-  const { signIn } = useAuth();
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
-
-  const handleSignIn = async () => {
-    try {
-      setBusy(true);
-      await signIn();
-    } catch (e: any) {
-      Alert.alert("Errore", e?.message || "Accesso non riuscito");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <ImageBackground source={{ uri: HERO_BG }} style={styles.bg} resizeMode="cover">
@@ -64,36 +49,12 @@ export default function Login() {
         <View style={styles.bottom}>
           <TouchableOpacity
             activeOpacity={0.85}
-            onPress={handleSignIn}
-            disabled={busy}
-            testID="login-google-button"
-            style={styles.googleBtn}
-          >
-            {busy ? (
-              <ActivityIndicator color={theme.colors.primaryFg} />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={20} color={theme.colors.primaryFg} />
-                <Text style={styles.googleText}>Accedi con Google</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {/* OR divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>oppure</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <TouchableOpacity
-            activeOpacity={0.85}
             onPress={() => router.push("/email-auth")}
             testID="login-email-button"
-            style={styles.emailBtn}
+            style={styles.googleBtn}
           >
-            <Ionicons name="mail-outline" size={18} color={theme.colors.text} />
-            <Text style={styles.emailBtnText}>Accedi con Email</Text>
+            <Ionicons name="mail-outline" size={20} color={theme.colors.primaryFg} />
+            <Text style={styles.googleText}>Accedi con Email</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
