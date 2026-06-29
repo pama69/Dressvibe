@@ -3396,6 +3396,40 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
     }
 
 
+@app.get("/api/debug/gemini-image-test", include_in_schema=False)
+async def debug_gemini_image_test(secret: str = ""):
+    """Try each model in GEMINI_IMAGE_MODEL_CHAIN with a tiny text->image
+    prompt and report which one actually returns an image with this API key.
+    Temporary diagnostic — remove after the image-gen config is fixed."""
+    if secret != os.environ.get("DEBUG_ADMIN_SECRET", "dv-migrate-2026"):
+        return {"error": "forbidden"}
+    if not _gemini_client:
+        return {"error": "no gemini client (GEMINI_API_KEY missing)"}
+    from google.genai import types as _gtypes
+    loop = asyncio.get_running_loop()
+    results = []
+
+    def _probe(model_name: str):
+        try:
+            resp = _gemini_client.models.generate_content(
+                model=model_name,
+                contents=[_gtypes.Part.from_text(text="A plain red circle on white background")],
+            )
+            for c in (getattr(resp, "candidates", None) or []):
+                content = getattr(c, "content", None)
+                for p in (getattr(content, "parts", []) or []):
+                    inline = getattr(p, "inline_data", None)
+                    if inline and getattr(inline, "data", None):
+                        return {"model": model_name, "ok": True}
+            return {"model": model_name, "ok": False, "note": "no image in response"}
+        except Exception as e:
+            return {"model": model_name, "ok": False, "error": str(e)[:250]}
+
+    for m in GEMINI_IMAGE_MODEL_CHAIN:
+        results.append(await loop.run_in_executor(None, _probe, m))
+    return {"chain": GEMINI_IMAGE_MODEL_CHAIN, "text_model": GEMINI_TEXT_MODEL, "results": results}
+
+
 # Temporary debug endpoint to diagnose deploy-vs-preview DB mismatch.
 # Sanitized output (no credentials), safe to remove after the migration
 # story is closed.
