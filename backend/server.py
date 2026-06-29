@@ -3444,62 +3444,6 @@ async def debug_whoami(authorization: Optional[str] = Header(None)):
     }
 
 
-_DEBUG_ADMIN_SECRET = os.environ.get("DEBUG_ADMIN_SECRET", "dv-migrate-2026")
-
-
-@app.get("/api/debug/users-summary", include_in_schema=False)
-async def debug_users_summary(secret: str = ""):
-    """List every user with their owned-data counts so we can identify the
-    old (Google OAuth) account vs the new (email) account and consolidate."""
-    if secret != _DEBUG_ADMIN_SECRET:
-        return {"error": "forbidden"}
-    out = []
-    async for u in db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "created_at": 1}):
-        uid = u.get("user_id")
-        ca = u.get("created_at")
-        out.append({
-            "user_id": uid,
-            "email": u.get("email"),
-            "name": u.get("name"),
-            "created_at": ca.isoformat() if hasattr(ca, "isoformat") else ca,
-            "garments": await db.garments.count_documents({"user_id": uid}),
-            "generations": await db.generations.count_documents({"user_id": uid}),
-            "clients": await db.virtual_clients.count_documents({"user_id": uid}),
-            "backgrounds": await db.backgrounds.count_documents({"user_id": uid}),
-            "videos": await db.videos.count_documents({"user_id": uid}),
-        })
-    out.sort(key=lambda x: (x["garments"] + x["generations"]), reverse=True)
-    return {"users": out}
-
-
-@app.post("/api/debug/reassign-owner", include_in_schema=False)
-async def debug_reassign_owner(from_user: str, to_user: str, secret: str = ""):
-    """Move ownership of all per-user documents from `from_user` to `to_user`.
-    One-time migration after dropping Google OAuth: consolidates the old
-    OAuth account's data onto the surviving email account."""
-    if secret != _DEBUG_ADMIN_SECRET:
-        return {"error": "forbidden"}
-    if not from_user or not to_user or from_user == to_user:
-        return {"error": "from_user and to_user must differ and be non-empty"}
-    to = await db.users.find_one({"user_id": to_user}, {"_id": 0, "user_id": 1})
-    if not to:
-        return {"error": f"to_user {to_user} not found"}
-    collections = [
-        "garments", "generations", "virtual_clients", "backgrounds",
-        "videos", "info_requests", "short_links", "user_settings",
-    ]
-    moved = {}
-    for coll in collections:
-        try:
-            res = await db[coll].update_many(
-                {"user_id": from_user}, {"$set": {"user_id": to_user}}
-            )
-            moved[coll] = res.modified_count
-        except Exception as e:
-            moved[coll] = f"error: {str(e)[:120]}"
-    return {"from_user": from_user, "to_user": to_user, "moved": moved}
-
-
 @app.get("/api/debug/garments-by-email", include_in_schema=False)
 async def debug_garments_by_email(email: str):
     """Public debug endpoint (no auth) that returns the garment count and
