@@ -8,11 +8,12 @@ import {
   View,
   Text,
   ActivityIndicator,
-  Platform,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 
 // Tab icon factory (module-level — prevents component remount on each render).
 const tabIcon = (name: keyof typeof Ionicons.glyphMap) =>
@@ -57,9 +58,59 @@ function GlobalNotifBell() {
   );
 }
 
+const TABS = [
+  { name: "index",    label: "Galleria", icon: "grid-outline"     as const },
+  { name: "generate", label: "Genera",   icon: "sparkles-outline" as const },
+  { name: "history",  label: "Storia",   icon: "time-outline"     as const },
+  { name: "profile",  label: "Profilo",  icon: "person-outline"   as const },
+];
+
+function CustomTabBar({ state, navigation }: any) {
+  const insets = useSafeAreaInsets();
+  const visibleRoutes = state.routes.filter((_: any, i: number) =>
+    TABS.some((t) => t.name === state.routes[i].name)
+  );
+
+  return (
+    <View style={[tb.wrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+      <LinearGradient
+        colors={["#13122a", "#0a091a"]}
+        style={tb.bar}
+      >
+        {TABS.map((tab) => {
+          const routeIndex = state.routes.findIndex((r: any) => r.name === tab.name);
+          const active = state.index === routeIndex;
+          return (
+            <Pressable
+              key={tab.name}
+              onPress={() => navigation.navigate(tab.name)}
+              style={tb.pill}
+              android_ripple={null}
+            >
+              {active ? (
+                <LinearGradient
+                  colors={["#312e6e", "#1e1b4b"]}
+                  style={tb.pillActive}
+                >
+                  <Ionicons name={tab.icon} size={18} color="#c4b5fd" />
+                  <Text style={tb.labelActive}>{tab.label}</Text>
+                </LinearGradient>
+              ) : (
+                <View style={tb.pillInactive}>
+                  <Ionicons name={tab.icon} size={18} color={theme.colors.textMuted} />
+                  <Text style={tb.labelInactive}>{tab.label}</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
+      </LinearGradient>
+    </View>
+  );
+}
+
 export default function AppTabs() {
   const { user, loading } = useAuth();
-  const insets = useSafeAreaInsets();
 
   if (loading) {
     return (
@@ -70,32 +121,11 @@ export default function AppTabs() {
   }
   if (!user) return <Redirect href="/login" />;
 
-  // Push the tab bar above the system gesture / nav bar.
-  // On Android (no inset reported) keep a sensible minimum.
-  const safeBottom = Math.max(insets.bottom, Platform.OS === "android" ? 12 : 0);
-  const tabBarHeight = 60 + safeBottom;
-
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarActiveTintColor: theme.colors.text,
-          tabBarInactiveTintColor: theme.colors.textMuted,
-          tabBarStyle: {
-            backgroundColor: theme.colors.bg,
-            borderTopColor: theme.colors.border,
-            borderTopWidth: 1,
-            height: tabBarHeight,
-            paddingTop: 8,
-            paddingBottom: safeBottom + 8,
-          },
-          tabBarLabelStyle: {
-            fontSize: 10,
-            letterSpacing: 2,
-            textTransform: "uppercase",
-          },
-        }}
+        tabBar={(props) => <CustomTabBar {...props} />}
+        screenOptions={{ headerShown: false }}
       >
         <Tabs.Screen
           name="index"
@@ -128,6 +158,65 @@ export default function AppTabs() {
     </View>
   );
 }
+
+const tb = StyleSheet.create({
+  wrap: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    backgroundColor: "transparent",
+  },
+  bar: {
+    flexDirection: "row",
+    borderRadius: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(180,150,255,0.15)",
+    shadowColor: "#7c3aed",
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
+  },
+  pill: { flex: 1 },
+  pillActive: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(180,150,255,0.35)",
+  },
+  pillInactive: {
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    gap: 2,
+  },
+  labelActive: {
+    color: "#c4b5fd",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  labelInactive: {
+    color: theme.colors.textMuted,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+    marginTop: 1,
+  },
+});
 
 const bellStyles = StyleSheet.create({
   btn: {
