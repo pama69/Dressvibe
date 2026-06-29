@@ -427,7 +427,7 @@ export default function Profile() {
           {waPhoneSaved ? (
             <Text style={s.tgInfoText} numberOfLines={1}>Attivo: {waPhoneSaved}</Text>
           ) : null}
-        </View>
+        </LiquidCard>
 
         {/* Telegram bot onboarding — 3-step guided flow with ToS acceptance,
             replaces the previous static channel input block. */}
