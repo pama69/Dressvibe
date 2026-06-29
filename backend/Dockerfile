@@ -18,6 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Railway injects $PORT. Bind to it; fall back to 8000 for local runs.
+# Railway injects $PORT. start.py legge la porta a runtime (exec-form safe).
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["python", "start.py"]

@@ -19,4 +19,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ .
 
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# start.py legge $PORT a runtime → sicuro anche in exec form (niente shell).
+CMD ["python", "start.py"]
