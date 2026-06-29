@@ -66,7 +66,27 @@ Richieste: `MONGO_URL`, `DB_NAME`, `EMERGENT_LLM_KEY` (da rimuovere), `GEMINI_AP
 
 > Recupero password: già attivo via `/auth/email/forgot` + `/auth/email/reset` con invio OTP tramite **Resend** (`RESEND_API_KEY`, `RESEND_FROM`). Per dressvibe.app verificare il dominio nella dashboard Resend e impostare `RESEND_FROM="DressVibe <noreply@dressvibe.app>"`.
 
+### 2026-06-29 — Scaffolding deploy Railway 🚧
+Architettura scelta: **servizio backend unico** (FastAPI API) su Railway + **MongoDB Atlas M0**. App mobile (Expo) punta al backend via `EXPO_PUBLIC_BACKEND_URL`. Web opzionale servito dallo stesso dominio.
+- [backend/Dockerfile](backend/Dockerfile): immagine `python:3.12-slim`, build deps, `uvicorn server:app` su `$PORT`.
+- [backend/railway.json](backend/railway.json): builder Dockerfile, healthcheck `/api/health`, restart on-failure.
+- [backend/.env.example](backend/.env.example): tutte le env documentate.
+- [backend/.dockerignore](backend/.dockerignore).
+- [backend/server.py](backend/server.py): mount statico opzionale `backend/web/` (serve il build Expo web dallo stesso origin se presente).
+
+#### Procedura deploy (da seguire)
+1. **Atlas**: crea cluster M0, utente DB, IP allowlist `0.0.0.0/0`, copia la connection string.
+2. **Railway**: New Project → Deploy from GitHub repo (branch `detach-emergent` o `main`).
+   - Service settings → **Root Directory = `backend`** (così trova Dockerfile/railway.json).
+   - **Variables**: incolla quelle di `.env.example` (almeno `MONGO_URL`, `DB_NAME`, `GEMINI_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM`; `PUBLIC_BASE_URL` = URL Railway).
+3. Deploy → verifica `GET https://<app>.up.railway.app/api/health` → `{"ok": true}`.
+4. **Dominio**: su Railway aggiungi `dressvibe.app` (custom domain) e configura il CNAME su Aruba; aggiorna `PUBLIC_BASE_URL`.
+5. **Mobile**: build Expo (EAS) con `EXPO_PUBLIC_BACKEND_URL=https://dressvibe.app`.
+
+> ⚠️ **Rischio build:** `requirements.txt` ha versioni pinnate "2026" generate da Emergent. Pacchetti **non importati** dal backend (`litellm`, `boto3`, `stripe`, `pandas`) andrebbero rimossi per ridurre tempo/fallimenti di build. Da valutare anche `black/flake8/mypy/isort/pytest` (dev-only).
+
 ### Prossimi step
-- [ ] Deploy Railway (backend + MongoDB + build web Expo).
+- [ ] Eseguire il deploy su Railway secondo la procedura sopra.
+- [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.
 - [ ] Asset/branding: rimpiazzare immagini `emergentagent.com` ([login.tsx](frontend/app/login.tsx), [generating.tsx](frontend/app/(app)/generating.tsx)), dominio dressvibe.app.
 - [ ] Pulizia stili inutilizzati in `login.tsx` (emailBtn/divider*).

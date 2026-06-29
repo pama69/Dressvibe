@@ -3882,6 +3882,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Optional: serve the Expo web export from the same origin as the API.
+# Build it with `npx expo export -p web` in /frontend (output: dist/) and copy
+# the contents into backend/web/. When present, the web app and /api/* share
+# one domain — which matches the frontend's `window.location.origin` logic and
+# avoids CORS entirely. Harmless when the directory is absent (mobile-only).
+_WEB_DIR = ROOT_DIR / "web"
+if _WEB_DIR.is_dir():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")
+    logger.info(f"Serving static web export from {_WEB_DIR}")
+
 
 # ---------- Auto-seed Model Presets -----------------------------------------
 # The face library is shipped as a static JSON snapshot in `backend/seed/`
