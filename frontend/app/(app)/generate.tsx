@@ -29,6 +29,7 @@ import {
 import { genStore, type AccessoryItem } from "@/src/state/genStore";
 import { presetSelectionStore } from "@/src/state/presetSelection";
 import AccessoryPicker from "@/src/components/AccessoryPicker";
+import { LiquidCard, CHIP_GRAD } from "@/src/components/LiquidCard";
 
 // Aesthetic modifiers shown as a 5-button toggle row in Step 4 (Look).
 // IDs must match the LOOK_STYLES_PROMPTS dict on the backend (server.py).
@@ -623,10 +624,10 @@ const styles = StyleSheet.create({
   },
   varsRow: { flexDirection: "row", gap: 10 },
   varBtn: {
-    flex: 1, paddingVertical: 16, borderWidth: 1, borderColor: theme.colors.border,
+    flex: 1, paddingVertical: 16, borderWidth: 1, borderColor: "rgba(180,150,255,0.2)",
     alignItems: "center", borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
-    backgroundColor: theme.colors.surface,
+    shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
+    backgroundColor: "#141330",
   },
   varBtnActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   varText: { color: theme.colors.text, fontSize: 16, fontWeight: "500" },
@@ -636,11 +637,11 @@ const styles = StyleSheet.create({
   lookBtn: {
     flexBasis: "31%", flexGrow: 1,
     paddingVertical: 12, paddingHorizontal: 10,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
+    backgroundColor: "#141330",
     alignItems: "center", justifyContent: "center", gap: 4,
     minWidth: 90, borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
   },
   lookBtnActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   lookEmoji: { fontSize: 20 },
@@ -649,9 +650,9 @@ const styles = StyleSheet.create({
   lookLabelActive: { color: theme.colors.primaryFg },
   priceToggleRow: {
     flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.16)",
+    backgroundColor: "#131228", borderRadius: 12,
+    shadowColor: "#7c3aed", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
   },
   checkbox: {
     width: 22, height: 22, borderWidth: 1.5, borderRadius: 6,
@@ -690,10 +691,10 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(255,255,255,0.3)",
   },
   providerChip: {
-    padding: 14, borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, minWidth: 200, gap: 6,
+    padding: 14, borderWidth: 1, borderColor: "rgba(180,150,255,0.2)",
+    backgroundColor: "#141330", minWidth: 200, gap: 6,
     borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
+    shadowColor: "#7c3aed", shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4,
   },
   providerChipActive: { borderColor: theme.colors.text, borderWidth: 2 },
   providerChipDisabled: { opacity: 0.45 },
@@ -751,8 +752,8 @@ const chipStyles = StyleSheet.create({
   row: { gap: 8, paddingRight: 12 },
   chip: {
     paddingVertical: 10, paddingHorizontal: 16,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 20,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
+    backgroundColor: "#131228", borderRadius: 20,
   },
   chipActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   chipText: { color: theme.colors.text, fontSize: 13, letterSpacing: 0.3 },

@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
+import { LiquidCard } from "@/src/components/LiquidCard";
 
 type GenItem = {
   id: string;
@@ -92,7 +93,7 @@ export default function History() {
             />
           }
           renderItem={({ item }) => (
-            <View style={styles.row} testID={`history-item-${item.id}`}>
+            <LiquidCard style={styles.row} testID={`history-item-${item.id}`}>
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => router.push(`/results/${item.id}`)}
@@ -123,7 +124,7 @@ export default function History() {
               >
                 <Text style={styles.deleteEmoji}>🗑️</Text>
               </TouchableOpacity>
-            </View>
+            </LiquidCard>
           )}
         />
       )}
@@ -142,11 +143,11 @@ const styles = StyleSheet.create({
   emptySub: { color: theme.colors.textSecondary, fontSize: 13, textAlign: "center" },
   row: {
     flexDirection: "row", alignItems: "stretch",
-    backgroundColor: theme.colors.surface,
     borderRadius: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.22,
-    shadowRadius: 10,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
+    shadowColor: "#7c3aed",
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 5 },
     elevation: 6,
     overflow: "hidden",

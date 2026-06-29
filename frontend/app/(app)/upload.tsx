@@ -376,8 +376,8 @@ const s = StyleSheet.create({
   chipRow: { gap: 8, paddingRight: 16 },
   chip: {
     paddingVertical: 8, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 20,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
+    backgroundColor: "#131228", borderRadius: 20,
   },
   chipA: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   chipT: { color: theme.colors.text, fontSize: 12 },

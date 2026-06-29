@@ -19,6 +19,8 @@ import { GENDERS, AGES, BODIES, ETHNICITIES, Option } from "@/src/constants/opti
 import TelegramBotSetup from "@/src/components/TelegramBotSetup";
 import ZernioSocialSetup from "@/src/components/ZernioSocialSetup";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
+import { LiquidCard, BLOCK_GRAD } from "@/src/components/LiquidCard";
+import { LinearGradient } from "expo-linear-gradient";
 
 type Client = {
   id: string;
@@ -242,18 +244,18 @@ export default function Profile() {
 
         {/* Stats */}
         <View style={s.statsRow}>
-          <View style={s.statCard}>
+          <LiquidCard style={s.statCard}>
             <Text style={s.statNum}>{stats?.garments ?? "—"}</Text>
             <Text style={s.statLab}>Capi</Text>
-          </View>
-          <View style={s.statCard}>
+          </LiquidCard>
+          <LiquidCard style={s.statCard}>
             <Text style={s.statNum}>{stats?.generations ?? "—"}</Text>
             <Text style={s.statLab}>Outfit</Text>
-          </View>
-          <View style={s.statCard}>
+          </LiquidCard>
+          <LiquidCard style={s.statCard}>
             <Text style={s.statNum}>{stats?.clients ?? "—"}</Text>
             <Text style={s.statLab}>Clienti</Text>
-          </View>
+          </LiquidCard>
         </View>
 
         {/* Clienti virtuali */}
@@ -308,7 +310,7 @@ export default function Profile() {
             <Text style={s.empty}>Nessun cliente salvato.</Text>
           ) : (
             clients.map((c) => (
-              <View key={c.id} style={s.clientCard} testID={`client-${c.id}`}>
+              <LiquidCard key={c.id} style={s.clientCard} testID={`client-${c.id}`}>
                 <View style={{ flex: 1 }}>
                   <Text style={s.clientName}>{c.name}</Text>
                   <Text style={s.clientMeta}>
@@ -319,7 +321,7 @@ export default function Profile() {
                 <TouchableOpacity onPress={() => handleDelete(c.id)} testID={`client-delete-${c.id}`}>
                   <Ionicons name="trash-outline" size={18} color={theme.colors.textMuted} />
                 </TouchableOpacity>
-              </View>
+              </LiquidCard>
             ))
           )}
         </View>
@@ -348,7 +350,7 @@ export default function Profile() {
         </TouchableOpacity>
 
         {/* WhatsApp channel selector */}
-        <View style={s.tgBlock}>
+        <LiquidCard style={s.tgBlock}>
           <Text style={s.tgTitle}>💬 Canale WhatsApp</Text>
           <Text style={s.tgHint}>
             Il canale dove pubblichi i tuoi look. Quando premerai "Posta su WhatsApp"
@@ -434,7 +436,7 @@ export default function Profile() {
         <ZernioSocialSetup />
 
         {/* Telegram diagnostics — fix for deployed env */}
-        <View style={s.tgBlock}>
+        <LiquidCard style={s.tgBlock}>
           <Text style={s.tgTitle}>📡 Diagnostica Telegram</Text>
           <Text style={s.tgHint}>
             Se hai pubblicato sul canale ma il pulsante "Richiedi info" non manda notifiche, il webhook
@@ -473,7 +475,7 @@ export default function Profile() {
           {tgInfo?.last_error_message ? (
             <Text style={s.tgError}>⚠️ {tgInfo.last_error_message}</Text>
           ) : null}
-        </View>
+        </LiquidCard>
       </ScrollView>
     </SafeAreaView>
   );
@@ -487,9 +489,9 @@ const s = StyleSheet.create({
   email: { color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 },
   statsRow: { flexDirection: "row", paddingHorizontal: 24, gap: 10 },
   statCard: {
-    flex: 1, padding: 14, borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 14,
-    shadowColor: "#000", shadowOpacity: 0.14, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
+    flex: 1, padding: 14, borderWidth: 1, borderColor: "rgba(180,150,255,0.2)",
+    borderRadius: 14,
+    shadowColor: "#7c3aed", shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4,
   },
   statNum: { color: theme.colors.text, fontSize: 22, fontWeight: "500" },
   statLab: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1, marginTop: 4 },
@@ -510,8 +512,8 @@ const s = StyleSheet.create({
   },
   chip: {
     paddingVertical: 8, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bg, borderRadius: 20,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
+    backgroundColor: "#131228", borderRadius: 20,
   },
   chipA: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   chipT: { color: theme.colors.text, fontSize: 12 },
@@ -520,11 +522,10 @@ const s = StyleSheet.create({
   saveBtnText: { color: theme.colors.primaryFg, fontWeight: "600", letterSpacing: 0.4 },
   empty: { color: theme.colors.textMuted, fontSize: 13, paddingVertical: 12 },
   clientCard: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    backgroundColor: theme.colors.surface, padding: 14,
-    borderWidth: 1, borderColor: theme.colors.border, marginBottom: 8,
+    flexDirection: "row", alignItems: "center", gap: 10, padding: 14,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", marginBottom: 8,
     borderRadius: 14,
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3,
   },
   clientName: { color: theme.colors.text, fontSize: 14, fontWeight: "500" },
   clientMeta: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 4 },
@@ -539,9 +540,9 @@ const s = StyleSheet.create({
   tgBlock: {
     marginTop: 28, marginHorizontal: 24, marginBottom: 60,
     padding: 18, gap: 12,
-    borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.2)",
     borderRadius: 16,
-    shadowColor: "#000", shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4,
+    shadowColor: "#7c3aed", shadowOpacity: 0.22, shadowRadius: 12, shadowOffset: { width: 0, height: 5 }, elevation: 5,
   },
   tgTitle: { color: theme.colors.text, fontSize: 13, fontWeight: "600", letterSpacing: 0.5 },
   tgHint: { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 17 },
