@@ -1,0 +1,15 @@
+frontend/
+tests/
+test_reports/
+memory/
+.emergent/
+.git/
+*.md
+backend_test*.py
+test_result.md
+design_guidelines.json
+**/__pycache__/
+**/*.pyc
+.env
+.env.*
+!backend/.env.example
