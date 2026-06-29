@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -148,7 +148,7 @@ export default function Profile() {
       setWaChannelInput(s.whatsapp_channel_url || "");
       setWaChannelSaved(s.whatsapp_channel_url || "");
       Alert.alert(
-        "Canale WhatsApp salvato âœ…",
+        "Canale WhatsApp salvato ✅",
         s.whatsapp_channel_url
           ? `I link "Posta su WhatsApp" apriranno:\n${s.whatsapp_channel_url}`
           : "Canale rimosso."
@@ -167,10 +167,10 @@ export default function Profile() {
       setWaPhoneInput(s.whatsapp_business_phone || "");
       setWaPhoneSaved(s.whatsapp_business_phone || "");
       Alert.alert(
-        "Numero WhatsApp salvato âœ…",
+        "Numero WhatsApp salvato ✅",
         s.whatsapp_business_phone
-          ? `Sulla pagina "Richiesta info" apparirÃ  un pulsante verde che apre una chat WhatsApp diretta verso:\n${s.whatsapp_business_phone}`
-          : "Numero rimosso. Il pulsante verde non apparirÃ  piÃ¹ sulla pagina pubblica."
+          ? `Sulla pagina "Richiesta info" apparirà un pulsante verde che apre una chat WhatsApp diretta verso:\n${s.whatsapp_business_phone}`
+          : "Numero rimosso. Il pulsante verde non apparirà più sulla pagina pubblica."
       );
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile salvare il numero");
@@ -185,7 +185,7 @@ export default function Profile() {
       const s = await api.updateUserSettings({ telegram_channel: channelInput });
       setChannelInput(s.telegram_channel || "");
       Alert.alert(
-        "Canale aggiornato âœ…",
+        "Canale aggiornato ✅",
         s.telegram_channel
           ? `Le prossime pubblicazioni andranno su:\n${s.telegram_channel}\n\nAssicurati che @instapost_mybot sia amministratore con permesso di pubblicare.`
           : "Canale rimosso. Tornerai a usare il canale di default."
@@ -203,8 +203,8 @@ export default function Profile() {
       const res = await api.telegramSetupWebhook();
       setTgInfo(res.info || null);
       Alert.alert(
-        "Webhook Telegram aggiornato âœ…",
-        `Telegram ora invia gli eventi a:\n\n${res.webhook_url}\n\nProva a far premere "Richiedi info" da un cliente â€” riceverai la notifica qui sull'admin.`,
+        "Webhook Telegram aggiornato ✅",
+        `Telegram ora invia gli eventi a:\n\n${res.webhook_url}\n\nProva a far premere "Richiedi info" da un cliente — riceverai la notifica qui sull'admin.`,
       );
     } catch (err: any) {
       Alert.alert("Errore", err?.message || "Impossibile aggiornare il webhook");
@@ -220,7 +220,7 @@ export default function Profile() {
       setTgInfo(res.info || null);
       const info = res.info || {};
       const last = info.last_error_message
-        ? `\nâš ï¸ Ultimo errore: ${info.last_error_message}`
+        ? `\n⚠️ Ultimo errore: ${info.last_error_message}`
         : "";
       Alert.alert(
         "Stato webhook",
@@ -245,15 +245,15 @@ export default function Profile() {
         {/* Stats */}
         <View style={s.statsRow}>
           <LiquidCard style={s.statCard}>
-            <Text style={s.statNum}>{stats?.garments ?? "â€”"}</Text>
+            <Text style={s.statNum}>{stats?.garments ?? "—"}</Text>
             <Text style={s.statLab}>Capi</Text>
           </LiquidCard>
           <LiquidCard style={s.statCard}>
-            <Text style={s.statNum}>{stats?.generations ?? "â€”"}</Text>
+            <Text style={s.statNum}>{stats?.generations ?? "—"}</Text>
             <Text style={s.statLab}>Outfit</Text>
           </LiquidCard>
           <LiquidCard style={s.statCard}>
-            <Text style={s.statNum}>{stats?.clients ?? "â€”"}</Text>
+            <Text style={s.statNum}>{stats?.clients ?? "—"}</Text>
             <Text style={s.statLab}>Clienti</Text>
           </LiquidCard>
         </View>
@@ -281,7 +281,7 @@ export default function Profile() {
               />
               <Text style={s.formLabel}>Genere</Text>
               {pickerRow(GENDERS, g, setG, "client-gender")}
-              <Text style={s.formLabel}>EtÃ </Text>
+              <Text style={s.formLabel}>Età</Text>
               {pickerRow(AGES, a, setA, "client-age")}
               <Text style={s.formLabel}>Corporatura</Text>
               {pickerRow(BODIES, b, setB, "client-body")}
@@ -314,7 +314,7 @@ export default function Profile() {
                 <View style={{ flex: 1 }}>
                   <Text style={s.clientName}>{c.name}</Text>
                   <Text style={s.clientMeta}>
-                    {c.model_gender} Â· {c.model_age} Â· {c.model_body} Â· {c.model_ethnicity}
+                    {c.model_gender} · {c.model_age} · {c.model_body} · {c.model_ethnicity}
                   </Text>
                   {c.notes ? <Text style={s.clientNotes}>{c.notes}</Text> : null}
                 </View>
@@ -329,7 +329,7 @@ export default function Profile() {
         <TouchableOpacity
           style={s.logout}
           onPress={async () => {
-            // Use the cross-platform confirm modal â€” the native Alert.alert
+            // Use the cross-platform confirm modal — the native Alert.alert
             // multi-button variant doesn't work on web (the OK callback is
             // never invoked from inside the iframe), which is exactly what
             // made "Esci dall'account" appear unresponsive.
@@ -351,13 +351,13 @@ export default function Profile() {
 
         {/* WhatsApp channel selector */}
         <LiquidCard style={s.tgBlock}>
-          <Text style={s.tgTitle}>ðŸ’¬ Canale WhatsApp</Text>
+          <Text style={s.tgTitle}>💬 Canale WhatsApp</Text>
           <Text style={s.tgHint}>
             Il canale dove pubblichi i tuoi look. Quando premerai "Posta su WhatsApp"
-            dallo Studio, l'app aprirÃ  direttamente questo canale per consentirti di
+            dallo Studio, l'app aprirà direttamente questo canale per consentirti di
             allegare la foto e incollare il link "Richiedi info".
-            {"\n"}Incolla qui il link completo del canale (lo trovi in WhatsApp â†’
-            Canale â†’ â‹® â†’ "Copia link del canale").
+            {"\n"}Incolla qui il link completo del canale (lo trovi in WhatsApp →
+            Canale → ⋮ → "Copia link del canale").
           </Text>
           <TextInput
             value={waChannelInput}
@@ -388,13 +388,13 @@ export default function Profile() {
             <Text style={s.tgInfoText} numberOfLines={1}>Attivo: {waChannelSaved}</Text>
           ) : null}
 
-          {/* Numero WhatsApp Business â€” usato per il pulsante "Chiedi su WhatsApp"
+          {/* Numero WhatsApp Business — usato per il pulsante "Chiedi su WhatsApp"
               che appare ai clienti sulla pagina pubblica di richiesta info. */}
           <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: 14 }} />
-          <Text style={[s.tgTitle, { fontSize: 14 }]}>ðŸ“ž Numero WhatsApp Business</Text>
+          <Text style={[s.tgTitle, { fontSize: 14 }]}>📞 Numero WhatsApp Business</Text>
           <Text style={s.tgHint}>
             Il TUO numero (es. quello del negozio). Sulla pagina pubblica "Richiedi info"
-            apparirÃ  un grande pulsante verde "Chiedi su WhatsApp": il cliente lo preme,
+            apparirà un grande pulsante verde "Chiedi su WhatsApp": il cliente lo preme,
             ti scrive direttamente e <Text style={{ fontWeight: "700" }}>vedrai automaticamente
             il suo numero</Text> nella tua chat.
           </Text>
@@ -429,19 +429,19 @@ export default function Profile() {
           ) : null}
         </LiquidCard>
 
-        {/* Telegram bot onboarding â€” 3-step guided flow with ToS acceptance,
+        {/* Telegram bot onboarding — 3-step guided flow with ToS acceptance,
             replaces the previous static channel input block. */}
         <TelegramBotSetup />
 
         <ZernioSocialSetup />
 
-        {/* Telegram diagnostics â€” fix for deployed env */}
+        {/* Telegram diagnostics — fix for deployed env */}
         <LiquidCard style={s.tgBlock}>
-          <Text style={s.tgTitle}>ðŸ“¡ Diagnostica Telegram</Text>
+          <Text style={s.tgTitle}>📡 Diagnostica Telegram</Text>
           <Text style={s.tgHint}>
             Se hai pubblicato sul canale ma il pulsante "Richiedi info" non manda notifiche, il webhook
             del bot sta puntando al vecchio ambiente di preview. Premi "Aggiorna webhook" qui sotto
-            DALLA VERSIONE DEPLOYATA e il bot inizierÃ  a parlare con questo backend.
+            DALLA VERSIONE DEPLOYATA e il bot inizierà a parlare con questo backend.
           </Text>
           <View style={{ flexDirection: "row", gap: 10 }}>
             <TouchableOpacity
@@ -469,11 +469,11 @@ export default function Profile() {
           </View>
           {tgInfo?.url ? (
             <Text style={s.tgInfoText} numberOfLines={3}>
-              âœ“ {tgInfo.url.replace(/\/[a-f0-9_]+$/i, "/***")}
+              ✓ {tgInfo.url.replace(/\/[a-f0-9_]+$/i, "/***")}
             </Text>
           ) : null}
           {tgInfo?.last_error_message ? (
-            <Text style={s.tgError}>âš ï¸ {tgInfo.last_error_message}</Text>
+            <Text style={s.tgError}>⚠️ {tgInfo.last_error_message}</Text>
           ) : null}
         </LiquidCard>
       </ScrollView>
@@ -513,7 +513,7 @@ const s = StyleSheet.create({
   chip: {
     paddingVertical: 8, paddingHorizontal: 14,
     borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#252252", borderRadius: 20,
+    backgroundColor: "#131228", borderRadius: 20,
   },
   chipA: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   chipT: { color: theme.colors.text, fontSize: 12 },
@@ -566,4 +566,3 @@ const s = StyleSheet.create({
   },
   tgError: { color: theme.colors.error, fontSize: 11 },
 });
-

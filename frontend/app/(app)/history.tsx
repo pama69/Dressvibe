@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -176,7 +176,7 @@ export default function History() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowTitle} numberOfLines={1}>{item.title || "Generazione"}</Text>
                     <Text style={styles.rowMeta}>
-                      {item.image_count || 0} immagini Â· {item.status === "done" ? "Pronto" : item.status}
+                      {item.image_count || 0} immagini · {item.status === "done" ? "Pronto" : item.status}
                     </Text>
                   </View>
                   {!selecting && <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />}
@@ -188,7 +188,7 @@ export default function History() {
                     testID={`history-delete-${item.id}`}
                     hitSlop={8}
                   >
-                    <Text style={styles.deleteEmoji}>ðŸ—‘ï¸</Text>
+                    <Text style={styles.deleteEmoji}>🗑️</Text>
                   </TouchableOpacity>
                 )}
               </LiquidCard>
@@ -235,7 +235,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 6,
     borderRadius: 12, borderWidth: 1,
     borderColor: "rgba(180,150,255,0.2)",
-    backgroundColor: "#22204a",
+    backgroundColor: "#111128",
   },
   actionBtnText: { color: theme.colors.textSecondary, fontSize: 12 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
@@ -305,4 +305,3 @@ const styles = StyleSheet.create({
   },
   bulkBtnText: { color: "#fff", fontSize: 15, fontWeight: "600" },
 });
-
