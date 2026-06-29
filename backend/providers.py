@@ -47,14 +47,14 @@ def list_providers() -> Dict[str, List[dict]]:
                 id="gemini_nano_banana",
                 name="Gemini Nano Banana",
                 description="Veloce, ottimo per editing realistico con riferimenti.",
-                env_keys=["EMERGENT_LLM_KEY"],
+                env_keys=["GEMINI_API_KEY"],
                 badge="Default",
             ),
             _provider(
                 id="openai_gpt_image_1",
                 name="OpenAI GPT Image 1",
                 description="Alta qualità, scenari complessi.",
-                env_keys=["EMERGENT_LLM_KEY"],
+                env_keys=["OPENAI_API_KEY"],
             ),
             _provider(
                 id="grok_imagine",
@@ -68,14 +68,14 @@ def list_providers() -> Dict[str, List[dict]]:
                 id="gemini_nano_banana",
                 name="Gemini Nano Banana",
                 description="Editing immagini (sfondo, ritocco, testo).",
-                env_keys=["EMERGENT_LLM_KEY"],
+                env_keys=["GEMINI_API_KEY"],
                 badge="Default",
             ),
             _provider(
                 id="openai_gpt_image_1",
                 name="OpenAI GPT Image 1",
                 description="Editing immagini con maschera.",
-                env_keys=["EMERGENT_LLM_KEY"],
+                env_keys=["OPENAI_API_KEY"],
             ),
         ],
         "video_gen": [
@@ -102,7 +102,7 @@ def list_providers() -> Dict[str, List[dict]]:
                 id="sora",
                 name="OpenAI Sora 2",
                 description="Scene complesse, dettagli fini.",
-                env_keys=["EMERGENT_LLM_KEY"],
+                env_keys=["OPENAI_API_KEY"],
             ),
         ],
     }
