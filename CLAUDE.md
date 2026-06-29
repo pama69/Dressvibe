@@ -66,6 +66,17 @@ Richieste: `MONGO_URL`, `DB_NAME`, `EMERGENT_LLM_KEY` (da rimuovere), `GEMINI_AP
 
 > Recupero password: già attivo via `/auth/email/forgot` + `/auth/email/reset` con invio OTP tramite **Resend** (`RESEND_API_KEY`, `RESEND_FROM`). Per dressvibe.app verificare il dominio nella dashboard Resend e impostare `RESEND_FROM="DressVibe <noreply@dressvibe.app>"`.
 
+### 2026-06-29 — Deploy backend su Railway ✅ ONLINE
+Backend FastAPI **online** su Railway, connesso a MongoDB Atlas M0. Distacco da Emergent completato (LLM + OAuth + deploy).
+- Builder: Dockerfile root del repo (Root Directory non impostato su Railway).
+- Avvio via [backend/start.py](backend/start.py) (`CMD ["python","start.py"]`) per gestire `$PORT` a runtime — Railway esegue lo startCommand in exec form e non espande le env var, quindi `startCommand` rimosso da `railway.json`.
+- Variabili impostate su Railway: `MONGO_URL`, `DB_NAME=dressvibe` (minuscolo!), `GEMINI_API_KEY`, `RESEND_API_KEY`, `RESEND_FROM`, `PUBLIC_BASE_URL`.
+- Trappole risolte durante il deploy: Railpack non trovava il build (→ Dockerfile in root) · `$PORT` non espanso (→ start.py) · auth Atlas fallita (→ "Update User" non cliccato) · `DatabaseDifferCase` (→ `DB_NAME` minuscolo `dressvibe`).
+
+#### ⚠️ TODO sicurezza post-deploy
+- [ ] **Rigenerare la password utente Mongo** `Dressvibe` (esposta in chat) e aggiornare `MONGO_URL` su Railway.
+- [ ] Restringere il ruolo dell'utente Atlas da `atlasAdmin` a `readWrite` sul solo DB `dressvibe`.
+
 ### 2026-06-29 — Scaffolding deploy Railway 🚧
 Architettura scelta: **servizio backend unico** (FastAPI API) su Railway + **MongoDB Atlas M0**. App mobile (Expo) punta al backend via `EXPO_PUBLIC_BACKEND_URL`. Web opzionale servito dallo stesso dominio.
 - [backend/Dockerfile](backend/Dockerfile): immagine `python:3.12-slim`, build deps, `uvicorn server:app` su `$PORT`.
