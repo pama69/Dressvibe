@@ -66,6 +66,14 @@ Richieste: `MONGO_URL`, `DB_NAME`, `EMERGENT_LLM_KEY` (da rimuovere), `GEMINI_AP
 
 > Recupero password: già attivo via `/auth/email/forgot` + `/auth/email/reset` con invio OTP tramite **Resend** (`RESEND_API_KEY`, `RESEND_FROM`). Per dressvibe.app verificare il dominio nella dashboard Resend e impostare `RESEND_FROM="DressVibe <noreply@dressvibe.app>"`.
 
+### 2026-06-29 — Verifica dati Atlas (nessuna migrazione necessaria) ✅
+Falso allarme "archivio diverso tra Emergent e Railway". Diagnosi via endpoint debug:
+- Emergent-preview e Railway puntano allo **stesso** cluster Atlas, stesso `DB_NAME=dressvibe` (verificato confrontando i `.env`).
+- I dati sono filtrati per `user_id`. L'utente `pama69@gmail.com` (`user_6e77cc5cf61f`) possiede **11 capi / 23 generazioni / 7 video** = il vero archivio. Gli altri 11 capi sul DB sono dell'account `demo@dressvibe.local` (seed) + 1 di golgolabruzzo.
+- **Nessun account Google nascosto**: tutti gli utenti sono `user_xxx` (registrazione email). Niente da riassegnare/migrare.
+- Confermato dall'utente: stesso login → stessi capi su entrambi gli ambienti.
+- Endpoint admin temporanei (`users-summary`, `reassign-owner`) aggiunti per la diagnosi e **subito rimossi** (il secondo poteva riscrivere la proprietà dei dati con segreto di default). Restano solo i debug read-only.
+
 ### 2026-06-29 — Deploy backend su Railway ✅ ONLINE
 Backend FastAPI **online** su Railway, connesso a MongoDB Atlas M0. Distacco da Emergent completato (LLM + OAuth + deploy).
 - Builder: Dockerfile root del repo (Root Directory non impostato su Railway).
