@@ -1117,7 +1117,7 @@ const s = StyleSheet.create({
   captionGen: { color: theme.colors.text, fontSize: 12, fontWeight: "500" },
   quickChip: {
     paddingVertical: 10, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", backgroundColor: "#131228",
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", backgroundColor: "#252252",
     borderRadius: 20,
   },
   quickText: { color: theme.colors.text, fontSize: 12 },
@@ -1160,7 +1160,7 @@ const s = StyleSheet.create({
   shareWord: { fontSize: 13, fontWeight: "700", letterSpacing: 0.2, textAlign: "center" },
   shareBtn: {
     flex: 1, alignItems: "center", paddingVertical: 18, gap: 6,
-    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", backgroundColor: "#141330",
+    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", backgroundColor: "#28265a",
     borderRadius: 14,
     shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
   },
@@ -1169,7 +1169,7 @@ const s = StyleSheet.create({
   videoHint: { color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16, marginBottom: 4 },
   videoBtn: {
     paddingVertical: 14, paddingHorizontal: 18, borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#141330", minWidth: 160, gap: 4, borderRadius: 12,
+    backgroundColor: "#28265a", minWidth: 160, gap: 4, borderRadius: 12,
     shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
   },
   videoBtnName: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
@@ -1194,7 +1194,7 @@ const s = StyleSheet.create({
     flexBasis: "31%", flexGrow: 1,
     paddingVertical: 14, paddingHorizontal: 8,
     borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#141330",
+    backgroundColor: "#28265a",
     alignItems: "center", justifyContent: "center", gap: 4,
     minWidth: 90, borderRadius: 12,
     shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,

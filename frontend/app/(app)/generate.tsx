@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -35,11 +35,11 @@ import { LiquidCard, CHIP_GRAD } from "@/src/components/LiquidCard";
 // IDs must match the LOOK_STYLES_PROMPTS dict on the backend (server.py).
 type LookStyle = { id: string; label: string; emoji: string };
 const LOOK_STYLES: LookStyle[] = [
-  { id: "warm",    label: "Caldo",    emoji: "🔆" },
-  { id: "depth",   label: "Profondo", emoji: "🎯" },
-  { id: "vivid",   label: "Vivido",   emoji: "🎨" },
-  { id: "dynamic", label: "Dinamico", emoji: "💨" },
-  { id: "premium", label: "Premium",  emoji: "💎" },
+  { id: "warm",    label: "Caldo",    emoji: "ðŸ”†" },
+  { id: "depth",   label: "Profondo", emoji: "ðŸŽ¯" },
+  { id: "vivid",   label: "Vivido",   emoji: "ðŸŽ¨" },
+  { id: "dynamic", label: "Dinamico", emoji: "ðŸ’¨" },
+  { id: "premium", label: "Premium",  emoji: "ðŸ’Ž" },
 ];
 
 type Garment = { id: string; name: string; image_base64?: string; thumb_base64?: string; category: string };
@@ -84,9 +84,9 @@ function ChipRow({
 
 export default function Generate() {
   const router = useRouter();
-  // Optional ?preselect=<garment_id> in the URL — when present, that garment
+  // Optional ?preselect=<garment_id> in the URL â€” when present, that garment
   // is automatically marked as selected the first time the list loads.
-  // Used by the gallery → garment detail → "Salva e genera" flow.
+  // Used by the gallery â†’ garment detail â†’ "Salva e genera" flow.
   const { preselect } = useLocalSearchParams<{ preselect?: string }>();
   const preselectAppliedRef = useRef(false);
   const [garments, setGarments] = useState<Garment[]>([]);
@@ -102,7 +102,7 @@ export default function Generate() {
   const [variations, setVariations] = useState(4);
   const [lookStyles, setLookStyles] = useState<string[]>([]);
   const [addPriceTags, setAddPriceTags] = useState(false);
-  // Aggiungi accessori — when the checkbox is on, the shop owner can attach
+  // Aggiungi accessori â€” when the checkbox is on, the shop owner can attach
   // up to ACCESSORY_MAX extra photos (shoes, bags, jewelry, hats, glasses,
   // belts, scarves, etc.) that the AI MUST include in the generated photo.
   // Each entry has a category that drives a focused, per-body-part prompt
@@ -114,7 +114,7 @@ export default function Generate() {
   const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
   const [customBgId, setCustomBgId] = useState<string | null>(null);
 
-  // Selected model preset (face library). When set, etnia/corporatura/età
+  // Selected model preset (face library). When set, etnia/corporatura/etÃ 
   // are hidden, body is forced to slim, and the preset's face description is
   // injected server-side into the generation prompt. `presetThumb` is shown
   // in the picker chip so the shop owner sees who they picked.
@@ -188,7 +188,7 @@ export default function Generate() {
 
   const onGenerate = () => {
     if (selected.length === 0) {
-      Alert.alert("Seleziona almeno un capo", "Tocca uno o più capi dalla tua galleria per continuare.");
+      Alert.alert("Seleziona almeno un capo", "Tocca uno o piÃ¹ capi dalla tua galleria per continuare.");
       return;
     }
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
@@ -229,7 +229,7 @@ export default function Generate() {
         {/* Step 1 - garments */}
         <View style={styles.step}>
           <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>1 — Capi</Text>
+            <Text style={styles.stepLabel}>1 â€” Capi</Text>
             <Text style={styles.stepHint}>{selected.length} selezionati</Text>
           </View>
           {garments.length === 0 ? (
@@ -274,12 +274,12 @@ export default function Generate() {
           )}
         </View>
 
-        {/* Step 2 — Model */}
+        {/* Step 2 â€” Model */}
         <View style={styles.step}>
-          <Text style={styles.stepLabel}>2 — Modello</Text>
+          <Text style={styles.stepLabel}>2 â€” Modello</Text>
           <ChipRow label="Genere" options={GENDERS} value={gender} onChange={setGender} testIDPrefix="gender" />
 
-          {/* Face-library picker — only when gender = donna (no male
+          {/* Face-library picker â€” only when gender = donna (no male
               presets yet). When a face is selected, the demographic chips
               below are hidden because the preset embeds them. */}
           {gender === "donna" ? (
@@ -292,14 +292,14 @@ export default function Generate() {
                   />
                 ) : (
                   <View style={[styles.presetThumb, { alignItems: "center", justifyContent: "center" }]}>
-                    <Text style={{ color: theme.colors.textMuted, fontSize: 18 }}>👤</Text>
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 18 }}>ðŸ‘¤</Text>
                   </View>
                 )}
                 <View style={{ flex: 1, gap: 4 }}>
                   <Text style={styles.presetLabel}>Modella scelta</Text>
                   <Text style={styles.presetName}>{presetName}</Text>
                   <Text style={styles.presetHint}>
-                    Età, etnia e corporatura sono fissati per coerenza.
+                    EtÃ , etnia e corporatura sono fissati per coerenza.
                   </Text>
                 </View>
                 <View style={{ gap: 6 }}>
@@ -330,26 +330,26 @@ export default function Generate() {
               >
                 <Ionicons name="people-outline" size={16} color={theme.colors.text} />
                 <Text style={styles.pickModelBtnText}>Scegli modella</Text>
-                <Text style={styles.pickModelBtnHint}>15 volti curati • opzionale</Text>
+                <Text style={styles.pickModelBtnHint}>15 volti curati â€¢ opzionale</Text>
               </TouchableOpacity>
             )
           ) : null}
 
-          {/* Demographic chips — hidden when a face preset is locked-in.
+          {/* Demographic chips â€” hidden when a face preset is locked-in.
               Without a preset the AI uses these to invent the model. */}
           {!(gender === "donna" && presetId) ? (
             <>
-              <ChipRow label="Età" options={AGES} value={age} onChange={setAge} testIDPrefix="age" />
+              <ChipRow label="EtÃ " options={AGES} value={age} onChange={setAge} testIDPrefix="age" />
               <ChipRow label="Corporatura" options={BODIES} value={body} onChange={setBody} testIDPrefix="body" />
               <ChipRow label="Etnia" options={ETHNICITIES} value={eth} onChange={setEth} testIDPrefix="eth" />
             </>
           ) : null}
         </View>
 
-        {/* Step 3 — Scene */}
+        {/* Step 3 â€” Scene */}
         <View style={styles.step}>
           <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>3 — Scena</Text>
+            <Text style={styles.stepLabel}>3 â€” Scena</Text>
             <TouchableOpacity
               onPress={() => router.push("/backgrounds")}
               style={styles.bgManageBtn}
@@ -389,7 +389,7 @@ export default function Generate() {
               </ScrollView>
               {customBgId ? (
                 <Text style={styles.customBgHint}>
-                  ✓ Userai uno sfondo personalizzato. Lo sfondo standard qui sotto sarà ignorato.
+                  âœ“ Userai uno sfondo personalizzato. Lo sfondo standard qui sotto sarÃ  ignorato.
                 </Text>
               ) : null}
             </View>
@@ -401,14 +401,14 @@ export default function Generate() {
           <ChipRow label="Scarpe" options={SHOES} value={shoes} onChange={setShoes} testIDPrefix="shoes" />
         </View>
 
-        {/* Step 4 — Look (aesthetic modifiers) */}
+        {/* Step 4 â€” Look (aesthetic modifiers) */}
         <View style={styles.step}>
           <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>4 — Look</Text>
+            <Text style={styles.stepLabel}>4 â€” Look</Text>
             <Text style={styles.stepHint}>{lookStyles.length > 0 ? `${lookStyles.length} attivi` : "facoltativo"}</Text>
           </View>
           <Text style={styles.lookHint}>
-            Personalizza l&apos;estetica della foto. Tocca uno o più stili — si combinano tra loro.
+            Personalizza l&apos;estetica della foto. Tocca uno o piÃ¹ stili â€” si combinano tra loro.
           </Text>
           <View style={styles.lookGrid}>
             {LOOK_STYLES.map((ls) => {
@@ -434,7 +434,7 @@ export default function Generate() {
           </View>
         </View>
 
-        {/* Inserisci prezzi nell'immagine — opt-in toggle. When ON, the
+        {/* Inserisci prezzi nell'immagine â€” opt-in toggle. When ON, the
             backend reads the "Descrizione e prezzi" of each selected garment
             (non-auto-placeholder names) and tells Gemini to render price
             tags next to the matching garments. */}
@@ -446,7 +446,7 @@ export default function Generate() {
             testID="generate-toggle-prices"
           >
             <View style={[styles.checkbox, addPriceTags && styles.checkboxOn]}>
-              {addPriceTags ? <Text style={styles.checkboxMark}>✓</Text> : null}
+              {addPriceTags ? <Text style={styles.checkboxMark}>âœ“</Text> : null}
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.priceToggleLabel}>Inserisci prezzi nell&apos;immagine</Text>
@@ -457,7 +457,7 @@ export default function Generate() {
           </TouchableOpacity>
         </View>
 
-        {/* Aggiungi accessori — opt-in toggle. When ON, the shop owner can
+        {/* Aggiungi accessori â€” opt-in toggle. When ON, the shop owner can
             attach up to ACCESSORY_MAX extra photos that the AI MUST wear on
             the model. Each photo carries a category that drives a focused
             "worn on the X" instruction in the backend prompt. */}
@@ -473,7 +473,7 @@ export default function Generate() {
             testID="generate-toggle-accessories"
           >
             <View style={[styles.checkbox, addAccessories && styles.checkboxOn]}>
-              {addAccessories ? <Text style={styles.checkboxMark}>✓</Text> : null}
+              {addAccessories ? <Text style={styles.checkboxMark}>âœ“</Text> : null}
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.priceToggleLabel}>Aggiungi accessori</Text>
@@ -493,9 +493,9 @@ export default function Generate() {
           ) : null}
         </View>
 
-        {/* Step 5 — Variations */}
+        {/* Step 5 â€” Variations */}
         <View style={styles.step}>
-          <Text style={styles.stepLabel}>5 — Variazioni</Text>
+          <Text style={styles.stepLabel}>5 â€” Variazioni</Text>
           <View style={styles.varsRow}>
             {VARIATIONS.map((n) => {
               const active = variations === n;
@@ -513,10 +513,10 @@ export default function Generate() {
           </View>
         </View>
 
-        {/* Step 5 — AI provider */}
+        {/* Step 5 â€” AI provider */}
         {providers.length > 0 && (
           <View style={styles.step}>
-            <Text style={styles.stepLabel}>6 — Provider AI</Text>
+            <Text style={styles.stepLabel}>6 â€” Provider AI</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 12 }}>
               {providers.map((p) => {
                 const active = aiProvider === p.id;
@@ -537,7 +537,7 @@ export default function Generate() {
                       {p.name}
                     </Text>
                     <Text style={styles.providerDesc}>
-                      {disabled ? `🔒 ${p.missing_keys?.join(', ')}` : p.description}
+                      {disabled ? `ðŸ”’ ${p.missing_keys?.join(', ')}` : p.description}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -546,7 +546,7 @@ export default function Generate() {
           </View>
         )}
 
-        <View style={{ height: 120 }} />
+        <View style={{ height: 200 }} />
       </ScrollView>
 
       {/* Magic button */}
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
     flex: 1, paddingVertical: 16, borderWidth: 1, borderColor: "rgba(180,150,255,0.2)",
     alignItems: "center", borderRadius: 12,
     shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
-    backgroundColor: "#141330",
+    backgroundColor: "#28265a",
   },
   varBtnActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   varText: { color: theme.colors.text, fontSize: 16, fontWeight: "500" },
@@ -638,7 +638,7 @@ const styles = StyleSheet.create({
     flexBasis: "31%", flexGrow: 1,
     paddingVertical: 12, paddingHorizontal: 10,
     borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#141330",
+    backgroundColor: "#28265a",
     alignItems: "center", justifyContent: "center", gap: 4,
     minWidth: 90, borderRadius: 12,
     shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
   priceToggleRow: {
     flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14,
     borderWidth: 1, borderColor: "rgba(180,150,255,0.16)",
-    backgroundColor: "#131228", borderRadius: 12,
+    backgroundColor: "#252252", borderRadius: 12,
     shadowColor: "#7c3aed", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
   },
   checkbox: {
@@ -692,7 +692,7 @@ const styles = StyleSheet.create({
   },
   providerChip: {
     padding: 14, borderWidth: 1, borderColor: "rgba(180,150,255,0.2)",
-    backgroundColor: "#141330", minWidth: 200, gap: 6,
+    backgroundColor: "#28265a", minWidth: 200, gap: 6,
     borderRadius: 12,
     shadowColor: "#7c3aed", shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4,
   },
@@ -702,7 +702,7 @@ const styles = StyleSheet.create({
   providerNameActive: { color: theme.colors.text },
   providerDesc: { color: theme.colors.textSecondary, fontSize: 10, lineHeight: 14 },
   ctaWrap: {
-    position: "absolute", left: 0, right: 0, bottom: 0,
+    position: "absolute", left: 0, right: 0, bottom: 80,
     padding: 20, backgroundColor: theme.colors.bg,
     borderTopWidth: 1, borderTopColor: theme.colors.border,
   },
@@ -753,9 +753,10 @@ const chipStyles = StyleSheet.create({
   chip: {
     paddingVertical: 10, paddingHorizontal: 16,
     borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#131228", borderRadius: 20,
+    backgroundColor: "#252252", borderRadius: 20,
   },
   chipActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   chipText: { color: theme.colors.text, fontSize: 13, letterSpacing: 0.3 },
   chipTextActive: { color: theme.colors.primaryFg, fontWeight: "600" },
 });
+

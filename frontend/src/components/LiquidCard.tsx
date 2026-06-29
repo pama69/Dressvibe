@@ -27,9 +27,9 @@ export function LiquidCard({
   );
 }
 
-export const CARD_GRAD: [string, string] = ["#1e1b3a", "#0d0c1e"];
-export const CHIP_GRAD: [string, string] = ["#1a1833", "#110f26"];
-export const BLOCK_GRAD: [string, string] = ["#181630", "#0c0b1c"];
+export const CARD_GRAD: [string, string] = ["#2e2b60", "#1e1c48"];
+export const CHIP_GRAD: [string, string] = ["#28265a", "#1c1a44"];
+export const BLOCK_GRAD: [string, string] = ["#252252", "#1a1840"];
 
 const styles = StyleSheet.create({
   card: { overflow: "hidden" },

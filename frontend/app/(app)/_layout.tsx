@@ -74,7 +74,7 @@ function CustomTabBar({ state, navigation }: any) {
   return (
     <View style={[tb.wrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
       <LinearGradient
-        colors={["#13122a", "#0a091a"]}
+        colors={["#201e44", "#17153a"]}
         style={tb.bar}
       >
         {TABS.map((tab) => {
@@ -89,7 +89,7 @@ function CustomTabBar({ state, navigation }: any) {
             >
               {active ? (
                 <LinearGradient
-                  colors={["#312e6e", "#1e1b4b"]}
+                  colors={["#3d3a80", "#28265e"]}
                   style={tb.pillActive}
                 >
                   <Ionicons name={tab.icon} size={18} color="#c4b5fd" />

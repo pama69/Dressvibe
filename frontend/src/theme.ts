@@ -1,11 +1,11 @@
 // Centralized theme tokens for DressVibe (dark, high-fashion editorial)
 export const theme = {
   colors: {
-    bg: "#07070f",
-    surface: "#111128",
-    surfaceAlt: "#191930",
-    border: "rgba(180,150,255,0.14)",
-    borderStrong: "rgba(180,150,255,0.32)",
+    bg: "#1a1836",
+    surface: "#22204a",
+    surfaceAlt: "#2b2858",
+    border: "rgba(180,150,255,0.18)",
+    borderStrong: "rgba(180,150,255,0.38)",
     text: "#FAFAFA",
     textSecondary: "#A1A1AA",
     textMuted: "#71717A",

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+﻿import React, { useCallback, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -20,7 +20,7 @@ import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { CATEGORIES, SEASONS, GENDERS } from "@/src/constants/options";
 
-// Robust base64 extractor — handles native (asset.base64) and web (blob/data URI).
+// Robust base64 extractor â€” handles native (asset.base64) and web (blob/data URI).
 async function assetToBase64(asset: ImagePicker.ImagePickerAsset): Promise<string | null> {
   if (asset.base64 && asset.base64.length > 0) return asset.base64;
   if (!asset.uri) return null;
@@ -109,7 +109,7 @@ export default function Upload() {
         mediaTypes: ["images"],
         base64: true,
         quality: 0.55,
-        // Skip the forced crop step — user wanted the picker to return the
+        // Skip the forced crop step â€” user wanted the picker to return the
         // photo as-is. They can re-pick if they want a different framing.
         allowsEditing: false,
       });
@@ -139,7 +139,7 @@ export default function Upload() {
       const res = await ImagePicker.launchCameraAsync({
         base64: true,
         quality: 0.55,
-        // No forced crop after the shot — user wanted the photo saved as-is.
+        // No forced crop after the shot â€” user wanted the photo saved as-is.
         allowsEditing: false,
       });
       if (res.canceled || !res.assets?.[0]) return;
@@ -163,7 +163,7 @@ export default function Upload() {
     }
     // "Descrizione e prezzi" is OPTIONAL. If the user didn't type anything we
     // auto-generate a unique placeholder code "Cap NNNN" so the garment still
-    // has a stable identifier in the gallery — and the backend knows there
+    // has a stable identifier in the gallery â€” and the backend knows there
     // is no real description / price list to bake into the prompt.
     const trimmed = name.trim();
     const finalName = trimmed || `Cap ${String(Math.floor(1000 + Math.random() * 9000))}`;
@@ -237,11 +237,11 @@ export default function Upload() {
 
           <Text style={s.fieldLabel}>Descrizione e prezzi</Text>
           <Text style={s.fieldHint}>
-            Facoltativo — es. "Vestito €59, pantalone €67". Se compilato, i prezzi appariranno come piccole etichette nella foto generata.
+            Facoltativo â€” es. "Vestito â‚¬59, pantalone â‚¬67". Se compilato, i prezzi appariranno come piccole etichette nella foto generata.
           </Text>
           <TextInput
             value={name} onChangeText={setName}
-            placeholder='es. Vestito €59, pantalone €67'
+            placeholder='es. Vestito â‚¬59, pantalone â‚¬67'
             placeholderTextColor={theme.colors.textMuted}
             style={s.input}
             testID="upload-name"
@@ -268,12 +268,12 @@ export default function Upload() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.fieldLabel}>Taglia</Text>
-              <TextInput value={size} onChangeText={setSize} placeholder="S, M, L, 42…"
+              <TextInput value={size} onChangeText={setSize} placeholder="S, M, L, 42â€¦"
                 placeholderTextColor={theme.colors.textMuted} style={s.input} testID="upload-size" />
             </View>
           </View>
 
-          <Text style={s.fieldLabel}>Prezzo (€)</Text>
+          <Text style={s.fieldLabel}>Prezzo (â‚¬)</Text>
           <TextInput
             value={price} onChangeText={setPrice} keyboardType="decimal-pad"
             placeholder="49.90"
@@ -377,7 +377,7 @@ const s = StyleSheet.create({
   chip: {
     paddingVertical: 8, paddingHorizontal: 14,
     borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#131228", borderRadius: 20,
+    backgroundColor: "#252252", borderRadius: 20,
   },
   chipA: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   chipT: { color: theme.colors.text, fontSize: 12 },
@@ -392,3 +392,4 @@ const s = StyleSheet.create({
   saveBtn: { backgroundColor: theme.colors.primary, paddingVertical: 18, alignItems: "center", borderRadius: 14 },
   saveBtnText: { color: theme.colors.primaryFg, fontWeight: "700", letterSpacing: 0.4, fontSize: 15 },
 });
+
