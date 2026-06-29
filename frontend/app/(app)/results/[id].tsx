@@ -181,13 +181,13 @@ export default function Results() {
             </View>
           }
           renderItem={({ item, index }) => (
-            <View>
+            <View style={s.tileWrap}>
               <TouchableOpacity
                 onPress={() => router.push({ pathname: "/studio/[id]", params: { id: gen.id, index: String(index) } })}
                 activeOpacity={0.85}
                 testID={`result-image-${index}`}
               >
-                <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW, height: tileH }]} />
+                <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW - 10, height: tileH - 10 }]} />
                 <View style={s.tileOverlay}>
                   <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
                   <Text style={s.tileText}>Apri Studio</Text>
@@ -222,19 +222,25 @@ const s = StyleSheet.create({
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 30 },
   emptyTitle: { color: theme.colors.text, fontSize: 16 },
   emptySub: { color: theme.colors.textSecondary, fontSize: 13, textAlign: "center" },
-  retry: { marginTop: 8, paddingVertical: 12, paddingHorizontal: 28, backgroundColor: theme.colors.primary },
+  retry: { marginTop: 8, paddingVertical: 12, paddingHorizontal: 28, backgroundColor: theme.colors.primary, borderRadius: 12 },
   retryText: { color: theme.colors.primaryFg, fontWeight: "600" },
   hint: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1, marginBottom: 14 },
   videosSection: { marginBottom: 22, gap: 10 },
   videosTitle: { color: theme.colors.text, fontSize: 12, letterSpacing: 1.4, textTransform: "uppercase" },
-  tile: { backgroundColor: theme.colors.surface },
+  tileWrap: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 5,
+    shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 6,
+  },
+  tile: { backgroundColor: theme.colors.surface, borderRadius: 10 },
   tileOverlay: {
-    position: "absolute", bottom: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 4, paddingHorizontal: 8,
+    position: "absolute", bottom: 13, left: 13, flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8,
   },
   tileText: { color: theme.colors.text, fontSize: 10, letterSpacing: 1 },
   deleteBtn: {
-    position: "absolute", top: 6, right: 6,
+    position: "absolute", top: 12, right: 12,
     width: 26, height: 26, borderRadius: 13,
     backgroundColor: "rgba(0,0,0,0.65)",
     alignItems: "center", justifyContent: "center",
