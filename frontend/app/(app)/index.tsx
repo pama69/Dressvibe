@@ -211,36 +211,35 @@ export default function Galleria() {
                 activeOpacity={0.85}
                 onPress={() => router.push(`/(app)/garment/${item.id}`)}
               >
-                <Image
-                  source={{
-                    // Prefer the small thumb (~10 KB JPEG) coming from the
-                    // list endpoint. Older list payloads (pre-thumbnail era)
-                    // shipped the full PNG inline — fall back to that.
-                    uri: item.thumb_base64
-                      ? `data:image/jpeg;base64,${item.thumb_base64}`
-                      : `data:image/png;base64,${item.image_base64}`,
-                  }}
-                  style={styles.cardImg}
-                />
-                <TouchableOpacity
-                  onPress={() => handleDelete(item)}
-                  style={styles.deleteBtn}
-                  testID={`garment-delete-${item.id}`}
-                  activeOpacity={0.7}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close" size={14} color={theme.colors.text} />
-                </TouchableOpacity>
-                <View style={styles.cardOverlay}>
-                  {displayName ? (
-                    <Text style={styles.cardName} numberOfLines={1}>
-                      {displayName}
+                <View style={styles.cardInner}>
+                  <Image
+                    source={{
+                      uri: item.thumb_base64
+                        ? `data:image/jpeg;base64,${item.thumb_base64}`
+                        : `data:image/png;base64,${item.image_base64}`,
+                    }}
+                    style={styles.cardImg}
+                  />
+                  <TouchableOpacity
+                    onPress={() => handleDelete(item)}
+                    style={styles.deleteBtn}
+                    testID={`garment-delete-${item.id}`}
+                    activeOpacity={0.7}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close" size={14} color={theme.colors.text} />
+                  </TouchableOpacity>
+                  <View style={styles.cardOverlay}>
+                    {displayName ? (
+                      <Text style={styles.cardName} numberOfLines={1}>
+                        {displayName}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.cardMeta}>
+                      {item.category}
+                      {item.price ? ` · €${item.price}` : ""}
                     </Text>
-                  ) : null}
-                  <Text style={styles.cardMeta}>
-                    {item.category}
-                    {item.price ? ` · €${item.price}` : ""}
-                  </Text>
+                  </View>
                 </View>
               </TouchableOpacity>
             );
@@ -369,12 +368,23 @@ const styles = StyleSheet.create({
   emptyBtnText: { color: theme.colors.primaryFg, fontWeight: "600", letterSpacing: 0.4 },
   list: { paddingHorizontal: PADDING, paddingBottom: 96 },
   card: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    overflow: "hidden",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "visible",
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
   },
-  cardImg: { width: "100%", height: "100%" },
+  cardInner: {
+    borderRadius: 16,
+    overflow: "hidden",
+    flex: 1,
+    padding: 6,
+    backgroundColor: "#fff",
+  },
+  cardImg: { width: "100%", height: "100%", borderRadius: 10 },
   deleteBtn: {
     position: "absolute", top: 6, right: 6,
     width: 26, height: 26, borderRadius: 13,

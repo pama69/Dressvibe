@@ -98,13 +98,15 @@ export default function History() {
                 onPress={() => router.push(`/results/${item.id}`)}
                 style={styles.rowInner}
               >
-                {item.thumbnail ? (
-                  <Image source={{ uri: `data:image/jpeg;base64,${item.thumbnail}` }} style={styles.thumb} />
-                ) : (
-                  <View style={[styles.thumb, styles.thumbEmpty]}>
-                    <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />
-                  </View>
-                )}
+                <View style={styles.thumbWrap}>
+                  {item.thumbnail ? (
+                    <Image source={{ uri: `data:image/jpeg;base64,${item.thumbnail}` }} style={styles.thumb} />
+                  ) : (
+                    <View style={[styles.thumb, styles.thumbEmpty]}>
+                      <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />
+                    </View>
+                  )}
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowTitle} numberOfLines={1}>{item.title || "Generazione"}</Text>
                   <Text style={styles.rowMeta}>
@@ -141,7 +143,13 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row", alignItems: "stretch",
     backgroundColor: theme.colors.surface,
-    borderWidth: 1, borderColor: theme.colors.border,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 6,
+    overflow: "hidden",
   },
   rowInner: {
     flex: 1, flexDirection: "row", alignItems: "center", gap: 14, padding: 12,
@@ -151,7 +159,18 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1, borderLeftColor: theme.colors.border,
   },
   deleteEmoji: { fontSize: 20, lineHeight: 24 },
-  thumb: { width: 64, height: 80, backgroundColor: theme.colors.surfaceAlt },
+  thumbWrap: {
+    width: 64, height: 80,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    padding: 3,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  thumb: { width: "100%", height: "100%", borderRadius: 6, backgroundColor: theme.colors.surfaceAlt },
   thumbEmpty: { alignItems: "center", justifyContent: "center" },
   rowTitle: { color: theme.colors.text, fontSize: 14, fontWeight: "500" },
   rowMeta: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 4 },
