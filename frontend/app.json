@@ -30,7 +30,15 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "themeColor": "#1a1836",
+      "backgroundColor": "#1a1836",
+      "name": "DressVibe",
+      "shortName": "DressVibe",
+      "description": "AI virtual try-on per negozi di abbigliamento",
+      "splash": {
+        "backgroundColor": "#1a1836"
+      }
     },
     "plugins": [
       "expo-router",
