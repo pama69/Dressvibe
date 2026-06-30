@@ -1,4 +1,4 @@
-# Stage 1: build Expo web static export
+# Stage 1: build Expo web static export — cache bust 2026-06-30
 FROM node:20-slim AS frontend-builder
 
 WORKDIR /frontend
