@@ -22,6 +22,7 @@ import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import VideoCard from "@/src/components/VideoCard";
 import InstagramShareSheet from "@/src/components/InstagramShareSheet";
+import PublishSheet, { type PublishChannel } from "@/src/components/PublishSheet";
 import AccessoryPicker from "@/src/components/AccessoryPicker";
 import { shareToInstagram, shareGeneric } from "@/src/utils/share";
 import { saveImageToGallery, saveVideoToGallery } from "@/src/utils/gallery";
@@ -110,19 +111,37 @@ export default function Studio() {
   const [addAccessories, setAddAccessories] = useState(false);
   const [accessories, setAccessories] = useState<AccessoryItem[]>([]);
 
-  // When arriving from the results grid with ?focus=publish we auto-scroll to
-  // the publish section so the shop owner lands straight on the "Pubblica"
-  // controls instead of hunting for them.
+  // Unified publish sheet (one "Pubblica" entry point).
+  const [publishOpen, setPublishOpen] = useState(false);
+  // Which channels the shop owner has actually configured. Instagram (manual
+  // clipboard flow) and Scarica are always available; the rest depend on setup.
+  const [chTg, setChTg] = useState(false);
+  const [chWa, setChWa] = useState(false);
+  const [chIgFb, setChIgFb] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await api.getUserSettings();
+        setChTg(!!(st.telegram_channel || st.telegram_channel_default));
+        setChWa(!!st.whatsapp_channel_url);
+      } catch {}
+      try {
+        const z = await api.zernioStatus();
+        setChIgFb(!!(z.accounts && z.accounts.some((a) => a.is_active)));
+      } catch {}
+    })();
+  }, []);
+
+  // When arriving from the results grid with ?focus=publish, open the publish
+  // sheet straight away so posting is a 2-tap flow (Pubblica → canale).
   const scrollRef = useRef<ScrollView>(null);
   const publishY = useRef(0);
   const focusedPublishRef = useRef(false);
   useEffect(() => {
     if (focus !== "publish" || loading || focusedPublishRef.current) return;
     focusedPublishRef.current = true;
-    // Small delay so layout has settled and publishY is measured.
-    const t = setTimeout(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(publishY.current - 12, 0), animated: true });
-    }, 350);
+    const t = setTimeout(() => setPublishOpen(true), 300);
     return () => clearTimeout(t);
   }, [focus, loading]);
 
@@ -614,6 +633,45 @@ export default function Studio() {
 
   const resetImage = () => { if (originalImage) setImage(originalImage); };
 
+  /** Save the current image to the device gallery / downloads. Shared by the
+   * publish sheet ("Scarica"). */
+  const saveCurrentImage = async () => {
+    if (!image) {
+      notify({ title: "Nessuna immagine selezionata" });
+      return;
+    }
+    const saved = await saveImageToGallery(image, `dressvibe_${id}_${idx}`);
+    if (saved.ok) {
+      if (Platform.OS === "web") {
+        notify({ title: "Foto scaricata 📥", message: "L'immagine è stata scaricata dal browser. Se sei su iPhone Safari, l'anteprima si apre in una nuova scheda — tienila premuta e tocca \"Salva in Foto\"." });
+      } else if (saved.where === "gallery") {
+        notify({ title: "Foto salvata 📸", message: "L'immagine è ora nella tua galleria, dentro l'album \"DressVibe\"." });
+      } else {
+        notify({ title: "Foto scaricata 📥", message: "Foto salvata sul dispositivo." });
+      }
+    } else {
+      notify({ title: "Salvataggio non riuscito", message: saved.error?.includes("Permesso") ? "Per salvare le foto nella galleria devi concedere il permesso a DressVibe nelle impostazioni del telefono." : (saved.error || "Riprova") });
+    }
+  };
+
+  /** Channels shown in the unified publish sheet — only the configured ones,
+   * plus Instagram (manual clipboard, always works) and Scarica. */
+  const publishChannels: PublishChannel[] = [
+    ...(chIgFb
+      ? [{ key: "instagram", label: "Instagram", hint: "Pubblicazione automatica", icon: "logo-instagram" as const, color: "#dd2a7b", onPress: () => publishToSocial("instagram") }]
+      : [{ key: "instagram", label: "Instagram", hint: "Salva foto + caption, poi apri Instagram", icon: "logo-instagram" as const, color: "#E4405F", onPress: openInstagramShare }]),
+    ...(chIgFb
+      ? [{ key: "facebook", label: "Facebook", hint: "Pubblicazione automatica", icon: "logo-facebook" as const, color: "#1877F2", onPress: () => publishToSocial("facebook") }]
+      : []),
+    ...(chTg
+      ? [{ key: "telegram", label: "Telegram", hint: "Pubblica sul canale con pulsante Richiedi info", icon: "paper-plane" as const, color: "#229ED9", onPress: () => downloadAndShare("telegram") }]
+      : []),
+    ...(chWa
+      ? [{ key: "whatsapp", label: "WhatsApp", hint: "Apre il tuo canale con testo e link pronti", icon: "logo-whatsapp" as const, color: "#25D366", onPress: shareToWhatsApp }]
+      : []),
+    { key: "download", label: "Scarica", hint: "Salva la foto sul dispositivo", icon: "download-outline" as const, color: theme.colors.text, onPress: saveCurrentImage },
+  ];
+
   /** Unified copywriter: fills the single "Testo del post" (tgDescription)
    * used by every channel. Uses the same AI as the Instagram share sheet
    * (/instagram/caption) so the text is coherent everywhere. */
@@ -995,115 +1053,35 @@ export default function Studio() {
             <Text style={s.tgCounter}>{tgDescription.length}/1000</Text>
           </View>
 
-          {/* Auto-publish (Instagram + Facebook via Zernio) */}
+          {/* Pubblica — unico punto d'ingresso: apre un foglio con i canali. */}
           <View
             style={s.section}
             onLayout={(e) => { publishY.current = e.nativeEvent.layout.y; }}
           >
-            <Text style={s.sectionLabel}>📤 Pubblica automaticamente</Text>
-            <Text style={s.tgHint}>
-              Pubblica direttamente sui tuoi profili social. La descrizione del post qui sopra viene usata come caption.
+            <TouchableOpacity
+              onPress={() => setPublishOpen(true)}
+              activeOpacity={0.9}
+              testID="open-publish-sheet"
+              disabled={busy || igFbBusy !== null || waBusy}
+            >
+              <LinearGradient
+                colors={MAGIC_GRADIENT}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={[s.publishCta, (busy || igFbBusy !== null || waBusy) && { opacity: 0.6 }]}
+              >
+                {busy || igFbBusy !== null || waBusy ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="paper-plane" size={18} color="#fff" />
+                    <Text style={s.publishCtaText}>Pubblica</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+            <Text style={[s.tgHint, { textAlign: "center" }]}>
+              Instagram, Facebook, Telegram, WhatsApp o scarica — con lo stesso testo del post.
             </Text>
-            <View style={[s.shareRow, { gap: 10 }]}>
-              <TouchableOpacity
-                style={[s.autoPubBtn, { borderColor: "#dd2a7b" }, igFbBusy === "instagram" && { opacity: 0.5 }]}
-                onPress={() => publishToSocial("instagram")}
-                disabled={igFbBusy !== null}
-                testID="zernio-publish-ig"
-                activeOpacity={0.85}
-              >
-                {igFbBusy === "instagram" ? (
-                  <ActivityIndicator color="#dd2a7b" />
-                ) : (
-                  <>
-                    <Ionicons name="logo-instagram" size={18} color="#dd2a7b" />
-                    <Text style={[s.autoPubText, { color: "#dd2a7b" }]}>Instagram</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.autoPubBtn, { borderColor: "#1877F2" }, igFbBusy === "facebook" && { opacity: 0.5 }]}
-                onPress={() => publishToSocial("facebook")}
-                disabled={igFbBusy !== null}
-                testID="zernio-publish-fb"
-                activeOpacity={0.85}
-              >
-                {igFbBusy === "facebook" ? (
-                  <ActivityIndicator color="#1877F2" />
-                ) : (
-                  <>
-                    <Ionicons name="logo-facebook" size={18} color="#1877F2" />
-                    <Text style={[s.autoPubText, { color: "#1877F2" }]}>Facebook</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Share */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Condividi</Text>
-            <View style={s.shareRow}>
-              <TouchableOpacity
-                style={[s.shareWordBtn, busy && { opacity: 0.6 }]}
-                onPress={() => downloadAndShare("telegram")}
-                testID="share-telegram"
-                disabled={busy}
-                activeOpacity={0.7}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#229ED9" />
-                ) : (
-                  <Text style={[s.shareWord, { color: "#229ED9" }]}>Telegram</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={s.shareWordBtn}
-                onPress={openInstagramShare}
-                testID="share-instagram"
-                activeOpacity={0.7}
-              >
-                <Text style={[s.shareWord, { color: "#E4405F" }]}>Instagram</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.shareWordBtn, waBusy && { opacity: 0.6 }]}
-                onPress={shareToWhatsApp}
-                disabled={waBusy}
-                testID="share-whatsapp"
-                activeOpacity={0.7}
-              >
-                {waBusy ? (
-                  <ActivityIndicator color="#25D366" />
-                ) : (
-                  <Text style={[s.shareWord, { color: "#25D366" }]}>WhatsApp</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={s.shareWordBtn}
-                onPress={async () => {
-                  if (!image) {
-                    notify({ title: "Nessuna immagine selezionata" });
-                    return;
-                  }
-                  const saved = await saveImageToGallery(image, `dressvibe_${id}_${idx}`);
-                  if (saved.ok) {
-                    if (Platform.OS === "web") {
-                      notify({ title: "Foto scaricata 📥", message: "L'immagine è stata scaricata dal browser. Se sei su iPhone Safari, l'anteprima si apre in una nuova scheda — tienila premuta e tocca \"Salva in Foto\"." });
-                    } else if (saved.where === "gallery") {
-                      notify({ title: "Foto salvata 📸", message: "L'immagine è ora nella tua galleria, dentro l'album \"DressVibe\"." });
-                    } else {
-                      notify({ title: "Foto scaricata 📥", message: "Foto salvata sul dispositivo." });
-                    }
-                  } else {
-                    notify({ title: "Salvataggio non riuscito", message: saved.error?.includes("Permesso") ? "Per salvare le foto nella galleria devi concedere il permesso a DressVibe nelle impostazioni del telefono." : (saved.error || "Riprova") });
-                  }
-                }}
-                testID="share-download"
-                activeOpacity={0.7}
-              >
-                <Text style={[s.shareWord, { color: theme.colors.text }]}>Scarica</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1116,6 +1094,11 @@ export default function Studio() {
         imageIndex={idx}
         skipSave={igSheet?.skipSave}
         initialCaption={tgDescription}
+      />
+      <PublishSheet
+        visible={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        channels={publishChannels}
       />
     </SafeAreaView>
   );
@@ -1154,6 +1137,12 @@ const s = StyleSheet.create({
   },
   aiGenText: { color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.2 },
   tgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: 4, marginBottom: 8 },
+  publishCta: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+    paddingVertical: 18, borderRadius: 16,
+    shadowColor: "#7c3aed", shadowOpacity: 0.5, shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 10,
+  },
+  publishCtaText: { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: 0.6 },
   tgCounter: { color: theme.colors.textMuted, fontSize: 10, textAlign: "right", marginTop: 4 },
   quickChip: {
     paddingVertical: 10, paddingHorizontal: 14,
