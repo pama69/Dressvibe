@@ -104,7 +104,21 @@ Architettura scelta: **servizio backend unico** (FastAPI API) su Railway + **Mon
 
 > ⚠️ **Rischio build:** `requirements.txt` ha versioni pinnate "2026" generate da Emergent. Pacchetti **non importati** dal backend (`litellm`, `boto3`, `stripe`, `pandas`) andrebbero rimossi per ridurre tempo/fallimenti di build. Da valutare anche `black/flake8/mypy/isort/pytest` (dev-only).
 
+### 2026-07-01 — Restyling UX generazione + flusso pubblicazione ✅
+Serie di migliorie UX su Galleria/Genera/Studio (tutte in `frontend/`, pushate su `main-mf20se`).
+- **Pulizia archivio automatica + menu Genera** (`9862886`): impostazione `archive_retention_months` (1–6) e cleanup automatico all'apertura app (mostra n° capi/generazioni rimossi). Restyling pannello Genera: chip "Scegli modella" in linea con i pulsanti età, opzione "Scarpa custom", pulsanti Look uniformi, "Scena" → "Posa modello".
+- **Ritocchi guidati sul prompt** (`cd73f0d`, `3a11e50`): 5 domande guidate (Rimuovi / Cambia colori / Cambia ambientazione / Cambia posa / Altro) iniettate come override ad alta priorità nel prompt di generazione. Componente riusabile `PromptTweaks` (predisposto per lo Studio, non ancora agganciato lì).
+- **Categorie capo obbligatorie + ruoli multi-capo** (`558f012`): 8 categorie obbligatorie all'upload (Giacca, Camicia, Maglia, Vestito, Pantalone, Gonna, Accessorio, Outfit completo) con selezione a tap singolo e validazione; etichettatura per ruolo (top/bottom/full-body/shoes) con iniezione intelligente dei basici e ordine preservato nella generazione multi-capo.
+- **Caption unificata** (`2bdff9b`): unico campo "Testo del post" + "✨ Genera con AI" (un solo copywriter); stesso testo su tutti i canali (Instagram/Facebook/Telegram/WhatsApp).
+- **Flusso pubblicazione** (`d4007e4`, `09a0ab2`, `4c5806e`, `565445d`): pulsante "Pubblica" su ogni risultato nella griglia; `PublishSheet` unico coi soli canali configurati (ricorda l'ultimo usato); "Scarica" come pulsante piccolo affiancato a "Pubblica"; apertura foglio affidabile via `useFocusEffect`; reset selezione capo/ritocchi tra generazioni.
+- **Fix Telegram nel foglio Pubblica** (`541b229`): `chTg` ora richiede canale personale + termini bot accettati alla versione corrente (combacia con il gate backend `/telegram/publish`); prima il canale di default lo faceva comparire ma la pubblicazione rispondeva "non configurato".
+- **Fix web build** (`d0733d6`): il build web usa l'origin del browser invece dell'hardcoded `dressvibe.app`.
+
+> ⏳ **Rimasto da fare:** setup canali "al volo" dal `PublishSheet` (evitare il rimbalzo a Profilo → Impostazioni); agganciare `PromptTweaks` al flusso di editing dello Studio.
+
 ### Prossimi step
+- [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
+- [ ] Agganciare `PromptTweaks` all'editing dello Studio.
 - [ ] Eseguire il deploy su Railway secondo la procedura sopra.
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.
 - [ ] Asset/branding: rimpiazzare immagini `emergentagent.com` ([login.tsx](frontend/app/login.tsx), [generating.tsx](frontend/app/(app)/generating.tsx)), dominio dressvibe.app.
