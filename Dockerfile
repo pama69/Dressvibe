@@ -8,7 +8,13 @@ RUN npm ci --legacy-peer-deps
 
 COPY frontend/ .
 
-ARG EXPO_PUBLIC_BACKEND_URL=https://dressvibe.app
+# Lasciato VUOTO di proposito: il web export servito dallo stesso host usa
+# `window.location.origin` (vedi frontend/src/api/client.ts), così l'app web
+# funziona da qualsiasi dominio attivo (www./api.dressvibe.app) senza CORS e
+# senza dipendere da un dominio hardcoded. Il dominio "dressvibe.app" nudo era
+# stato rimosso da Railway → causava "Failed to fetch". Il build mobile (EAS)
+# passa invece il proprio EXPO_PUBLIC_BACKEND_URL.
+ARG EXPO_PUBLIC_BACKEND_URL=
 ENV EXPO_PUBLIC_BACKEND_URL=$EXPO_PUBLIC_BACKEND_URL
 
 RUN npx expo export -p web
