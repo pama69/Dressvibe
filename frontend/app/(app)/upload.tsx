@@ -55,7 +55,7 @@ export default function Upload() {
   const router = useRouter();
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [category, setCategory] = useState("t-shirt");
+  const [category, setCategory] = useState("");
   const [color, setColor] = useState("");
   const [size, setSize] = useState("");
   const [price, setPrice] = useState("");
@@ -73,7 +73,7 @@ export default function Upload() {
   const resetForm = useCallback(() => {
     setImageBase64(null);
     setName("");
-    setCategory("t-shirt");
+    setCategory("");
     setColor("");
     setSize("");
     setPrice("");
@@ -159,6 +159,13 @@ export default function Upload() {
     if (!imageBase64) {
       setError("Scegli o scatta una foto del capo prima di salvare.");
       notify("Foto richiesta", "Scegli o scatta una foto del capo.");
+      return;
+    }
+    // La categoria guida la generazione (ruolo del capo nell'outfit), quindi
+    // ora è obbligatoria: un solo tap, ma va scelta.
+    if (!category) {
+      setError("Scegli la categoria del capo (Giacca, Camicia, Maglia…).");
+      notify("Categoria richiesta", "Tocca la categoria del capo prima di salvare.");
       return;
     }
     // "Descrizione e prezzi" is OPTIONAL. If the user didn't type anything we
@@ -247,7 +254,7 @@ export default function Upload() {
             testID="upload-name"
           />
 
-          <Text style={s.fieldLabel}>Categoria</Text>
+          <Text style={s.fieldLabel}>Categoria *</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
             {CATEGORIES.map((c) => (
               <TouchableOpacity
@@ -255,7 +262,9 @@ export default function Upload() {
                 style={[s.chip, category === c.value && s.chipA]}
                 testID={`upload-cat-${c.value}`}
               >
-                <Text style={[s.chipT, category === c.value && s.chipTA]}>{c.label}</Text>
+                <Text style={[s.chipT, category === c.value && s.chipTA]}>
+                  {c.emoji ? `${c.emoji}  ` : ""}{c.label}
+                </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>

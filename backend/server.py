@@ -849,6 +849,114 @@ LOOK_STYLES_PROMPTS = {
 
 import re
 
+# Maps each garment category (assigned by the shop owner at upload time) to a
+# short English role label and the body area where it is worn. Used to label the
+# clothing reference images in the prompt so Gemini combines multiple capi into
+# ONE coherent outfit and knows exactly what each reference is.
+GARMENT_ROLE = {
+    "t-shirt":   ("a t-shirt", "upper body"),
+    "maglia":    ("a top / knit (t-shirt, jumper or sweatshirt)", "upper body"),
+    "camicia":   ("a shirt", "upper body"),
+    "maglione":  ("a sweater", "upper body"),
+    "felpa":     ("a hoodie / sweatshirt", "upper body"),
+    "giacca":    ("a jacket / blazer", "upper body, as an outer layer"),
+    "cappotto":  ("a coat", "upper body, as an outer layer"),
+    "pantaloni": ("trousers", "lower body"),
+    "jeans":     ("jeans", "lower body"),
+    "gonna":     ("a skirt", "lower body"),
+    "vestito":   ("a dress", "full body (covers both upper and lower body)"),
+    "outfit":    ("a COMPLETE outfit already worn together in this single photo (multiple garments)",
+                  "the entire body — reproduce EVERY garment visible in this reference exactly as shown"),
+    "scarpe":    ("shoes", "feet"),
+    "accessorio": ("an accessory", "worn in its natural place"),
+}
+
+_UPPER_CATS = {"t-shirt", "maglia", "camicia", "maglione", "felpa", "giacca", "cappotto"}
+_LOWER_CATS = {"pantaloni", "jeans", "gonna"}
+# "vestito" and "outfit" both cover the whole body, so no neutral basics are
+# added. "outfit" additionally means the single photo ALREADY shows several
+# garments worn together — they must all be reproduced.
+_FULL_CATS = {"vestito", "outfit"}
+
+
+def _compose_garments_block(categories: Optional[List[str]]) -> tuple[str, bool]:
+    """Build the clothing paragraph of the prompt from the selected capi.
+
+    Returns (text, shoes_from_reference). When `categories` is provided we label
+    each clothing reference by role and instruct Gemini to MERGE all of them into
+    a single coordinated outfit, adding neutral basics ONLY for the body areas
+    that no selected capo covers. Falls back to the previous generic paragraph
+    when categories are missing (older clients / edge cases).
+
+    `shoes_from_reference` is True when one of the selected capi is a pair of
+    shoes, so the caller can make the footwear come from that reference image.
+    """
+    cats = [c for c in (categories or []) if c]
+    if not cats:
+        # Legacy fallback — the original singular-phrased paragraph.
+        text = (
+            "The model is wearing EXACTLY and ONLY the clothing items shown in the reference images, "
+            "preserving every detail: color, pattern, texture, cut, logo, prints. "
+            "CRITICAL — do NOT add, invent or hallucinate any clothing item, accessory, layer or "
+            "piece of apparel that is NOT visible in the reference images. Specifically: do not add a "
+            "jacket, blazer, coat, cardigan, shirt, t-shirt, sweater, vest, scarf, belt, hat, bag, "
+            "jewellery, glasses, gloves, socks, tights or any other garment unless it is clearly "
+            "present in the references. If the reference shows only a top, the lower body must wear "
+            "plain neutral basics (simple slim trousers or jeans) — never a skirt, dress or shorts. "
+            "If the reference shows only bottoms, the upper body must wear a plain neutral fitted "
+            "top — never a jacket, coat or layering piece. NEVER LAYER additional clothing on top of "
+            "or under the referenced items. The number of garments visible on the model must match "
+            "the number provided in the references (plus the minimal neutral basic just described). "
+        )
+        return text, False
+
+    # Label each clothing reference by its role (1-based, matching refs order).
+    parts: List[str] = []
+    for i, c in enumerate(cats, start=1):
+        role, where = GARMENT_ROLE.get(c, (f"a {c}", "in its natural place"))
+        parts.append(f"reference #{i} = {role} (worn on the {where})")
+    labelled = "; ".join(parts)
+
+    upper_covered = any(c in _UPPER_CATS or c in _FULL_CATS for c in cats)
+    lower_covered = any(c in _LOWER_CATS or c in _FULL_CATS for c in cats)
+    has_full = any(c in _FULL_CATS for c in cats)
+    shoes_from_reference = any(c == "scarpe" for c in cats)
+
+    lines: List[str] = []
+    if len(cats) > 1:
+        lines.append(
+            f"The clothing reference images are, in order: {labelled}. "
+            "Combine ALL of these garments into ONE single, coherent, well-coordinated outfit "
+            "worn AT THE SAME TIME by the same model — this is one look, not several."
+        )
+    else:
+        lines.append(
+            f"The clothing reference image is: {labelled}. "
+            "The model wears this exact item."
+        )
+
+    lines.append(
+        "Preserve every detail of each referenced garment: color, pattern, texture, cut, logo, prints. "
+        "Do NOT invent, hallucinate or add any extra clothing, layer or accessory that is not shown in the references, "
+        "and do NOT drop any of the referenced garments."
+    )
+
+    # Smart neutral basics — only for the body area no capo covers.
+    if not has_full:
+        if not upper_covered:
+            lines.append(
+                "No upper-body garment was provided, so dress the upper body in a plain, neutral, "
+                "fitted top that does not distract from the referenced garments."
+            )
+        if not lower_covered:
+            lines.append(
+                "No lower-body garment was provided, so dress the lower body in plain, neutral, "
+                "simple slim trousers or jeans — never a skirt, dress or shorts."
+            )
+
+    return " ".join(lines) + " ", shoes_from_reference
+
+
 def build_outfit_prompt(
     p: GenerationCreate,
     variation_idx: int,
@@ -856,6 +964,7 @@ def build_outfit_prompt(
     price_descriptions: Optional[List[str]] = None,
     model_preset_face: Optional[str] = None,
     num_garments: int = 0,
+    garment_categories: Optional[List[str]] = None,
 ) -> str:
     gender = GENDER_IT.get(p.model_gender, p.model_gender)
     age = AGE_IT.get(p.model_age, p.model_age)
@@ -864,6 +973,16 @@ def build_outfit_prompt(
     pose = POSE_IT.get(p.pose, p.pose)
     bg = BACKGROUND_IT.get(p.background, p.background)
     shoes = SHOES_IT.get(p.shoes, p.shoes)
+
+    # Build the (possibly role-labelled) clothing paragraph. When one of the
+    # selected capi is a pair of shoes, footwear must come from that reference
+    # instead of the generic SHOES_IT description.
+    garments_block, shoes_from_reference = _compose_garments_block(garment_categories)
+    if shoes_from_reference:
+        shoes = (
+            "the EXACT shoes shown in the shoe reference image — reproduce them faithfully "
+            "(shape, color, material); do NOT replace them with other footwear"
+        )
 
     if custom_bg_label:
         background_instruction = (
@@ -892,18 +1011,8 @@ def build_outfit_prompt(
     return (
         subject_line
         + f"FULL BODY SHOT from head to feet, the entire figure must be visible including the shoes and the floor under them. "
-        f"The model is wearing EXACTLY and ONLY the clothing items shown in the reference images, "
-        f"preserving every detail: color, pattern, texture, cut, logo, prints. "
-        f"CRITICAL — do NOT add, invent or hallucinate any clothing item, accessory, layer or "
-        f"piece of apparel that is NOT visible in the reference images. Specifically: do not add a "
-        f"jacket, blazer, coat, cardigan, shirt, t-shirt, sweater, vest, scarf, belt, hat, bag, "
-        f"jewellery, glasses, gloves, socks, tights or any other garment unless it is clearly "
-        f"present in the references. If the reference shows only a top, the lower body must wear "
-        f"plain neutral basics (simple slim trousers or jeans) — never a skirt, dress or shorts. "
-        f"If the reference shows only bottoms, the upper body must wear a plain neutral fitted "
-        f"top — never a jacket, coat or layering piece. NEVER LAYER additional clothing on top of "
-        f"or under the referenced items. The number of garments visible on the model must match "
-        f"the number provided in the references (plus the minimal neutral basic just described). "
+        f"{garments_block}"
+        f"NEVER layer additional, non-referenced clothing on top of or under the referenced items. "
         f"Footwear: {shoes}. "
         f"Pose: {pose}. {background_instruction} "
         f"Shot with a 35mm lens, soft natural lighting, magazine-quality, "
@@ -1458,7 +1567,13 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     ).to_list(20)
     if not garments:
         raise HTTPException(status_code=404, detail="Capi non trovati")
+    # $in does NOT preserve the requested order, so reorder the results to match
+    # the selection order — this keeps the "reference #N = <role>" labels in the
+    # prompt aligned with the actual reference images sent to Gemini.
+    _by_id = {g["id"]: g for g in garments}
+    garments = [_by_id[gid] for gid in payload.garment_ids if gid in _by_id]
     refs = [g["image_base64"] for g in garments]
+    garment_categories = [g.get("category") for g in garments]  # role labels for the prompt
     num_garments = len(refs)  # remembered before appending accessories/bg so the prompt can reference them by 1-based index
 
     # Collect real (non-auto-placeholder) descriptions from the selected
@@ -1535,6 +1650,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
                 build_outfit_prompt(
                     payload, i, custom_bg_label, price_descriptions,
                     model_preset_face, num_garments=num_garments,
+                    garment_categories=garment_categories,
                 ),
                 refs,
                 f"{gen_id}_{i}",
