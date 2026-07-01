@@ -176,7 +176,7 @@ export default function Results() {
                 </View>
               ) : null}
               <Text style={s.hint}>
-                {gen.images.length} variazioni · Tocca un'immagine per modificarla
+                {gen.images.length} variazioni · "Pubblica" per postare subito · "Ritocca" per modificare
               </Text>
             </View>
           }
@@ -190,8 +190,19 @@ export default function Results() {
                 <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW - 10, height: tileH - 10 }]} />
                 <View style={s.tileOverlay}>
                   <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
-                  <Text style={s.tileText}>Apri Studio</Text>
+                  <Text style={s.tileText}>Ritocca</Text>
                 </View>
+              </TouchableOpacity>
+              {/* Azione primaria: pubblica subito senza passare per l'editing.
+                  Porta allo Studio già posizionato sulla sezione "Pubblica". */}
+              <TouchableOpacity
+                onPress={() => router.push({ pathname: "/studio/[id]", params: { id: gen.id, index: String(index), focus: "publish" } })}
+                style={[s.publishBtn, { width: tileW - 10 }]}
+                testID={`result-publish-${index}`}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="paper-plane-outline" size={15} color={theme.colors.primaryFg} />
+                <Text style={s.publishText}>Pubblica</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => handleDeleteImage(index)}
@@ -239,6 +250,12 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8,
   },
   tileText: { color: theme.colors.text, fontSize: 10, letterSpacing: 1 },
+  publishBtn: {
+    marginTop: 6, alignSelf: "center",
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: theme.colors.primary, paddingVertical: 10, borderRadius: 10,
+  },
+  publishText: { color: theme.colors.primaryFg, fontSize: 13, fontWeight: "700", letterSpacing: 0.4 },
   deleteBtn: {
     position: "absolute", top: 12, right: 12,
     width: 26, height: 26, borderRadius: 13,

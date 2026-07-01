@@ -397,7 +397,9 @@ const s = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 10,
   },
   errorText: { color: theme.colors.error, fontSize: 12, flex: 1 },
-  footer: { padding: 20, borderTopWidth: 1, borderTopColor: theme.colors.border, backgroundColor: theme.colors.bg },
+  // paddingBottom extra: la barra dei tab fluttuante (assoluta, ~80px) copre
+  // il bordo inferiore dello schermo, quindi alziamo il pulsante "Salva".
+  footer: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 96, borderTopWidth: 1, borderTopColor: theme.colors.border, backgroundColor: theme.colors.bg },
   saveBtn: { backgroundColor: theme.colors.primary, paddingVertical: 18, alignItems: "center", borderRadius: 14 },
   saveBtnText: { color: theme.colors.primaryFg, fontWeight: "700", letterSpacing: 0.4, fontSize: 15 },
 });

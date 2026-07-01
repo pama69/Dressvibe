@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -67,7 +67,7 @@ const LOOK_PRESETS: { id: string; label: string; emoji: string; prompt: string }
 ];
 
 export default function Studio() {
-  const { id, index } = useLocalSearchParams<{ id: string; index: string }>();
+  const { id, index, focus } = useLocalSearchParams<{ id: string; index: string; focus?: string }>();
   const router = useRouter();
   const notify = useNotify();
   const initialIdx = parseInt(index || "0", 10);
@@ -109,6 +109,22 @@ export default function Studio() {
   // double-apply the same accessories on the next iteration.
   const [addAccessories, setAddAccessories] = useState(false);
   const [accessories, setAccessories] = useState<AccessoryItem[]>([]);
+
+  // When arriving from the results grid with ?focus=publish we auto-scroll to
+  // the publish section so the shop owner lands straight on the "Pubblica"
+  // controls instead of hunting for them.
+  const scrollRef = useRef<ScrollView>(null);
+  const publishY = useRef(0);
+  const focusedPublishRef = useRef(false);
+  useEffect(() => {
+    if (focus !== "publish" || loading || focusedPublishRef.current) return;
+    focusedPublishRef.current = true;
+    // Small delay so layout has settled and publishY is measured.
+    const t = setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(publishY.current - 12, 0), animated: true });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [focus, loading]);
 
   /** When the user taps the Instagram button we immediately save the active
    * image into the device gallery so they don't have to wait until the
@@ -734,7 +750,7 @@ export default function Studio() {
           </View>
         ) : null}
 
-        <ScrollView contentContainerStyle={{ paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
           <View style={s.imageWrap}>
             {loading || !image ? (
               <View style={s.imagePh}><ActivityIndicator color={theme.colors.text} /></View>
@@ -980,7 +996,10 @@ export default function Studio() {
           </View>
 
           {/* Auto-publish (Instagram + Facebook via Zernio) */}
-          <View style={s.section}>
+          <View
+            style={s.section}
+            onLayout={(e) => { publishY.current = e.nativeEvent.layout.y; }}
+          >
             <Text style={s.sectionLabel}>📤 Pubblica automaticamente</Text>
             <Text style={s.tgHint}>
               Pubblica direttamente sui tuoi profili social. La descrizione del post qui sopra viene usata come caption.
