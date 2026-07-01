@@ -188,6 +188,19 @@ export default function Generate() {
     preselectAppliedRef.current = true;
   }, [garments, preselect]);
 
+  // On first open, auto-focus the most recent garment (the list arrives sorted
+  // newest-first from the backend) by pre-selecting it — so a shop owner who
+  // just uploaded a capo can generate immediately. Skipped when arriving with
+  // an explicit ?preselect target, and applied only once.
+  const autoSelectAppliedRef = useRef(false);
+  useEffect(() => {
+    if (autoSelectAppliedRef.current || preselectAppliedRef.current) return;
+    if (preselect) return;
+    if (garments.length === 0) return;
+    setSelected((curr) => (curr.length > 0 ? curr : [garments[0].id]));
+    autoSelectAppliedRef.current = true;
+  }, [garments, preselect]);
+
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
@@ -349,7 +362,7 @@ export default function Generate() {
                       testID="open-model-picker"
                       activeOpacity={0.85}
                     >
-                      <Ionicons name="people-outline" size={14} color={theme.colors.primaryFg} />
+                      <Ionicons name="people-outline" size={14} color={theme.colors.primary} />
                       <Text style={styles.modelChipText}>Scegli modella</Text>
                     </TouchableOpacity>
                   ) : null
@@ -580,7 +593,9 @@ export default function Generate() {
           </View>
         )}
 
-        <View style={{ height: 120 }} />
+        {/* Clearance so the last section (Provider AI) scrolls fully above the
+            floating CTA (which sits at bottom:80 and is ~110px tall). */}
+        <View style={{ height: 220 }} />
       </ScrollView>
 
       {/* Magic button */}
@@ -669,9 +684,11 @@ const styles = StyleSheet.create({
   lookHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: -4 },
   modelChip: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: theme.colors.primary, borderColor: theme.colors.primary,
+    // Outlined (not filled) so it reads as an ACTION, not a selected age chip —
+    // only one option in the row should ever look "selected".
+    backgroundColor: "transparent", borderColor: theme.colors.primary, borderStyle: "dashed",
   },
-  modelChipText: { color: theme.colors.primaryFg, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
+  modelChipText: { color: theme.colors.primary, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
   priceToggleRow: {
     flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14,
     borderWidth: 1, borderColor: theme.colors.border,
