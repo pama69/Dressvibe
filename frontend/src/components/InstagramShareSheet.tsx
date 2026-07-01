@@ -45,6 +45,10 @@ type Props = {
    * the caller (e.g. the Studio screen) has already saved the image to the
    * gallery before opening the modal. */
   skipSave?: boolean;
+  /** Unified "Testo del post" from the Studio. When provided (non-empty) the
+   * sheet uses it as-is instead of auto-generating a separate caption, so the
+   * text stays coherent across all channels. The user can still regenerate. */
+  initialCaption?: string;
 };
 
 const STYLE_LABELS: { id: Style; label: string; emoji: string }[] = [
@@ -72,6 +76,7 @@ export default function InstagramShareSheet({
   shopName = "Frammenti",
   city = "Pescara",
   skipSave = false,
+  initialCaption = "",
 }: Props) {
   const mediaType: "photo" | "video" = videoUrl ? "video" : "photo";
   const [style, setStyle] = useState<Style>("elegante");
@@ -106,10 +111,15 @@ export default function InstagramShareSheet({
   );
 
   useEffect(() => {
-    if (visible && !caption) {
+    if (!visible || caption) return;
+    // Prefer the unified "Testo del post" coming from the Studio. Only fall
+    // back to auto-generating a fresh caption when it's empty.
+    if (initialCaption.trim()) {
+      setCaption(initialCaption.trim());
+    } else {
       fetchCaption(style);
     }
-  }, [visible, caption, fetchCaption, style]);
+  }, [visible, caption, fetchCaption, style, initialCaption]);
 
   const changeStyle = (s: Style) => {
     setStyle(s);

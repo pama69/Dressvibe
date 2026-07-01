@@ -85,7 +85,6 @@ export default function Studio() {
   const [busy, setBusy] = useState(false);
   const [edited, setEdited] = useState(false);
   const [editPrompt, setEditPrompt] = useState("");
-  const [caption, setCaption] = useState("");
   const [capBusy, setCapBusy] = useState(false);
   const [genTitle, setGenTitle] = useState("");
   const [videoProviders, setVideoProviders] = useState<any[]>([]);
@@ -418,10 +417,7 @@ export default function Studio() {
     if (!(await ensureTelegramConfigured())) return;
     setPublishingTgVideoId(video.id);
     try {
-      const captionText =
-        tgDescription.trim() ||
-        caption?.trim() ||
-        "Disponibile in negozio ✨";
+      const captionText = tgDescription.trim() || "Disponibile in negozio ✨";
       const res = await api.telegramPublish({
         video_url: video.video_url,
         media_type: "video",
@@ -602,26 +598,24 @@ export default function Studio() {
 
   const resetImage = () => { if (originalImage) setImage(originalImage); };
 
-  const generateCaption = async () => {
+  /** Unified copywriter: fills the single "Testo del post" (tgDescription)
+   * used by every channel. Uses the same AI as the Instagram share sheet
+   * (/instagram/caption) so the text is coherent everywhere. */
+  const generatePostText = async () => {
     setCapBusy(true);
     try {
-      const r = await api.caption({
-        garment_name: genTitle || "Capo moda",
-        category: "outfit",
-        style: "instagram",
+      const r = await api.generateInstagramCaption({
+        gen_id: id,
+        image_index: idx,
+        media_type: "photo",
+        style: "elegante",
       });
-      setCaption(r.caption);
+      setTgDescription(r.caption);
     } catch (e: any) {
-      notify({ title: "Errore", message: e?.message || "Errore caption" });
+      notify({ title: "Errore", message: e?.message || "Impossibile generare il testo" });
     } finally {
       setCapBusy(false);
     }
-  };
-
-  const copyCaption = async () => {
-    if (!caption) return;
-    await Clipboard.setStringAsync(caption);
-    notify({ title: "Copiato!", message: "La caption è negli appunti." });
   };
 
   /** Pre-flight check shared by every Telegram action.
@@ -662,10 +656,7 @@ export default function Studio() {
       if (!(await ensureTelegramConfigured())) return;
       try {
         setBusy(true);
-        const captionText =
-          tgDescription.trim() ||
-          caption?.trim() ||
-          "Disponibile in negozio ✨";
+        const captionText = tgDescription.trim() || "Disponibile in negozio ✨";
         const res = await api.telegramPublish({
           image_base64: image,
           media_type: "photo",
@@ -695,7 +686,7 @@ export default function Studio() {
     try {
       const opts = {
         imageBase64: image,
-        caption: caption?.trim() || undefined,
+        caption: tgDescription.trim() || undefined,
         fileBaseName: `dressvibe_${id}_${idx}`,
       };
       if (target === "instagram") {
@@ -949,11 +940,31 @@ export default function Studio() {
             </TouchableOpacity>
           </View>
 
-          {/* Descrizione Post — usata sia per Telegram che per WhatsApp */}
+          {/* Testo del post — UNICO testo usato da tutti i canali
+              (Instagram, Facebook, Telegram, WhatsApp). */}
           <View style={s.section}>
-            <Text style={s.sectionLabel}>📝 Descrizione Post</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={s.sectionLabel}>📝 Testo del post</Text>
+              <TouchableOpacity
+                onPress={generatePostText}
+                disabled={capBusy}
+                style={[s.aiGenBtn, capBusy && { opacity: 0.5 }]}
+                testID="post-generate-ai"
+                activeOpacity={0.8}
+              >
+                {capBusy ? (
+                  <ActivityIndicator color={theme.colors.text} size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="sparkles-outline" size={14} color={theme.colors.text} />
+                    <Text style={s.aiGenText}>Genera con AI</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
             <Text style={s.tgHint}>
-              Questo testo apparirà sotto la foto/video pubblicata su Telegram e sopra il link "Premi qui per ricevere info" quando posti su WhatsApp.
+              Un solo testo, usato ovunque: su Instagram/Facebook come caption, su Telegram sotto la foto,
+              e su WhatsApp sopra il link "Premi qui per ricevere info".
             </Text>
             <TextInput
               value={tgDescription}
@@ -1085,6 +1096,7 @@ export default function Studio() {
         genId={id}
         imageIndex={idx}
         skipSave={igSheet?.skipSave}
+        initialCaption={tgDescription}
       />
     </SafeAreaView>
   );
@@ -1115,6 +1127,15 @@ const s = StyleSheet.create({
   sectionLabel: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2, textTransform: "uppercase" },
   sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   captionGen: { color: theme.colors.text, fontSize: 12, fontWeight: "500" },
+  aiGenBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingVertical: 7, paddingHorizontal: 12,
+    borderWidth: 1, borderColor: theme.colors.borderStrong, borderRadius: 20,
+    backgroundColor: theme.colors.surface,
+  },
+  aiGenText: { color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.2 },
+  tgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: 4, marginBottom: 8 },
+  tgCounter: { color: theme.colors.textMuted, fontSize: 10, textAlign: "right", marginTop: 4 },
   quickChip: {
     paddingVertical: 10, paddingHorizontal: 14,
     borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", backgroundColor: "#252252",
