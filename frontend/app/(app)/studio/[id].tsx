@@ -143,15 +143,18 @@ export default function Studio() {
 
   // When arriving from the results grid with ?focus=publish, open the publish
   // sheet straight away so posting is a 2-tap flow (Pubblica → canale).
+  // NOTE: Studio is a tab screen that stays mounted after the first visit, so a
+  // one-time useEffect would only fire once. useFocusEffect runs on EVERY entry
+  // into the screen, so the sheet re-opens each time we arrive with focus=publish.
   const scrollRef = useRef<ScrollView>(null);
   const publishY = useRef(0);
-  const focusedPublishRef = useRef(false);
-  useEffect(() => {
-    if (focus !== "publish" || loading || focusedPublishRef.current) return;
-    focusedPublishRef.current = true;
-    const t = setTimeout(() => setPublishOpen(true), 300);
-    return () => clearTimeout(t);
-  }, [focus, loading]);
+  useFocusEffect(
+    useCallback(() => {
+      if (focus !== "publish") return;
+      const t = setTimeout(() => setPublishOpen(true), 300);
+      return () => clearTimeout(t);
+    }, [focus])
+  );
 
   /** When the user taps the Instagram button we immediately save the active
    * image into the device gallery so they don't have to wait until the
@@ -677,7 +680,6 @@ export default function Studio() {
     ...(chWa
       ? [{ key: "whatsapp", label: "WhatsApp", hint: "Apre il tuo canale con testo e link pronti", icon: "logo-whatsapp" as const, color: "#25D366", onPress: shareToWhatsApp }]
       : []),
-    { key: "download", label: "Scarica", hint: "Salva la foto sul dispositivo", icon: "download-outline" as const, color: theme.colors.text, onPress: saveCurrentImage },
   ];
 
   /** Unified copywriter: fills the single "Testo del post" (tgDescription)
@@ -1066,27 +1068,39 @@ export default function Studio() {
             style={s.section}
             onLayout={(e) => { publishY.current = e.nativeEvent.layout.y; }}
           >
-            <TouchableOpacity
-              onPress={() => setPublishOpen(true)}
-              activeOpacity={0.9}
-              testID="open-publish-sheet"
-              disabled={busy || igFbBusy !== null || waBusy}
-            >
-              <LinearGradient
-                colors={MAGIC_GRADIENT}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                style={[s.publishCta, (busy || igFbBusy !== null || waBusy) && { opacity: 0.6 }]}
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => setPublishOpen(true)}
+                activeOpacity={0.9}
+                testID="open-publish-sheet"
+                disabled={busy || igFbBusy !== null || waBusy}
+                style={{ flex: 1 }}
               >
-                {busy || igFbBusy !== null || waBusy ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="paper-plane" size={18} color="#fff" />
-                    <Text style={s.publishCtaText}>Pubblica</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={MAGIC_GRADIENT}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                  style={[s.publishCta, (busy || igFbBusy !== null || waBusy) && { opacity: 0.6 }]}
+                >
+                  {busy || igFbBusy !== null || waBusy ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="paper-plane" size={18} color="#fff" />
+                      <Text style={s.publishCtaText}>Pubblica</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={saveCurrentImage}
+                activeOpacity={0.85}
+                testID="studio-download"
+                style={s.downloadBtn}
+              >
+                <Ionicons name="download-outline" size={18} color={theme.colors.text} />
+                <Text style={s.downloadText}>Scarica</Text>
+              </TouchableOpacity>
+            </View>
             <Text style={[s.tgHint, { textAlign: "center" }]}>
               Instagram, Facebook, Telegram, WhatsApp o scarica — con lo stesso testo del post.
             </Text>
@@ -1151,6 +1165,12 @@ const s = StyleSheet.create({
     shadowColor: "#7c3aed", shadowOpacity: 0.5, shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 10,
   },
   publishCtaText: { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: 0.6 },
+  downloadBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    paddingHorizontal: 16, borderRadius: 16,
+    borderWidth: 1, borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.bg,
+  },
+  downloadText: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
   tgCounter: { color: theme.colors.textMuted, fontSize: 10, textAlign: "right", marginTop: 4 },
   quickChip: {
     paddingVertical: 10, paddingHorizontal: 14,
