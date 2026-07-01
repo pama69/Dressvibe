@@ -801,6 +801,13 @@ SHOES_IT = {
     "alta_elegante": "elegant high-heeled shoes that match the outfit",
     "comoda_fashion": "comfortable fashionable sneakers or trendy flat shoes that match the outfit",
     "scarpa_bassa": "minimal low-cut flat shoes (ballerinas, loafers or low boots) that match the outfit",
+    # "custom": the shop owner supplies the shoes inside the reference photos —
+    # the model must wear THOSE exact shoes, not invented casual ones.
+    "custom": (
+        "the EXACT shoes visible in the reference images — reproduce them faithfully "
+        "(shape, color, material, brand details). Do NOT replace them with any other, "
+        "generic or casual footwear; if shoes appear in the references they are mandatory"
+    ),
 }
 
 # Optional aesthetic modifiers selectable from the generation UI. The prompts
@@ -3169,6 +3176,7 @@ class UserSettingsUpdate(BaseModel):
     whatsapp_business_phone: Optional[str] = None
     shop_name: Optional[str] = None
     city: Optional[str] = None
+    archive_retention_months: Optional[int] = None
 
 
 def normalize_phone_e164(value: Optional[str]) -> Optional[str]:
@@ -3393,6 +3401,7 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
         "whatsapp_business_phone": s.get("whatsapp_business_phone") or "",
         "shop_name": s.get("shop_name") or "Frammenti",
         "city": s.get("city") or "Pescara",
+        "archive_retention_months": int(s.get("archive_retention_months") or 1),
     }
 
 
@@ -3897,12 +3906,34 @@ async def update_user_settings(payload: UserSettingsUpdate, authorization: Optio
         update_doc["shop_name"] = payload.shop_name.strip()[:80]
     if payload.city is not None:
         update_doc["city"] = payload.city.strip()[:80]
+    if payload.archive_retention_months is not None:
+        months = max(1, min(6, int(payload.archive_retention_months)))
+        update_doc["archive_retention_months"] = months
     await db.user_settings.update_one(
         {"user_id": user["user_id"]},
         {"$set": update_doc},
         upsert=True,
     )
     return await get_user_settings(authorization)
+
+
+@api_router.post("/archive/cleanup")
+async def archive_cleanup(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    uid = user["user_id"]
+    s = await db.user_settings.find_one({"user_id": uid}, {"archive_retention_months": 1}) or {}
+    months = int(s.get("archive_retention_months") or 1)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    g_res = await db.garments.delete_many({"user_id": uid, "created_at": {"$lt": cutoff}})
+    gen_res = await db.generations.delete_many({"user_id": uid, "created_at": {"$lt": cutoff}})
+    deleted = g_res.deleted_count + gen_res.deleted_count
+    return {
+        "deleted": deleted,
+        "garments_deleted": g_res.deleted_count,
+        "generations_deleted": gen_res.deleted_count,
+        "months": months,
+    }
 
 
 # =================== App init ===================

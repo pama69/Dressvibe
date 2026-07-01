@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Tabs, Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/contexts/AuthContext";
@@ -11,7 +11,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
+  Alert,
 } from "react-native";
+import { api } from "@/src/api/client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -111,6 +113,21 @@ function CustomTabBar({ state, navigation }: any) {
 
 export default function AppTabs() {
   const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const res = await api.archiveCleanup();
+        if (res.deleted > 0) {
+          Alert.alert(
+            "Archivio aggiornato",
+            `Sono stati cancellati dall'archivio tutti i capi e le generazioni più vecchi di ${res.months} ${res.months === 1 ? "mese" : "mesi"}.`
+          );
+        }
+      } catch {}
+    })();
+  }, [user?.user_id]);
 
   if (loading) {
     return (

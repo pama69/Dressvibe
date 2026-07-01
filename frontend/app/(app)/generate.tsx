@@ -49,17 +49,20 @@ function ChipRow({
   value,
   onChange,
   testIDPrefix,
+  leading,
 }: {
   label: string;
   options: Option[];
   value: string;
   onChange: (v: string) => void;
   testIDPrefix: string;
+  leading?: React.ReactNode;
 }) {
   return (
     <View style={chipStyles.wrap}>
       <Text style={chipStyles.label}>{label}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={chipStyles.row}>
+        {leading}
         {options.map((o) => {
           const active = value === o.value;
           return (
@@ -281,64 +284,72 @@ export default function Generate() {
           {/* Face-library picker — only when gender = donna (no male
               presets yet). When a face is selected, the demographic chips
               below are hidden because the preset embeds them. */}
-          {gender === "donna" ? (
-            presetId ? (
-              <View style={styles.presetCard} testID="preset-selected-card">
-                {presetThumb ? (
-                  <Image
-                    source={{ uri: `data:image/jpeg;base64,${presetThumb}` }}
-                    style={styles.presetThumb}
-                  />
-                ) : (
-                  <View style={[styles.presetThumb, { alignItems: "center", justifyContent: "center" }]}>
-                    <Text style={{ color: theme.colors.textMuted, fontSize: 18 }}>👤</Text>
-                  </View>
-                )}
-                <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={styles.presetLabel}>Modella scelta</Text>
-                  <Text style={styles.presetName}>{presetName}</Text>
-                  <Text style={styles.presetHint}>
-                    Età, etnia e corporatura sono fissati per coerenza.
-                  </Text>
+          {gender === "donna" && presetId ? (
+            <View style={styles.presetCard} testID="preset-selected-card">
+              {presetThumb ? (
+                <Image
+                  source={{ uri: `data:image/jpeg;base64,${presetThumb}` }}
+                  style={styles.presetThumb}
+                />
+              ) : (
+                <View style={[styles.presetThumb, { alignItems: "center", justifyContent: "center" }]}>
+                  <Text style={{ color: theme.colors.textMuted, fontSize: 18 }}>👤</Text>
                 </View>
-                <View style={{ gap: 6 }}>
-                  <TouchableOpacity
-                    onPress={() => router.push("/model-picker")}
-                    style={styles.presetChange}
-                    testID="preset-change"
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.presetChangeText}>Cambia</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => presetSelectionStore.clear()}
-                    style={styles.presetClear}
-                    testID="preset-clear"
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.presetClearText}>Rimuovi</Text>
-                  </TouchableOpacity>
-                </View>
+              )}
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={styles.presetLabel}>Modella scelta</Text>
+                <Text style={styles.presetName}>{presetName}</Text>
+                <Text style={styles.presetHint}>
+                  Età, etnia e corporatura sono fissati per coerenza.
+                </Text>
               </View>
-            ) : (
-              <TouchableOpacity
-                onPress={() => router.push("/model-picker")}
-                style={styles.pickModelBtn}
-                testID="open-model-picker"
-                activeOpacity={0.85}
-              >
-                <Ionicons name="people-outline" size={16} color={theme.colors.text} />
-                <Text style={styles.pickModelBtnText}>Scegli modella</Text>
-                <Text style={styles.pickModelBtnHint}>15 volti curati • opzionale</Text>
-              </TouchableOpacity>
-            )
+              <View style={{ gap: 6 }}>
+                <TouchableOpacity
+                  onPress={() => router.push("/model-picker")}
+                  style={styles.presetChange}
+                  testID="preset-change"
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.presetChangeText}>Cambia</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => presetSelectionStore.clear()}
+                  style={styles.presetClear}
+                  testID="preset-clear"
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.presetClearText}>Rimuovi</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           ) : null}
 
           {/* Demographic chips — hidden when a face preset is locked-in.
-              Without a preset the AI uses these to invent the model. */}
+              Without a preset the AI uses these to invent the model.
+              The "Scegli modella" chip sits inline with the Età options
+              (only for donna, where curated face presets exist). */}
           {!(gender === "donna" && presetId) ? (
             <>
-              <ChipRow label="Età" options={AGES} value={age} onChange={setAge} testIDPrefix="age" />
+              <ChipRow
+                label="Età"
+                options={AGES}
+                value={age}
+                onChange={setAge}
+                testIDPrefix="age"
+                leading={
+                  gender === "donna" ? (
+                    <TouchableOpacity
+                      onPress={() => router.push("/model-picker")}
+                      style={[chipStyles.chip, styles.modelChip]}
+                      testID="open-model-picker"
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="people-outline" size={14} color={theme.colors.primaryFg} />
+                      <Text style={styles.modelChipText}>Scegli modella</Text>
+                    </TouchableOpacity>
+                  ) : null
+                }
+              />
               <ChipRow label="Corporatura" options={BODIES} value={body} onChange={setBody} testIDPrefix="body" />
               <ChipRow label="Etnia" options={ETHNICITIES} value={eth} onChange={setEth} testIDPrefix="eth" />
             </>
@@ -348,7 +359,7 @@ export default function Generate() {
         {/* Step 3 — Scene */}
         <View style={styles.step}>
           <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>3 — Scena</Text>
+            <Text style={styles.stepLabel}>3 — Posa modello</Text>
             <TouchableOpacity
               onPress={() => router.push("/backgrounds")}
               style={styles.bgManageBtn}
@@ -398,6 +409,12 @@ export default function Generate() {
             <ChipRow label="Sfondo" options={BACKGROUNDS} value={bg} onChange={setBg} testIDPrefix="bg" />
           ) : null}
           <ChipRow label="Scarpe" options={SHOES} value={shoes} onChange={setShoes} testIDPrefix="shoes" />
+          {shoes === "custom" ? (
+            <Text style={styles.customBgHint}>
+              👟 La modella indosserà le scarpe presenti nelle foto dei capi, senza sostituirle
+              con calzature casual inventate.
+            </Text>
+          ) : null}
         </View>
 
         {/* Step 4 — Look (aesthetic modifiers) */}
@@ -409,7 +426,7 @@ export default function Generate() {
           <Text style={styles.lookHint}>
             Personalizza l&apos;estetica della foto. Tocca uno o più stili — si combinano tra loro.
           </Text>
-          <View style={styles.lookGrid}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={chipStyles.row}>
             {LOOK_STYLES.map((ls) => {
               const active = lookStyles.includes(ls.id);
               return (
@@ -421,16 +438,17 @@ export default function Generate() {
                       curr.includes(ls.id) ? curr.filter((x) => x !== ls.id) : [...curr, ls.id]
                     );
                   }}
-                  style={[styles.lookBtn, active && styles.lookBtnActive]}
+                  style={[chipStyles.chip, active && chipStyles.chipActive]}
                   activeOpacity={0.85}
                   testID={`look-${ls.id}`}
                 >
-                  <Text style={[styles.lookEmoji, active && styles.lookEmojiActive]}>{ls.emoji}</Text>
-                  <Text style={[styles.lookLabel, active && styles.lookLabelActive]}>{ls.label}</Text>
+                  <Text style={[chipStyles.chipText, active && chipStyles.chipTextActive]}>
+                    {ls.emoji}  {ls.label}
+                  </Text>
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
 
         {/* Inserisci prezzi nell'immagine — opt-in toggle. When ON, the
@@ -632,21 +650,11 @@ const styles = StyleSheet.create({
   varText: { color: theme.colors.text, fontSize: 16, fontWeight: "500" },
   varTextActive: { color: theme.colors.primaryFg },
   lookHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: -4 },
-  lookGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  lookBtn: {
-    flexBasis: "31%", flexGrow: 1,
-    paddingVertical: 12, paddingHorizontal: 10,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    alignItems: "center", justifyContent: "center", gap: 4,
-    minWidth: 90, borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  modelChip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: theme.colors.primary, borderColor: theme.colors.primary,
   },
-  lookBtnActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
-  lookEmoji: { fontSize: 20 },
-  lookEmojiActive: {},
-  lookLabel: { color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.3 },
-  lookLabelActive: { color: theme.colors.primaryFg },
+  modelChipText: { color: theme.colors.primaryFg, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
   priceToggleRow: {
     flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14,
     borderWidth: 1, borderColor: theme.colors.border,
@@ -712,14 +720,6 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   ctaText: { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: 0.6 },
-  pickModelBtn: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingVertical: 14, paddingHorizontal: 16,
-    borderWidth: 1, borderStyle: "dashed", borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, marginTop: 4, borderRadius: 12,
-  },
-  pickModelBtnText: { color: theme.colors.text, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
-  pickModelBtnHint: { color: theme.colors.textMuted, fontSize: 11, marginLeft: "auto" },
   presetCard: {
     flexDirection: "row", gap: 12, padding: 12,
     borderWidth: 1, borderColor: theme.colors.text,

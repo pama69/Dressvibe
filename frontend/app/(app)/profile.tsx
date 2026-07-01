@@ -117,6 +117,10 @@ export default function Profile() {
   const [channelDefault, setChannelDefault] = useState("");
   const [channelSaving, setChannelSaving] = useState(false);
 
+  // Archive retention
+  const [retentionMonths, setRetentionMonths] = useState(1);
+  const [retentionSaving, setRetentionSaving] = useState(false);
+
   // WhatsApp channel
   const [waChannelInput, setWaChannelInput] = useState("");
   const [waChannelSaved, setWaChannelSaved] = useState("");
@@ -137,6 +141,7 @@ export default function Profile() {
         setWaChannelSaved(s.whatsapp_channel_url || "");
         setWaPhoneInput(s.whatsapp_business_phone || "");
         setWaPhoneSaved(s.whatsapp_business_phone || "");
+        setRetentionMonths(s.archive_retention_months ?? 1);
       } catch {}
     })();
   }, []);
@@ -176,6 +181,17 @@ export default function Profile() {
       Alert.alert("Errore", e?.message || "Impossibile salvare il numero");
     } finally {
       setWaPhoneSaving(false);
+    }
+  };
+
+  const saveRetention = async (months: number) => {
+    setRetentionSaving(true);
+    try {
+      await api.updateUserSettings({ archive_retention_months: months });
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile salvare");
+    } finally {
+      setRetentionSaving(false);
     }
   };
 
@@ -431,6 +447,47 @@ export default function Profile() {
 
         {/* Telegram bot onboarding — 3-step guided flow with ToS acceptance,
             replaces the previous static channel input block. */}
+        {/* Archive retention slider */}
+        <LiquidCard style={s.tgBlock}>
+          <Text style={s.tgTitle}>🗂 Conservazione archivio</Text>
+          <Text style={s.tgHint}>
+            Capi e generazioni più vecchie di questo periodo vengono eliminate automaticamente
+            all'apertura dell'app.
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 20, marginTop: 8 }}>
+            <TouchableOpacity
+              onPress={() => {
+                const v = Math.max(1, retentionMonths - 1);
+                setRetentionMonths(v);
+                saveRetention(v);
+              }}
+              disabled={retentionMonths <= 1 || retentionSaving}
+              style={{ opacity: retentionMonths <= 1 ? 0.3 : 1, padding: 10 }}
+            >
+              <Ionicons name="remove-circle-outline" size={28} color={theme.colors.text} />
+            </TouchableOpacity>
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ color: theme.colors.text, fontSize: 36, fontWeight: "300", width: 60, textAlign: "center" }}>
+                {retentionMonths}
+              </Text>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1 }}>
+                {retentionMonths === 1 ? "MESE" : "MESI"}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                const v = Math.min(6, retentionMonths + 1);
+                setRetentionMonths(v);
+                saveRetention(v);
+              }}
+              disabled={retentionMonths >= 6 || retentionSaving}
+              style={{ opacity: retentionMonths >= 6 ? 0.3 : 1, padding: 10 }}
+            >
+              <Ionicons name="add-circle-outline" size={28} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
+        </LiquidCard>
+
         <TelegramBotSetup />
 
         <ZernioSocialSetup />

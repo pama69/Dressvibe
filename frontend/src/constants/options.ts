@@ -46,6 +46,7 @@ export const SHOES: Option[] = [
   { value: "alta_elegante", label: "Alta elegante" },
   { value: "comoda_fashion", label: "Comoda fashion" },
   { value: "scarpa_bassa", label: "Scarpa bassa" },
+  { value: "custom", label: "Scarpa custom", emoji: "👟" },
 ];
 
 export const CATEGORIES: Option[] = [

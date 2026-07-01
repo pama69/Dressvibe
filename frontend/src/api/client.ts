@@ -4,22 +4,21 @@ import { Platform } from "react-native";
 /**
  * Resolve the backend base URL.
  *
- * On WEB we always trust the browser's current origin (e.g. the deploy
- * URL `https://20fa349a-...preview.emergentagent.com` OR the preview URL
- * `https://outfit-gen-11.preview.emergentagent.com`). The Kubernetes
- * ingress routes `/api/*` of each environment to its own backend, so
- * relying on `EXPO_PUBLIC_BACKEND_URL` (which is baked at build time)
- * was making the deployed web app talk to the preview backend → that's
- * what caused the empty gallery after migration.
- *
- * On NATIVE (Expo Go / standalone build) there is no `window.location`,
- * so we keep using the build-time env var.
+ * Priorità:
+ *   1. `EXPO_PUBLIC_BACKEND_URL` se impostata (dev locale, build mobile, o
+ *      web servito da un dominio diverso dal backend — es. dressvibe.app vs
+ *      api.dressvibe.app).
+ *   2. Su WEB senza env var: l'origin corrente del browser. Funziona quando
+ *      il web build è servito DALLO STESSO dominio del backend (stesso host
+ *      che instrada `/api/*` allo stesso processo FastAPI).
+ *   3. Su NATIVE senza env var: stringa vuota (da configurare).
  */
-const ENV_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+const ENV_BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/+$/, "");
 const BACKEND_URL =
-  Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
+  ENV_BACKEND_URL ||
+  (Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
     ? window.location.origin
-    : ENV_BACKEND_URL;
+    : "");
 const API = `${BACKEND_URL}/api`;
 const TOKEN_KEY = "dv_session_token";
 
@@ -302,11 +301,17 @@ export const api = {
       whatsapp_business_phone: string;
       shop_name: string;
       city: string;
+      archive_retention_months: number;
     }>("/user-settings"),
-  updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; whatsapp_business_phone?: string; shop_name?: string; city?: string }) =>
-    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string }>(
+  updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; whatsapp_business_phone?: string; shop_name?: string; city?: string; archive_retention_months?: number }) =>
+    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string; archive_retention_months: number }>(
       "/user-settings",
       { method: "PUT", body }
+    ),
+  archiveCleanup: () =>
+    request<{ deleted: number; garments_deleted: number; generations_deleted: number; months: number }>(
+      "/archive/cleanup",
+      { method: "POST" }
     ),
   telegramStatus: () =>
     request<{ configured: boolean; channel_id: string | null }>("/telegram/status"),
