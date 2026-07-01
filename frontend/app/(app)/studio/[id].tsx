@@ -123,7 +123,15 @@ export default function Studio() {
     (async () => {
       try {
         const st = await api.getUserSettings();
-        setChTg(!!(st.telegram_channel || st.telegram_channel_default));
+        // Telegram è "configurato" SOLO col canale personale + termini bot
+        // accettati (il backend rifiuta la pubblicazione altrimenti, e il
+        // canale di default NON è un fallback). Deve combaciare con
+        // ensureTelegramConfigured e con /telegram/publish.
+        const tgReady =
+          !!st.telegram_channel &&
+          !!st.telegram_terms_accepted_at &&
+          st.telegram_terms_version === st.telegram_terms_current_version;
+        setChTg(tgReady);
         setChWa(!!st.whatsapp_channel_url);
       } catch {}
       try {
