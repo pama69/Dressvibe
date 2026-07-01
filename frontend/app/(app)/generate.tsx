@@ -188,17 +188,20 @@ export default function Generate() {
     preselectAppliedRef.current = true;
   }, [garments, preselect]);
 
-  // On first open, auto-focus the most recent garment (the list arrives sorted
-  // newest-first from the backend) by pre-selecting it — so a shop owner who
-  // just uploaded a capo can generate immediately. Skipped when arriving with
-  // an explicit ?preselect target, and applied only once.
-  const autoSelectAppliedRef = useRef(false);
+  // Auto-focus the MOST RECENT garment (the list arrives sorted newest-first).
+  // We track the current newest id: on first load, and every time a newly
+  // uploaded capo becomes the newest, we RESET the selection to just that capo.
+  // This avoids the old bug where a previously-flagged capo stayed selected and
+  // got merged with the new one. Skipped when arriving with an explicit
+  // ?preselect target (the garment-detail "Salva e genera" flow).
+  const lastNewestIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (autoSelectAppliedRef.current || preselectAppliedRef.current) return;
     if (preselect) return;
     if (garments.length === 0) return;
-    setSelected((curr) => (curr.length > 0 ? curr : [garments[0].id]));
-    autoSelectAppliedRef.current = true;
+    const newestId = garments[0].id;
+    if (lastNewestIdRef.current === newestId) return; // no new capo → keep selection
+    lastNewestIdRef.current = newestId;
+    setSelected([newestId]);
   }, [garments, preselect]);
 
   const toggle = (id: string) =>
@@ -237,6 +240,10 @@ export default function Generate() {
       // Guided prompt overrides — only sent when the shop owner filled something.
       ...tweaksToPayload(tweaks),
     });
+    // I "Ritocchi" sono istruzioni one-shot (es. "cambia colore"): vanno
+    // azzerati dopo ogni generazione, altrimenti si trascinano sulla successiva
+    // (es. un capo rosso che diventa blu perche il ritocco era rimasto scritto).
+    setTweaks(EMPTY_TWEAKS);
     router.push("/generating");
   };
 
