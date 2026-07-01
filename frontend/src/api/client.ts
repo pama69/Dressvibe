@@ -129,6 +129,9 @@ export const api = {
     gen_id?: string,
     add_price_tags?: boolean,
     accessories?: { category: string; image_base64: string }[],
+    // Guided "ritocchi" overrides (tweak_remove, tweak_color, …) — only the
+    // keys with content are present; forwarded straight to the backend.
+    tweaks?: Record<string, string | undefined>,
   ) =>
     request<{ image_base64: string; image_index?: number | null }>("/studio/edit", {
       method: "POST",
@@ -141,6 +144,7 @@ export const api = {
         // backend treats `undefined` / `null` as "no accessories" and we
         // want to keep the payload small for the common case.
         accessories: accessories && accessories.length > 0 ? accessories : undefined,
+        ...(tweaks || {}),
       },
       timeoutMs: 90000,
     }),

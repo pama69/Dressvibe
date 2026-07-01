@@ -24,6 +24,7 @@ import VideoCard from "@/src/components/VideoCard";
 import InstagramShareSheet from "@/src/components/InstagramShareSheet";
 import PublishSheet, { type PublishChannel } from "@/src/components/PublishSheet";
 import AccessoryPicker from "@/src/components/AccessoryPicker";
+import PromptTweaks, { EMPTY_TWEAKS, hasTweaks, tweaksToPayload, type Tweaks } from "@/src/components/PromptTweaks";
 import { shareToInstagram, shareGeneric } from "@/src/utils/share";
 import { saveImageToGallery, saveVideoToGallery } from "@/src/utils/gallery";
 import { useNotify } from "@/src/contexts/ConfirmContext";
@@ -86,6 +87,9 @@ export default function Studio() {
   const [busy, setBusy] = useState(false);
   const [edited, setEdited] = useState(false);
   const [editPrompt, setEditPrompt] = useState("");
+  // Guided "ritocchi" — same component/logic as the Generation screen, reused
+  // to edit an already-generated photo with the identical 5 questions.
+  const [tweaks, setTweaks] = useState<Tweaks>(EMPTY_TWEAKS);
   const [capBusy, setCapBusy] = useState(false);
   const [genTitle, setGenTitle] = useState("");
   const [videoProviders, setVideoProviders] = useState<any[]>([]);
@@ -358,9 +362,14 @@ export default function Studio() {
       // the backend skips the accessory prompt block entirely.
       const accs =
         addAccessories && accessories.length > 0 ? accessories : undefined;
-      const res = await api.studioEdit(image, finalPrompt, id, addPriceTags, accs);
+      const res = await api.studioEdit(
+        image, finalPrompt, id, addPriceTags, accs, tweaksToPayload(tweaks),
+      );
       setImage(res.image_base64);
       setEdited(true);
+      // One-shot overrides: clear the "ritocchi" so they don't silently carry
+      // over to the next edit (same behaviour as the Generation screen).
+      if (hasTweaks(tweaks)) setTweaks(EMPTY_TWEAKS);
       // One-shot: clear the accessory list so the user has to re-attach
       // them on the next edit. The checkbox itself stays on so they can
       // immediately add new ones if they want to iterate.
@@ -402,7 +411,8 @@ export default function Studio() {
     editPrompt.trim() ||
     selectedLookId ||
     addPriceTags ||
-    (addAccessories && accessories.length > 0)
+    (addAccessories && accessories.length > 0) ||
+    hasTweaks(tweaks)
   );
 
   const handleGenerateVideo = async (providerId: string) => {
@@ -918,6 +928,20 @@ export default function Studio() {
               testID="studio-prompt"
               multiline
             />
+
+            {/* Ritocchi guidati — le stesse 5 domande della schermata Genera,
+                riusate qui per correggere la foto già generata. Vengono
+                applicate solo quando l'utente preme "Applica modifica". */}
+            <View style={{ marginTop: 14, gap: 8 }}>
+              <Text style={s.sectionLabel}>
+                🎯 Ritocchi guidati{" "}
+                <Text style={s.lookHint}>{hasTweaks(tweaks) ? "· attivi" : "· facoltativi"}</Text>
+              </Text>
+              <Text style={s.lookHint}>
+                Rispondi solo dove serve: rimuovere qualcosa, cambiare colori, sfondo, posa. Poi premi "Applica modifica".
+              </Text>
+              <PromptTweaks value={tweaks} onChange={setTweaks} testIdScope="studio-tweaks" />
+            </View>
 
             {/* Genera Video — collocato fra la modifica personalizzata
                 e il bottone "Applica modifica" su richiesta dell'utente. */}

@@ -114,11 +114,17 @@ Serie di migliorie UX su Galleria/Genera/Studio (tutte in `frontend/`, pushate s
 - **Fix Telegram nel foglio Pubblica** (`541b229`): `chTg` ora richiede canale personale + termini bot accettati alla versione corrente (combacia con il gate backend `/telegram/publish`); prima il canale di default lo faceva comparire ma la pubblicazione rispondeva "non configurato".
 - **Fix web build** (`d0733d6`): il build web usa l'origin del browser invece dell'hardcoded `dressvibe.app`.
 
-> ⏳ **Rimasto da fare:** setup canali "al volo" dal `PublishSheet` (evitare il rimbalzo a Profilo → Impostazioni); agganciare `PromptTweaks` al flusso di editing dello Studio.
+> ⏳ **Rimasto da fare:** setup canali "al volo" dal `PublishSheet` (evitare il rimbalzo a Profilo → Impostazioni).
+
+### 2026-07-01 — PromptTweaks agganciato allo Studio ✅
+I "ritocchi guidati" ora sono disponibili anche nell'editing dello Studio, con le stesse 5 domande e la stessa logica della schermata Genera.
+- **Backend** [backend/server.py](backend/server.py): `StudioEditRequest` accetta i campi `tweak_remove/color/setting/pose/other`; `studio_edit` compone `compose_user_tweaks_suffix(...)` e lo appende **in fondo** al prompt (dopo accessori/prezzi → massima priorità), condividendo l'helper col flusso di generazione.
+- **Client** [client.ts](frontend/src/api/client.ts): `studioEdit` accetta un parametro opzionale `tweaks` (payload `tweak_*`) e lo inoltra.
+- **Studio** [studio/[id].tsx](frontend/app/(app)/studio/[id].tsx): sezione "🎯 Ritocchi guidati" sotto "Modifica personalizzata" (riusa il componente `PromptTweaks`); i ritocchi abilitano "Applica modifica", vengono inviati con la modifica e **azzerati one-shot** dopo l'edit (come nella generazione).
+- Verifica: `py_compile` backend OK; `tsc --noEmit` sui file toccati OK (restano 3 errori pre-esistenti in `history.tsx`/`index.tsx`, non correlati).
 
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
-- [ ] Agganciare `PromptTweaks` all'editing dello Studio.
 - [ ] Eseguire il deploy su Railway secondo la procedura sopra.
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.
 - [ ] Asset/branding: rimpiazzare immagini `emergentagent.com` ([login.tsx](frontend/app/login.tsx), [generating.tsx](frontend/app/(app)/generating.tsx)), dominio dressvibe.app.

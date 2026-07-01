@@ -221,6 +221,14 @@ class StudioEditRequest(BaseModel):
     provider: Optional[str] = None  # image_edit provider id; None = default
     add_price_tags: bool = False  # if True, append price tag instruction using descriptions from the source generation's garments
     accessories: Optional[List[AccessoryItem]] = None  # optional extra items to wear (shoes/bag/jewelry/etc.) — same UX as on the Generation screen
+    # Optional guided "ritocchi" (same PromptTweaks component as the Generation
+    # screen). Each maps to a strong, high-priority override appended at the very
+    # end of the edit prompt via compose_user_tweaks_suffix.
+    tweak_remove: Optional[str] = None   # "Devo togliere qualcosa?"
+    tweak_color: Optional[str] = None    # "Devo cambiare qualche colore?"
+    tweak_setting: Optional[str] = None  # "Devo cambiare lo sfondo o l'ambiente?"
+    tweak_pose: Optional[str] = None     # "Devo cambiare posa o espressione?"
+    tweak_other: Optional[str] = None    # "Altro da sistemare?"
 
 
 class VideoGenerateRequest(BaseModel):
@@ -1858,6 +1866,15 @@ async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] =
                 accessory_count += 1
         if accessory_count > 0:
             prompt += _compose_accessories_suffix(payload.accessories, num_garments=1)
+    # Guided "ritocchi" go LAST so they carry the highest priority — same
+    # override block used by the generation flow.
+    prompt += compose_user_tweaks_suffix(
+        payload.tweak_remove,
+        payload.tweak_color,
+        payload.tweak_setting,
+        payload.tweak_pose,
+        payload.tweak_other,
+    )
     result = await generate_single_image(prompt, refs, session_id)
     if not result:
         raise HTTPException(status_code=502, detail="Modifica non riuscita, riprova")
