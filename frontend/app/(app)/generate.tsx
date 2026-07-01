@@ -29,6 +29,7 @@ import {
 import { genStore, type AccessoryItem } from "@/src/state/genStore";
 import { presetSelectionStore } from "@/src/state/presetSelection";
 import AccessoryPicker from "@/src/components/AccessoryPicker";
+import PromptTweaks, { EMPTY_TWEAKS, hasTweaks, tweaksToPayload, type Tweaks } from "@/src/components/PromptTweaks";
 
 // Aesthetic modifiers shown as a 5-button toggle row in Step 4 (Look).
 // IDs must match the LOOK_STYLES_PROMPTS dict on the backend (server.py).
@@ -111,6 +112,8 @@ export default function Generate() {
   // addendum on the backend (see ACCESSORY_CAT_INSTRUCTION in server.py).
   const [addAccessories, setAddAccessories] = useState(false);
   const [accessories, setAccessories] = useState<AccessoryItem[]>([]);
+  // Guided per-generation "ritocchi" (togli / cambia colore / sfondo / posa / altro)
+  const [tweaks, setTweaks] = useState<Tweaks>(EMPTY_TWEAKS);
   const [providers, setProviders] = useState<any[]>([]);
   const [aiProvider, setAiProvider] = useState<string>("gemini_nano_banana");
   const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
@@ -218,6 +221,8 @@ export default function Generate() {
       model_preset_id: presetId || undefined,
       model_preset_name: presetName || undefined,
       model_preset_thumb: presetThumb || undefined,
+      // Guided prompt overrides — only sent when the shop owner filled something.
+      ...tweaksToPayload(tweaks),
     });
     router.push("/generating");
   };
@@ -508,6 +513,18 @@ export default function Generate() {
               testIdScope="acc-gen"
             />
           ) : null}
+        </View>
+
+        {/* Step — Ritocchi (guided prompt overrides) */}
+        <View style={styles.step}>
+          <View style={styles.stepHead}>
+            <Text style={styles.stepLabel}>Ritocchi</Text>
+            <Text style={styles.stepHint}>{hasTweaks(tweaks) ? "attivi" : "facoltativo"}</Text>
+          </View>
+          <Text style={styles.lookHint}>
+            Rispondi solo se serve. Lascia vuoto ciò che va già bene.
+          </Text>
+          <PromptTweaks value={tweaks} onChange={setTweaks} testIdScope="gen-tweaks" />
         </View>
 
         {/* Step 5 — Variations */}

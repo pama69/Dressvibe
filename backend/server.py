@@ -193,6 +193,14 @@ class GenerationCreate(BaseModel):
     add_price_tags: bool = False  # opt-in: when True, garment "Descrizione e prezzi" names are used to overlay price tags in the photo
     accessories: Optional[List[AccessoryItem]] = None  # optional extra items to wear (shoes/bag/jewelry/hat/glasses/belt/scarf)
     model_preset_id: Optional[str] = None  # when set, forces a specific pre-generated face (locks ethnicity/body/age to preset defaults)
+    # Optional per-generation "ritocchi" written by the shop owner as answers to
+    # guided questions (see PromptTweaks on the frontend). Each maps to a strong,
+    # high-priority override directive appended at the very end of the prompt.
+    tweak_remove: Optional[str] = None   # "Devo togliere qualcosa?"
+    tweak_color: Optional[str] = None    # "Devo cambiare qualche colore?"
+    tweak_setting: Optional[str] = None  # "Devo cambiare lo sfondo o l'ambiente?"
+    tweak_pose: Optional[str] = None     # "Devo cambiare posa o espressione?"
+    tweak_other: Optional[str] = None    # "Altro da sistemare?"
 
 
 class Generation(BaseModel):
@@ -907,6 +915,8 @@ def build_outfit_prompt(
         f"{_compose_accessories_suffix(p.accessories, num_garments)}"
         f"{_compose_price_tags_suffix(price_descriptions)}"
         f"{_compose_look_styles_suffix(p.look_styles)}"
+        # User "ritocchi" overrides go LAST so they carry the most weight.
+        f"{compose_user_tweaks_suffix(p.tweak_remove, p.tweak_color, p.tweak_setting, p.tweak_pose, p.tweak_other)}"
     )
 
 
@@ -954,6 +964,57 @@ def _compose_price_tags_suffix(descriptions: Optional[List[str]]) -> str:
         f"or intrusive: they should cover at most ~6-8% of the photo width each. "
         f"Use a clean rectangular shape with subtle rounded corners, no logos, no watermarks, no extra graphics. "
         f"Position the tags so they do NOT cover the model's face, hands, or the key parts of the outfit."
+    )
+
+
+def _clean_tweak(value: Optional[str], limit: int = 200) -> str:
+    """Sanitise a free-text 'ritocco' answer: trim, collapse whitespace and
+    clamp length so an oversized paste can't blow up or hijack the prompt."""
+    if not value:
+        return ""
+    s = " ".join(str(value).split()).strip()
+    return s[:limit]
+
+
+def compose_user_tweaks_suffix(
+    remove: Optional[str] = None,
+    color: Optional[str] = None,
+    setting: Optional[str] = None,
+    pose: Optional[str] = None,
+    other: Optional[str] = None,
+) -> str:
+    """Turn the guided 'ritocchi' answers into a strong, high-priority override
+    block appended at the very END of the prompt (where instructions weigh most).
+
+    Shared by the generation flow and the Studio edit flow so both interpret the
+    same questions identically. Returns '' when the shop owner left them empty.
+    """
+    remove = _clean_tweak(remove)
+    color = _clean_tweak(color)
+    setting = _clean_tweak(setting)
+    pose = _clean_tweak(pose)
+    other = _clean_tweak(other)
+
+    lines: List[str] = []
+    if remove:
+        lines.append(f"- REMOVE / do NOT show these elements: {remove}.")
+    if color:
+        lines.append(f"- CHANGE COLORS as requested: {color}.")
+    if setting:
+        lines.append(f"- CHANGE the setting/background/environment to: {setting}.")
+    if pose:
+        lines.append(f"- CHANGE the model's pose/expression/framing: {pose}.")
+    if other:
+        lines.append(f"- ALSO apply this adjustment: {other}.")
+    if not lines:
+        return ""
+
+    body = " ".join(lines)
+    return (
+        " IMPORTANT USER OVERRIDES (written by the shop owner, HIGHEST PRIORITY — "
+        "you MUST apply them even if they contradict the default instructions above, "
+        "e.g. if asked to remove the shoes then do not add any footwear): "
+        f"{body}"
     )
 
 

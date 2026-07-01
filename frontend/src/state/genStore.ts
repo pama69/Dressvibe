@@ -32,6 +32,13 @@ type GenParams = {
   model_preset_name?: string | null;
   /** Display-only thumb (base64 JPEG, no prefix) for the selected preset. */
   model_preset_thumb?: string | null;
+  /** Guided per-generation "ritocchi" — free-text answers mapped to strong
+   *  override directives on the backend (see PromptTweaks + server.py). */
+  tweak_remove?: string;
+  tweak_color?: string;
+  tweak_setting?: string;
+  tweak_pose?: string;
+  tweak_other?: string;
 };
 
 let _params: GenParams | null = null;
