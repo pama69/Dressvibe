@@ -3717,9 +3717,30 @@ async def debug_garments_by_email(email: str):
 ZERNIO_API_KEY = os.environ.get("ZERNIO_API_KEY", "").strip()
 ZERNIO_BASE = "https://zernio.com/api/v1"
 
+# ⚠️ MULTI-TENANCY GUARD.
+# The Zernio integration currently uses a SINGLE global API key = ONE shared
+# workspace (the owner's Instagram/Facebook). It has NO per-user account
+# isolation: without this guard, ANY registered user would publish to the
+# owner's social accounts. Until real per-user Zernio profiles/keys are built,
+# Zernio (status/connect/publish) is restricted to an allowlist of owner
+# emails. Default includes the current owner so protection is immediate even
+# before setting the env var on Railway; override with ZERNIO_OWNER_EMAILS
+# (comma-separated). Empty allowlist ⇒ Zernio disabled for everyone.
+ZERNIO_OWNER_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("ZERNIO_OWNER_EMAILS", "pama69@gmail.com").split(",")
+    if e.strip()
+}
+
 
 def _zernio_enabled() -> bool:
     return bool(ZERNIO_API_KEY)
+
+
+def _is_zernio_owner(user: dict) -> bool:
+    """Only the owner account(s) may use the shared Zernio workspace."""
+    email = (user.get("email") or "").strip().lower()
+    return bool(email) and email in ZERNIO_OWNER_EMAILS
 
 
 def _zernio_headers() -> dict:
@@ -3762,8 +3783,11 @@ async def zernio_status(authorization: Optional[str] = Header(None)):
     """Tell the client whether Zernio is configured server-side and which
     accounts the user (or our owner) currently has connected. The response
     is tailored for the frontend's "Pubblicazione Social" card."""
-    await get_current_user(authorization)
-    if not _zernio_enabled():
+    user = await get_current_user(authorization)
+    # Multi-tenancy guard: only the owner account can see/use the shared Zernio
+    # workspace. Everyone else gets "not configured" so IG/FB never appear as
+    # available in their publish sheet.
+    if not _zernio_enabled() or not _is_zernio_owner(user):
         return {"configured": False, "accounts": [], "platforms": {}}
     try:
         async with httpx.AsyncClient(timeout=15) as http:
@@ -3805,9 +3829,11 @@ async def zernio_connect_url(
     """Return Zernio's hosted OAuth URL so the frontend can open it in the
     system browser. After the OAuth dance the account appears in
     `/zernio/status`."""
-    await get_current_user(authorization)
+    user = await get_current_user(authorization)
     if not _zernio_enabled():
         raise HTTPException(503, "Zernio non configurato")
+    if not _is_zernio_owner(user):
+        raise HTTPException(403, "Pubblicazione automatica IG/FB non disponibile per questo account.")
     if platform not in ("instagram", "facebook"):
         raise HTTPException(400, "Piattaforma non supportata (per ora: instagram, facebook)")
     profile_id = await _zernio_default_profile_id()
@@ -3854,6 +3880,10 @@ async def zernio_publish(
     user = await get_current_user(authorization)
     if not _zernio_enabled():
         raise HTTPException(503, "Zernio non configurato")
+    # Multi-tenancy guard: block anyone but the owner from posting to the shared
+    # Instagram/Facebook workspace.
+    if not _is_zernio_owner(user):
+        raise HTTPException(403, "Pubblicazione automatica IG/FB non disponibile per questo account.")
     valid = [p for p in payload.platforms if p in ("instagram", "facebook")]
     if not valid:
         raise HTTPException(400, "Indica almeno una piattaforma (instagram/facebook)")
