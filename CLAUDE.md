@@ -143,9 +143,16 @@ Il pulsante indietro in [results/[id].tsx](frontend/app/(app)/results/[id].tsx) 
 ### 2026-07-02 — CTA "Carica Altro" al posto del "+" in header (Galleria) ✅
 Il pulsante "+" in alto a destra nella Galleria [index.tsx](frontend/app/(app)/index.tsx) era poco visibile (piccolo, in un angolo, vicino alla campanella notifiche). Rimosso e sostituito con una barra fissa **"Carica Altro"** sopra la tab bar (icona + testo, stessa posizione/ombra della barra azioni già usata in `history.tsx`), mostrata solo quando la galleria ha già almeno un capo — la schermata vuota mantiene il suo CTA esistente "+ Carica capo". Rimossi gli stili `uploadFab`/`fabPlus` non più usati; riattivato e ristilizzato `uploadFabBig` (era dead code da una versione precedente).
 
+### 2026-07-02 — Distacco asset da Emergent (indipendenza completa) ✅
+Ultimo legame runtime con Emergent rimosso: le 2 immagini ancora hot-linkate dalla CDN `static.prod-images.emergentagent.com` (sfondo login + aura generazione) sono state **scaricate in locale** in [frontend/assets/images/](frontend/assets/images/) (`login-hero.png`, `generating-aura.png`) e referenziate via `require`.
+- [login.tsx](frontend/app/login.tsx): `HERO_BG` ora `require("@/assets/images/login-hero.png")` (source diretta, non più `{uri}`).
+- [generating.tsx](frontend/app/(app)/generating.tsx): `MAGIC_AURA` ora `require("@/assets/images/generating-aura.png")`.
+- [server.py](backend/server.py): pulito il log fuorviante `will try Emergent fallback once` (il fallback non esiste più).
+- **Verifica distacco:** nessuna env var, chiamata HTTP o asset runtime punta più a Emergent. Backend/LLM/auth/deploy/DB interamente su Railway + Atlas + Gemini. Restano solo riferimenti in **test** (`backend_test_*.py`, `tests/`) e **docs** (`design_guidelines.json`, `test_reports/`), non in produzione.
+- **→ Emergent può essere disattivato.** Unico check consigliato prima di spegnerlo: aprire login e schermata di generazione e verificare che le immagini (ora locali) si vedano.
+
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
-- [ ] Eseguire il deploy su Railway secondo la procedura sopra.
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.
-- [ ] Asset/branding: rimpiazzare immagini `emergentagent.com` ([login.tsx](frontend/app/login.tsx), [generating.tsx](frontend/app/(app)/generating.tsx)), dominio dressvibe.app.
 - [ ] Pulizia stili inutilizzati in `login.tsx` (emailBtn/divider*).
+- [ ] (Facoltativo) Ripulire i riferimenti al vecchio URL preview Emergent nei file di test (`backend_test_*.py`, `tests/conftest.py`).
