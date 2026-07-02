@@ -140,6 +140,9 @@ Prima, i video generati nello Studio avevano un flusso di pubblicazione "proprie
 ### 2026-07-02 — Fix "indietro" da Risultati (tornava al menu invece che a Storia) ✅
 Il pulsante indietro in [results/[id].tsx](frontend/app/(app)/results/[id].tsx) faceva `router.replace("/(app)")` **fisso**, ignorando da dove si arrivava: da Storia (`history.tsx`) tornava sempre al menu principale invece che alla lista Storia. Sostituito con `router.canGoBack() ? router.back() : router.replace("/(app)")`, che fa il "pop" reale dello stack di navigazione (torna a Storia se si arriva da lì, o al flusso Genera se si arriva da una generazione appena creata), con fallback al menu solo se non c'è history da cui tornare.
 
+### 2026-07-02 — CTA "Carica Altro" al posto del "+" in header (Galleria) ✅
+Il pulsante "+" in alto a destra nella Galleria [index.tsx](frontend/app/(app)/index.tsx) era poco visibile (piccolo, in un angolo, vicino alla campanella notifiche). Rimosso e sostituito con una barra fissa **"Carica Altro"** sopra la tab bar (icona + testo, stessa posizione/ombra della barra azioni già usata in `history.tsx`), mostrata solo quando la galleria ha già almeno un capo — la schermata vuota mantiene il suo CTA esistente "+ Carica capo". Rimossi gli stili `uploadFab`/`fabPlus` non più usati; riattivato e ristilizzato `uploadFabBig` (era dead code da una versione precedente).
+
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] Eseguire il deploy su Railway secondo la procedura sopra.

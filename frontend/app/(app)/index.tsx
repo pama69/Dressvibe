@@ -146,16 +146,6 @@ export default function Galleria() {
             {user?.name?.split(" ")[0] || "Atelier"}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", gap: 10, alignItems: "center", marginRight: 56 }}>
-          <TouchableOpacity
-            style={styles.uploadFab}
-            onPress={() => router.push("/upload")}
-            testID="upload-fab"
-            activeOpacity={0.8}
-          >
-            <Text style={styles.fabPlus}>＋</Text>
-          </TouchableOpacity>
-        </View>
       </View>
 
       <View style={styles.section}>
@@ -247,7 +237,21 @@ export default function Galleria() {
         />
       )}
 
-      {/* "Carica un capo" CTA removed per user request — already in header (+) */}
+      {/* CTA "Carica Altro" — sostituisce il vecchio "+" nell'header, ora più
+          visibile: barra fissa sopra la tab bar, mostrata solo quando la
+          galleria ha già almeno un capo (la schermata vuota ha già il suo
+          CTA "+ Carica capo"). */}
+      {!loading && items.length > 0 ? (
+        <TouchableOpacity
+          onPress={() => router.push("/upload")}
+          style={styles.uploadFabBig}
+          testID="upload-fab-big"
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add" size={18} color={theme.colors.primaryFg} />
+          <Text style={styles.uploadFabBigText}>Carica Altro</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Welcome splash — minimal black overlay with the animated DressVibe
           logo. Auto-fades after ~1.6s and reveals the gallery. No buttons. */}
@@ -320,14 +324,6 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
     marginTop: 4,
   },
-  uploadFab: {
-    backgroundColor: theme.colors.primary,
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  fabPlus: { color: theme.colors.primaryFg, fontSize: 26, fontWeight: "300", lineHeight: 30, marginTop: -2 },
   bellEmoji: { fontSize: 22, lineHeight: 26 },
   bell: {
     width: 44, height: 44,
@@ -419,13 +415,21 @@ const styles = StyleSheet.create({
   generateCtaText: { color: theme.colors.text, fontSize: 14, letterSpacing: 0.5 },
   uploadFabBig: {
     position: "absolute",
-    bottom: 96,
+    bottom: 90,
     left: 24,
     right: 24,
+    flexDirection: "row",
+    gap: 8,
     backgroundColor: theme.colors.primary,
-    paddingVertical: 18,
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
   uploadFabBigText: {
     color: theme.colors.primaryFg,
