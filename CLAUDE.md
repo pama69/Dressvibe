@@ -123,6 +123,14 @@ I "ritocchi guidati" ora sono disponibili anche nell'editing dello Studio, con l
 - **Studio** [studio/[id].tsx](frontend/app/(app)/studio/[id].tsx): sezione "🎯 Ritocchi guidati" sotto "Modifica personalizzata" (riusa il componente `PromptTweaks`); i ritocchi abilitano "Applica modifica", vengono inviati con la modifica e **azzerati one-shot** dopo l'edit (come nella generazione).
 - Verifica: `py_compile` backend OK; `tsc --noEmit` sui file toccati OK (restano 3 errori pre-esistenti in `history.tsx`/`index.tsx`, non correlati).
 
+### 2026-07-02 — Pubblicazione video unificata col flow foto ✅
+Prima, i video generati nello Studio avevano un flusso di pubblicazione "proprietario": una riga fissa di 3 pulsanti (WhatsApp/Telegram/Instagram) sulla `VideoCard`, sempre visibili anche quando il canale non era configurato (a differenza delle foto, dove il `PublishSheet` mostra solo i canali realmente pronti). Nella schermata Storia → Risultati, i video non avevano **nessun** modo di pubblicare: solo Studio/Salva/Elimina.
+- **`VideoCard`** [VideoCard.tsx](frontend/src/components/VideoCard.tsx): rimossi i prop `onShareInstagram/onShareWhatsApp/onPublishTelegram/publishing*/onShare` e la riga a 3 pulsanti; sostituiti da un unico prop `onPublish` + `publishing`, stesso trattamento visivo del CTA "Pubblica" delle foto.
+- **`PublishSheet`** [PublishSheet.tsx](frontend/src/components/PublishSheet.tsx): aggiunto `subtitle` opzionale per distinguere "questo scatto" da "questo video" nello stesso foglio.
+- **Studio** [studio/[id].tsx](frontend/app/(app)/studio/[id].tsx): nuovo stato `videoPublishTarget`; nuova funzione `videoPublishChannels(video)` (parallela a `publishChannels`) che riusa `handlePublishVideoTelegram`/`shareVideoToWhatsApp`/l'`InstagramShareSheet` esistenti, filtrati per `chTg`/`chWa` come le foto. Instagram resta sempre manuale per i video (Zernio, l'auto-publish IG/FB, supporta solo foto lato backend) — niente Facebook per i video, coerente col principio "mostra solo i canali che funzionano davvero". Il pulsante "Pubblica" su ogni `VideoCard` apre lo stesso `PublishSheet` scoping sul video; nuovo parametro URL `publishVideoId` (parallelo a `focus=publish`) apre il foglio automaticamente arrivando da Risultati.
+- **Risultati** [results/[id].tsx](frontend/app/(app)/results/[id].tsx): aggiunto `onPublish` sulla `VideoCard` → naviga in Studio con `publishVideoId`, stesso pattern del pulsante "Pubblica" già presente sulle foto.
+- Verifica: `py_compile` backend OK (nessuna modifica lato backend per questo task); `tsc --noEmit` sui file toccati OK (stessi 3 errori pre-esistenti non correlati).
+
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] Eseguire il deploy su Railway secondo la procedura sopra.

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Platform, Linking, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { VideoView, useVideoPlayer } from "expo-video";
 import * as Clipboard from "expo-clipboard";
@@ -11,17 +11,13 @@ type Props = {
   height: number;
   expired?: boolean;
   onDelete?: () => void;
-  onShareInstagram?: () => void;
-  onShareWhatsApp?: () => void;
-  onPublishTelegram?: () => void;
-  publishingTelegram?: boolean;
-  publishingWhatsApp?: boolean;
+  /** Opens the unified publish sheet (same "Pubblica" flow as photos) scoped
+   *  to this video — see PublishSheet. */
+  onPublish?: () => void;
+  publishing?: boolean;
   onSaveToGallery?: () => Promise<void> | void;
   onOpenStudio?: () => void;
   showActions?: boolean;
-  // Legacy alias — some screens still pass `onShare` (Instagram share). Keep
-  // it for backward compatibility.
-  onShare?: () => void;
 };
 
 export default function VideoCard({
@@ -30,15 +26,11 @@ export default function VideoCard({
   height,
   expired,
   onDelete,
-  onShareInstagram,
-  onShareWhatsApp,
-  onPublishTelegram,
-  publishingTelegram,
-  publishingWhatsApp,
+  onPublish,
+  publishing,
   onSaveToGallery,
   onOpenStudio,
   showActions = true,
-  onShare,
 }: Props) {
   const player = useVideoPlayer(url, (p) => {
     p.loop = true;
@@ -51,9 +43,6 @@ export default function VideoCard({
       try { player.pause(); } catch {}
     };
   }, [player]);
-
-  // Backward compat: if only `onShare` (legacy) was passed, treat it as IG.
-  const igHandler = onShareInstagram || onShare;
 
   const handleCopyLink = async () => {
     try { await Clipboard.setStringAsync(url); } catch {}
@@ -99,49 +88,26 @@ export default function VideoCard({
 
       {showActions ? (
         <View style={s.actionsWrap}>
-          {/* PRIMARY: 3 share buttons, equal width, colour-coded */}
-          {(onShareWhatsApp || onPublishTelegram || igHandler) ? (
-            <View style={s.shareRow}>
-              {onShareWhatsApp ? (
-                <TouchableOpacity
-                  onPress={onShareWhatsApp}
-                  disabled={publishingWhatsApp}
-                  style={[s.shareBtn, s.waBtn, publishingWhatsApp && s.busy]}
-                  testID="video-share-wa"
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
-                  <Text style={[s.shareLabel, { color: "#25D366" }]}>
-                    {publishingWhatsApp ? "Apro…" : "WhatsApp"}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {onPublishTelegram ? (
-                <TouchableOpacity
-                  onPress={onPublishTelegram}
-                  disabled={publishingTelegram}
-                  style={[s.shareBtn, s.tgBtn, publishingTelegram && s.busy]}
-                  testID="video-publish-tg"
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="paper-plane" size={16} color="#2AABEE" />
-                  <Text style={[s.shareLabel, { color: "#2AABEE" }]}>
-                    {publishingTelegram ? "Invio…" : "Telegram"}
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {igHandler ? (
-                <TouchableOpacity
-                  onPress={igHandler}
-                  style={[s.shareBtn, s.igBtn]}
-                  testID="video-share-ig"
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="logo-instagram" size={18} color="#dd2a7b" />
-                  <Text style={[s.shareLabel, { color: "#dd2a7b" }]}>Instagram</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
+          {/* Unico punto d'ingresso di pubblicazione — stesso "Pubblica" +
+              foglio canali usato per le foto, invece dei 3 pulsanti fissi
+              di prima (che ignoravano se un canale fosse configurato). */}
+          {onPublish ? (
+            <TouchableOpacity
+              onPress={onPublish}
+              disabled={publishing}
+              style={[s.publishBtn, publishing && s.busy]}
+              testID="video-publish"
+              activeOpacity={0.85}
+            >
+              {publishing ? (
+                <ActivityIndicator color={theme.colors.primaryFg} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="paper-plane" size={16} color={theme.colors.primaryFg} />
+                  <Text style={s.publishBtnText}>Pubblica</Text>
+                </>
+              )}
+            </TouchableOpacity>
           ) : null}
 
           {/* SECONDARY: utility chips — only render when at least one is present */}
@@ -207,24 +173,18 @@ const s = StyleSheet.create({
   },
   actionsWrap: { gap: 8 },
 
-  // Primary share row — 3 equal-width buttons, colour-coded
-  shareRow: { flexDirection: "row", gap: 8 },
-  shareBtn: {
-    flex: 1,
+  // Unified "Pubblica" CTA — same visual weight as the photo publish button.
+  publishBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 8,
     paddingVertical: 12,
-    paddingHorizontal: 6,
-    borderWidth: 1,
-    borderRadius: 4,
+    borderRadius: 10,
+    backgroundColor: theme.colors.primary,
     minHeight: 44,
   },
-  shareLabel: { fontSize: 12, fontWeight: "700", letterSpacing: 0.3 },
-  waBtn: { borderColor: "#25D366", backgroundColor: "rgba(37,211,102,0.10)" },
-  tgBtn: { borderColor: "#2AABEE", backgroundColor: "rgba(42,171,238,0.12)" },
-  igBtn: { borderColor: "#dd2a7b", backgroundColor: "rgba(221,42,123,0.10)" },
+  publishBtnText: { color: theme.colors.primaryFg, fontSize: 14, fontWeight: "700", letterSpacing: 0.3 },
 
   // Utility row — smaller chips, neutral colour
   utilRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },

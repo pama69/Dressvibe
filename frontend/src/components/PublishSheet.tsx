@@ -25,10 +25,12 @@ export default function PublishSheet({
   visible,
   onClose,
   channels,
+  subtitle = "Scegli dove postare questo scatto.",
 }: {
   visible: boolean;
   onClose: () => void;
   channels: PublishChannel[];
+  subtitle?: string;
 }) {
   const [lastUsed, setLastUsed] = useState<string | null>(null);
 
@@ -60,7 +62,7 @@ export default function PublishSheet({
         <Pressable style={s.sheet} onPress={() => {}}>
           <View style={s.handle} />
           <Text style={s.title}>📢 Pubblica</Text>
-          <Text style={s.subtitle}>Scegli dove postare questo scatto.</Text>
+          <Text style={s.subtitle}>{subtitle}</Text>
 
           <View style={{ gap: 10, marginTop: 8 }}>
             {ordered.map((c) => (

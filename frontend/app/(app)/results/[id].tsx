@@ -153,6 +153,12 @@ export default function Results() {
                         width={videoTileW}
                         height={videoTileH}
                         onDelete={() => handleDeleteVideo(v.id)}
+                        onPublish={() =>
+                          router.push({
+                            pathname: "/studio/[id]",
+                            params: { id: gen.id, index: String(v.image_index ?? 0), publishVideoId: v.id },
+                          })
+                        }
                         onSaveToGallery={async () => {
                           const url = v.playback_url || v.video_url;
                           if (!url) return;

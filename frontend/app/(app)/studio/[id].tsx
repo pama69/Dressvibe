@@ -69,7 +69,7 @@ const LOOK_PRESETS: { id: string; label: string; emoji: string; prompt: string }
 ];
 
 export default function Studio() {
-  const { id, index, focus } = useLocalSearchParams<{ id: string; index: string; focus?: string }>();
+  const { id, index, focus, publishVideoId } = useLocalSearchParams<{ id: string; index: string; focus?: string; publishVideoId?: string }>();
   const router = useRouter();
   const notify = useNotify();
   const initialIdx = parseInt(index || "0", 10);
@@ -115,8 +115,12 @@ export default function Studio() {
   const [addAccessories, setAddAccessories] = useState(false);
   const [accessories, setAccessories] = useState<AccessoryItem[]>([]);
 
-  // Unified publish sheet (one "Pubblica" entry point).
+  // Unified publish sheet (one "Pubblica" entry point) — shared by photos
+  // AND videos. `videoPublishTarget` is null when publishing the current
+  // photo, or set to the video being published when opened from a
+  // VideoCard's "Pubblica" button.
   const [publishOpen, setPublishOpen] = useState(false);
+  const [videoPublishTarget, setVideoPublishTarget] = useState<any | null>(null);
   // Which channels the shop owner has actually configured. Instagram (manual
   // clipboard flow) and Scarica are always available; the rest depend on setup.
   const [chTg, setChTg] = useState(false);
@@ -158,6 +162,22 @@ export default function Studio() {
       const t = setTimeout(() => setPublishOpen(true), 300);
       return () => clearTimeout(t);
     }, [focus])
+  );
+
+  // Same 2-tap flow, but for a specific video: arrives from the Results grid
+  // with ?publishVideoId=<id>. Waits for `videos` to be loaded (re-fires when
+  // it changes, since it's a useFocusEffect dependency) before matching.
+  useFocusEffect(
+    useCallback(() => {
+      if (!publishVideoId) return;
+      const v = videos.find((vv) => vv.id === publishVideoId);
+      if (!v) return;
+      const t = setTimeout(() => {
+        setVideoPublishTarget(v);
+        setPublishOpen(true);
+      }, 300);
+      return () => clearTimeout(t);
+    }, [publishVideoId, videos])
   );
 
   /** When the user taps the Instagram button we immediately save the active
@@ -441,7 +461,7 @@ export default function Studio() {
             const where = saved.where === "gallery" ? "nella galleria del telefono" : "tra i download";
             notify({
               title: "Video pronto ✅",
-              message: `Video generato e salvato ${where}. Trovi anche le scorciatoie WhatsApp / Telegram / Instagram qui sotto.`,
+              message: `Video generato e salvato ${where}. Trovi anche il pulsante "Pubblica" qui sotto.`,
             });
           } else {
             notify({ title: "Video pronto", message: "Il tuo video è pronto qui sotto. Premi play per vederlo." });
@@ -691,6 +711,23 @@ export default function Studio() {
       ? [{ key: "whatsapp", label: "WhatsApp", hint: "Apre il tuo canale con testo e link pronti", icon: "logo-whatsapp" as const, color: "#25D366", onPress: shareToWhatsApp }]
       : []),
   ];
+
+  /** Same unified sheet, scoped to a specific video. Instagram/Facebook
+   *  auto-publish (Zernio) only supports photos on the backend today, so
+   *  Instagram is always the manual clipboard flow here and Facebook is
+   *  omitted entirely — we only ever show channels that actually work. */
+  const videoPublishChannels = (video: any): PublishChannel[] => {
+    const url = video?.playback_url || video?.video_url;
+    return [
+      { key: "instagram", label: "Instagram", hint: "Salva video + caption, poi apri Instagram", icon: "logo-instagram" as const, color: "#E4405F", onPress: () => setIgSheet({ video: url }) },
+      ...(chTg
+        ? [{ key: "telegram", label: "Telegram", hint: "Pubblica sul canale con pulsante Richiedi info", icon: "paper-plane" as const, color: "#229ED9", onPress: () => handlePublishVideoTelegram(video) }]
+        : []),
+      ...(chWa
+        ? [{ key: "whatsapp", label: "WhatsApp", hint: "Apre il tuo canale con testo e link pronti", icon: "logo-whatsapp" as const, color: "#25D366", onPress: () => shareVideoToWhatsApp(video) }]
+        : []),
+    ];
+  };
 
   /** Unified copywriter: fills the single "Testo del post" (tgDescription)
    * used by every channel. Uses the same AI as the Instagram share sheet
@@ -985,11 +1022,8 @@ export default function Studio() {
                       width={300}
                       height={Math.round(300 * (16 / 9))}
                       onDelete={() => handleDeleteVideo(v.id)}
-                      onPublishTelegram={() => handlePublishVideoTelegram(v)}
-                      publishingTelegram={publishingTgVideoId === v.id}
-                      onShareWhatsApp={() => shareVideoToWhatsApp(v)}
-                      publishingWhatsApp={waVideoId === v.id}
-                      onShareInstagram={() => setIgSheet({ video: v.playback_url || v.video_url })}
+                      onPublish={() => { setVideoPublishTarget(v); setPublishOpen(true); }}
+                      publishing={publishingTgVideoId === v.id || waVideoId === v.id}
                       onSaveToGallery={() => handleSaveVideoToGallery(v)}
                     />
                   ))}
@@ -1094,7 +1128,7 @@ export default function Studio() {
           >
             <View style={{ flexDirection: "row", gap: 10 }}>
               <TouchableOpacity
-                onPress={() => setPublishOpen(true)}
+                onPress={() => { setVideoPublishTarget(null); setPublishOpen(true); }}
                 activeOpacity={0.9}
                 testID="open-publish-sheet"
                 disabled={busy || igFbBusy !== null || waBusy}
@@ -1143,8 +1177,9 @@ export default function Studio() {
       />
       <PublishSheet
         visible={publishOpen}
-        onClose={() => setPublishOpen(false)}
-        channels={publishChannels}
+        onClose={() => { setPublishOpen(false); setVideoPublishTarget(null); }}
+        channels={videoPublishTarget ? videoPublishChannels(videoPublishTarget) : publishChannels}
+        subtitle={videoPublishTarget ? "Scegli dove postare questo video." : "Scegli dove postare questo scatto."}
       />
     </SafeAreaView>
   );
