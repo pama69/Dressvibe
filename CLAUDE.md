@@ -9,6 +9,12 @@ Flusso: Galleria (capi) → AI veste una modella → Storia (immagini generate) 
 
 ---
 
+## Istruzioni operative (Claude)
+
+- ⚠️ **Chiedere SEMPRE autorizzazione prima di ogni `git push`** — sia sul branch di lavoro sia, soprattutto, prima di ogni merge/push su `main` (che è collegato al deploy automatico su Railway). Commit e modifiche in locale non richiedono conferma; il push sì, sempre.
+
+---
+
 ## Dipendenze Emergent da rimuovere
 
 | # | Dipendenza | Dove | Sostituto |
@@ -130,6 +136,9 @@ Prima, i video generati nello Studio avevano un flusso di pubblicazione "proprie
 - **Studio** [studio/[id].tsx](frontend/app/(app)/studio/[id].tsx): nuovo stato `videoPublishTarget`; nuova funzione `videoPublishChannels(video)` (parallela a `publishChannels`) che riusa `handlePublishVideoTelegram`/`shareVideoToWhatsApp`/l'`InstagramShareSheet` esistenti, filtrati per `chTg`/`chWa` come le foto. Instagram resta sempre manuale per i video (Zernio, l'auto-publish IG/FB, supporta solo foto lato backend) — niente Facebook per i video, coerente col principio "mostra solo i canali che funzionano davvero". Il pulsante "Pubblica" su ogni `VideoCard` apre lo stesso `PublishSheet` scoping sul video; nuovo parametro URL `publishVideoId` (parallelo a `focus=publish`) apre il foglio automaticamente arrivando da Risultati.
 - **Risultati** [results/[id].tsx](frontend/app/(app)/results/[id].tsx): aggiunto `onPublish` sulla `VideoCard` → naviga in Studio con `publishVideoId`, stesso pattern del pulsante "Pubblica" già presente sulle foto.
 - Verifica: `py_compile` backend OK (nessuna modifica lato backend per questo task); `tsc --noEmit` sui file toccati OK (stessi 3 errori pre-esistenti non correlati).
+
+### 2026-07-02 — Fix "indietro" da Risultati (tornava al menu invece che a Storia) ✅
+Il pulsante indietro in [results/[id].tsx](frontend/app/(app)/results/[id].tsx) faceva `router.replace("/(app)")` **fisso**, ignorando da dove si arrivava: da Storia (`history.tsx`) tornava sempre al menu principale invece che alla lista Storia. Sostituito con `router.canGoBack() ? router.back() : router.replace("/(app)")`, che fa il "pop" reale dello stack di navigazione (torna a Storia se si arriva da lì, o al flusso Genera se si arriva da una generazione appena creata), con fallback al menu solo se non c'è history da cui tornare.
 
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).

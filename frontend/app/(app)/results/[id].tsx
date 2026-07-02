@@ -109,7 +109,10 @@ export default function Results() {
   return (
     <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.replace("/(app)")} testID="results-back">
+        <TouchableOpacity
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(app)"))}
+          testID="results-back"
+        >
           <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <Text style={s.headerTitle} numberOfLines={1}>{gen?.title || "Risultati"}</Text>
