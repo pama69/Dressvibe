@@ -7,8 +7,8 @@ import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import { genStore } from "@/src/state/genStore";
 
-const MAGIC_AURA =
-  "https://static.prod-images.emergentagent.com/jobs/c1b3d46b-a98d-4423-a9d4-2841a2073b32/images/33ab703b0e70fdfd1677d39ea98e5abb9630c2c54be49fc70ee4e3d4ff3c8e24.png";
+// Asset locale (ex Emergent CDN) — nessuna dipendenza esterna.
+const MAGIC_AURA = require("@/assets/images/generating-aura.png");
 
 const STEPS = [
   "Analisi dei capi…",
@@ -206,7 +206,7 @@ export default function Generating() {
       <LinearGradient colors={["#050505", "#0b0b0b", "#050505"]} style={StyleSheet.absoluteFill} />
 
       <Animated.View style={[s.auraWrap, { transform: [{ rotate: rotateDeg }, { scale }] }]}>
-        <Image source={{ uri: MAGIC_AURA }} style={s.aura} />
+        <Image source={MAGIC_AURA} style={s.aura} />
       </Animated.View>
 
       <View style={s.center}>

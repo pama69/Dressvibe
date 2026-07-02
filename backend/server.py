@@ -1508,7 +1508,7 @@ async def _generate_single_image_raw(prompt: str, reference_images_b64: List[str
         except Exception as e:
             if getattr(e, "_dv_rate_limited", False):
                 rate_limit_hit = True
-                logger.warning("[Gemini-direct] hit rate limit, will try Emergent fallback once")
+                logger.warning("[Gemini-direct] hit rate limit (no fallback: Emergent removed)")
             else:
                 logger.warning(f"[Gemini-direct] failed (non-rate-limit): {str(e)[:200]}")
         if not rate_limit_hit:

@@ -13,15 +13,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 
-// TODO(asset migration): host this hero locally / on dressvibe.app.
-const HERO_BG =
-  "https://static.prod-images.emergentagent.com/jobs/c1b3d46b-a98d-4423-a9d4-2841a2073b32/images/ed6e2d9050a5c6379f9a25571187e3c6ec908017286a2484188d806b5f2598bc.png";
+// Asset locale (ex Emergent CDN) — nessuna dipendenza esterna.
+const HERO_BG = require("@/assets/images/login-hero.png");
 
 export default function Login() {
   const router = useRouter();
 
   return (
-    <ImageBackground source={{ uri: HERO_BG }} style={styles.bg} resizeMode="cover">
+    <ImageBackground source={HERO_BG} style={styles.bg} resizeMode="cover">
       <LinearGradient
         colors={["rgba(5,5,5,0.4)", "rgba(5,5,5,0.85)", "#050505"]}
         style={StyleSheet.absoluteFill}
