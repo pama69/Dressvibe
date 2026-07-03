@@ -3371,6 +3371,11 @@ class UserSettingsUpdate(BaseModel):
     shop_name: Optional[str] = None
     city: Optional[str] = None
     archive_retention_months: Optional[int] = None
+    # Anagrafica negozio (schermata Impostazioni → Profilo)
+    first_name: Optional[str] = None      # nome
+    last_name: Optional[str] = None       # cognome
+    business_name: Optional[str] = None   # nome attività (guida anche le caption)
+    address: Optional[str] = None         # indirizzo
 
 
 def normalize_phone_e164(value: Optional[str]) -> Optional[str]:
@@ -3596,6 +3601,12 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
         "shop_name": s.get("shop_name") or "Frammenti",
         "city": s.get("city") or "Pescara",
         "archive_retention_months": int(s.get("archive_retention_months") or 1),
+        # Anagrafica negozio. business_name usa shop_name come fallback per gli
+        # utenti storici (che avevano solo shop_name).
+        "first_name": s.get("first_name") or "",
+        "last_name": s.get("last_name") or "",
+        "business_name": s.get("business_name") or s.get("shop_name") or "",
+        "address": s.get("address") or "",
     }
 
 
@@ -4133,6 +4144,18 @@ async def update_user_settings(payload: UserSettingsUpdate, authorization: Optio
     if payload.archive_retention_months is not None:
         months = max(1, min(6, int(payload.archive_retention_months)))
         update_doc["archive_retention_months"] = months
+    if payload.first_name is not None:
+        update_doc["first_name"] = payload.first_name.strip()[:60]
+    if payload.last_name is not None:
+        update_doc["last_name"] = payload.last_name.strip()[:60]
+    if payload.address is not None:
+        update_doc["address"] = payload.address.strip()[:200]
+    if payload.business_name is not None:
+        bn = payload.business_name.strip()[:80]
+        update_doc["business_name"] = bn
+        # Il nome attività guida anche le caption (che leggono shop_name):
+        # li teniamo allineati.
+        update_doc["shop_name"] = bn
     await db.user_settings.update_one(
         {"user_id": user["user_id"]},
         {"$set": update_doc},

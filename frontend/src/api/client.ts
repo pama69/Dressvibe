@@ -306,9 +306,13 @@ export const api = {
       shop_name: string;
       city: string;
       archive_retention_months: number;
+      first_name: string;
+      last_name: string;
+      business_name: string;
+      address: string;
     }>("/user-settings"),
-  updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; whatsapp_business_phone?: string; shop_name?: string; city?: string; archive_retention_months?: number }) =>
-    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string; archive_retention_months: number }>(
+  updateUserSettings: (body: { telegram_channel?: string; whatsapp_channel_url?: string; whatsapp_business_phone?: string; shop_name?: string; city?: string; archive_retention_months?: number; first_name?: string; last_name?: string; business_name?: string; address?: string }) =>
+    request<{ telegram_channel: string; telegram_channel_default: string; whatsapp_channel_url: string; whatsapp_business_phone: string; shop_name: string; city: string; archive_retention_months: number; first_name: string; last_name: string; business_name: string; address: string }>(
       "/user-settings",
       { method: "PUT", body }
     ),

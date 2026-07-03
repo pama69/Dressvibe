@@ -6,7 +6,7 @@
  * ?mode=register query param) which keeps the navigation stack shallow.
  *
  *   - login              email + password → calls POST /auth/email/login
- *   - register           email + password + name → POST /auth/email/register
+ *   - register           email + password + conferma → POST /auth/email/register
  *   - verify             6-digit OTP → POST /auth/email/verify
  *   - forgot             email only → POST /auth/email/forgot
  *   - reset              email + OTP + new password → POST /auth/email/reset
@@ -25,6 +25,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { api } from "@/src/api/client";
 import { useAuth } from "@/src/contexts/AuthContext";
@@ -32,6 +33,41 @@ import { useNotify } from "@/src/contexts/ConfirmContext";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 
 type Mode = "login" | "register" | "verify" | "forgot" | "reset";
+
+/** Password input with a temporary "show" eye toggle. */
+function PwInput({
+  value, onChangeText, placeholder, testID,
+}: {
+  value: string;
+  onChangeText: (t: string) => void;
+  placeholder?: string;
+  testID?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <View style={{ position: "relative", justifyContent: "center" }}>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={theme.colors.textMuted}
+        secureTextEntry={!show}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={[s.input, { paddingRight: 48 }]}
+        testID={testID}
+      />
+      <TouchableOpacity
+        onPress={() => setShow((v) => !v)}
+        style={{ position: "absolute", right: 12, padding: 6 }}
+        hitSlop={8}
+        testID={testID ? `${testID}-eye` : undefined}
+      >
+        <Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={20} color={theme.colors.textSecondary} />
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 export default function EmailAuth() {
   const router = useRouter();
@@ -44,16 +80,24 @@ export default function EmailAuth() {
   );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   // ---------- Submit handlers ----------
   const doRegister = async () => {
+    if (password.length < 8) {
+      notify({ title: "Password troppo corta", message: "Usa almeno 8 caratteri." });
+      return;
+    }
+    if (password !== confirmPassword) {
+      notify({ title: "Le password non coincidono", message: "Ricontrolla la password e la conferma." });
+      return;
+    }
     setBusy(true);
     try {
-      const res = await api.emailRegister({ email: email.trim().toLowerCase(), password, name: name.trim() });
+      const res = await api.emailRegister({ email: email.trim().toLowerCase(), password, name: "" });
       // DEV-only fallback: surface the OTP if Resend isn't configured.
       if (res?.dev_otp) {
         notify({ title: "DEV: codice OTP", message: `${res.dev_otp} (Resend non configurato)` });
@@ -188,31 +232,26 @@ export default function EmailAuth() {
             </View>
           )}
 
-          {mode === "register" && (
+          {(mode === "login" || mode === "register") && (
             <View style={s.field}>
-              <Text style={s.label}>Nome (facoltativo)</Text>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="Nome del tuo negozio"
-                placeholderTextColor={theme.colors.textMuted}
-                style={s.input}
-                testID="name-input"
+              <Text style={s.label}>Password</Text>
+              <PwInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="almeno 8 caratteri"
+                testID="password-input"
               />
             </View>
           )}
 
-          {(mode === "login" || mode === "register") && (
+          {mode === "register" && (
             <View style={s.field}>
-              <Text style={s.label}>Password</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="almeno 8 caratteri"
-                placeholderTextColor={theme.colors.textMuted}
-                secureTextEntry
-                style={s.input}
-                testID="password-input"
+              <Text style={s.label}>Conferma password</Text>
+              <PwInput
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="ripeti la password"
+                testID="confirm-password-input"
               />
             </View>
           )}
@@ -242,13 +281,10 @@ export default function EmailAuth() {
           {mode === "reset" && (
             <View style={s.field}>
               <Text style={s.label}>Nuova password</Text>
-              <TextInput
+              <PwInput
                 value={newPassword}
                 onChangeText={setNewPassword}
                 placeholder="almeno 8 caratteri"
-                placeholderTextColor={theme.colors.textMuted}
-                secureTextEntry
-                style={s.input}
                 testID="new-password-input"
               />
             </View>

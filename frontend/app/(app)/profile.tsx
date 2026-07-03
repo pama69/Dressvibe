@@ -131,6 +131,13 @@ export default function Profile() {
   const [waPhoneSaved, setWaPhoneSaved] = useState("");
   const [waPhoneSaving, setWaPhoneSaving] = useState(false);
 
+  // Anagrafica negozio (nome, cognome, nome attività, indirizzo)
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [businessName, setBusinessName] = useState("");
+  const [address, setAddress] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -142,9 +149,38 @@ export default function Profile() {
         setWaPhoneInput(s.whatsapp_business_phone || "");
         setWaPhoneSaved(s.whatsapp_business_phone || "");
         setRetentionMonths(s.archive_retention_months ?? 1);
+        setFirstName(s.first_name || "");
+        setLastName(s.last_name || "");
+        setBusinessName(s.business_name || "");
+        setAddress(s.address || "");
       } catch {}
     })();
   }, []);
+
+  const saveProfile = async () => {
+    if (!businessName.trim()) {
+      Alert.alert("Nome attività richiesto", "Inserisci il nome della tua attività.");
+      return;
+    }
+    setProfileSaving(true);
+    try {
+      const s = await api.updateUserSettings({
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        business_name: businessName.trim(),
+        address: address.trim(),
+      });
+      setFirstName(s.first_name || "");
+      setLastName(s.last_name || "");
+      setBusinessName(s.business_name || "");
+      setAddress(s.address || "");
+      Alert.alert("Dati salvati ✅", "Il profilo della tua attività è stato aggiornato.");
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile salvare i dati");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const saveWaChannel = async () => {
     setWaChannelSaving(true);
@@ -254,7 +290,7 @@ export default function Profile() {
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
         <View style={s.header}>
           <Text style={s.eyebrow}>PROFILO</Text>
-          <Text style={s.title}>{user?.name || "Atelier"}</Text>
+          <Text style={s.title}>{businessName || user?.name || "La tua attività"}</Text>
           <Text style={s.email}>{user?.email}</Text>
         </View>
 
@@ -272,6 +308,56 @@ export default function Profile() {
             <Text style={s.statNum}>{stats?.clients ?? "—"}</Text>
             <Text style={s.statLab}>Clienti</Text>
           </LiquidCard>
+        </View>
+
+        {/* Dati attività */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Dati attività</Text>
+          <Text style={s.sectionSub}>
+            Nome, cognome, nome dell'attività e indirizzo. Il nome attività appare in alto e viene usato nelle didascalie dei post.
+          </Text>
+          <View style={s.form}>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.formLabel}>NOME</Text>
+                <TextInput
+                  value={firstName} onChangeText={setFirstName}
+                  placeholder="Mario" placeholderTextColor={theme.colors.textMuted}
+                  style={s.input} testID="profile-first-name"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.formLabel}>COGNOME</Text>
+                <TextInput
+                  value={lastName} onChangeText={setLastName}
+                  placeholder="Rossi" placeholderTextColor={theme.colors.textMuted}
+                  style={s.input} testID="profile-last-name"
+                />
+              </View>
+            </View>
+            <Text style={s.formLabel}>NOME ATTIVITÀ</Text>
+            <TextInput
+              value={businessName} onChangeText={setBusinessName}
+              placeholder="es. Frammenti Abbigliamento" placeholderTextColor={theme.colors.textMuted}
+              style={s.input} testID="profile-business-name"
+            />
+            <Text style={s.formLabel}>INDIRIZZO</Text>
+            <TextInput
+              value={address} onChangeText={setAddress}
+              placeholder="Via Roma 1, Pescara" placeholderTextColor={theme.colors.textMuted}
+              style={s.input} testID="profile-address"
+            />
+            <TouchableOpacity
+              style={[s.saveBtn, profileSaving && { opacity: 0.6 }]}
+              onPress={saveProfile}
+              disabled={profileSaving}
+              testID="profile-save-btn"
+            >
+              {profileSaving
+                ? <ActivityIndicator color={theme.colors.primaryFg} />
+                : <Text style={s.saveBtnText}>Salva dati attività</Text>}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Clienti virtuali */}
