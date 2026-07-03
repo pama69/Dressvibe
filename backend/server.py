@@ -2823,6 +2823,7 @@ async def telegram_publish(payload: TelegramPublishRequest, request: Request, au
         "file_id": file_id,
         "created_at": datetime.now(timezone.utc),
     })
+    await _record_post_event(user["user_id"])  # streak: pubblicazione Telegram
     return {"ok": True, "channel_message_id": message_id, "token": token, "media_type": media_type}
 
 
@@ -2986,6 +2987,9 @@ async def create_short_link(payload: ShortLinkCreate, request: Request, authoriz
     images = gen.get("images") or []
     if payload.image_index < 0 or payload.image_index >= len(images):
         raise HTTPException(status_code=400, detail="Indice immagine non valido")
+
+    # streak: creare lo short-link è il trigger della condivisione WhatsApp
+    await _record_post_event(user["user_id"])
 
     # Derive the public base URL from the INCOMING request so the link the
     # user copies/pastes to WhatsApp always points at the host that actually
@@ -3688,10 +3692,11 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
 
 @app.get("/api/debug/gemini-image-test", include_in_schema=False)
 async def debug_gemini_image_test(secret: str = ""):
+    raise HTTPException(status_code=404, detail="Not found")
     """Try each model in GEMINI_IMAGE_MODEL_CHAIN with a tiny text->image
     prompt and report which one actually returns an image with this API key.
     Temporary diagnostic — remove after the image-gen config is fixed."""
-    if secret != os.environ.get("DEBUG_ADMIN_SECRET", "dv-migrate-2026"):
+    if secret != os.environ.get("DEBUG_ADMIN_SECRET", ""):
         return {"error": "forbidden"}
     if not _gemini_client:
         return {"error": "no gemini client (GEMINI_API_KEY missing)"}
@@ -3725,6 +3730,7 @@ async def debug_gemini_image_test(secret: str = ""):
 # story is closed.
 @app.get("/api/debug/db-info", include_in_schema=False)
 async def debug_db_info():
+    raise HTTPException(status_code=404, detail="Not found")
     mongo = os.environ.get("MONGO_URL", "")
     # Hide credentials, only keep "atlas/local" flag + host hint
     flag = "atlas" if "mongodb+srv" in mongo else ("local" if "localhost" in mongo else "other")
@@ -3747,6 +3753,7 @@ async def debug_db_info():
 
 @app.get("/api/debug/whoami", include_in_schema=False)
 async def debug_whoami(authorization: Optional[str] = Header(None)):
+    raise HTTPException(status_code=404, detail="Not found")
     """Echo back the user_id resolved from the Bearer token so the deploy
     issue (galleria vuota) can be diagnosed: confirms whether the token in
     use maps to the right user_id with the expected garment count."""
@@ -4479,6 +4486,10 @@ async def startup_db():
     await db.info_requests.create_index("created_at")
     await db.model_presets.create_index("id", unique=True)
     await db.model_presets.create_index([("gender", 1), ("active", 1), ("order", 1)])
+    # Rate-limit dei tentativi auth: TTL su `expires_at` per purgare i bucket
+    # scaduti (altrimenti la collection cresce all'infinito).
+    await db.auth_rate_limits.create_index("bucket", unique=True)
+    await db.auth_rate_limits.create_index("expires_at", expireAfterSeconds=0)
     logger.info("DressVibe API started")
 
     # One-shot thumbnail backfill — generate `thumb_base64` for any garment

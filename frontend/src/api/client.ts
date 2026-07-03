@@ -316,6 +316,15 @@ export const api = {
       "/user-settings",
       { method: "PUT", body }
     ),
+  getStreak: () =>
+    request<{
+      current: number;
+      longest: number;
+      posted_today: boolean;
+      days_idle: number | null;
+      last_post_date: string | null;
+      total_posts: number;
+    }>("/streak"),
   archiveCleanup: () =>
     request<{ deleted: number; garments_deleted: number; generations_deleted: number; months: number }>(
       "/archive/cleanup",

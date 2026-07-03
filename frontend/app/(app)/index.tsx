@@ -30,6 +30,7 @@ type Garment = {
   id: string;
   name: string;
   image_base64: string;
+  thumb_base64?: string;
   category: string;
   price?: number | null;
 };
@@ -95,6 +96,11 @@ export default function Galleria() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSplash]);
 
+  const [streak, setStreak] = useState<{
+    current: number; longest: number; posted_today: boolean; days_idle: number | null;
+  } | null>(null);
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const list = await api.listGarments();
@@ -105,6 +111,10 @@ export default function Galleria() {
       setLoading(false);
       setRefreshing(false);
     }
+    try {
+      const st = await api.getStreak();
+      setStreak(st);
+    } catch {}
   }, []);
 
   useFocusEffect(
@@ -146,7 +156,40 @@ export default function Galleria() {
             {user?.name?.split(" ")[0] || "Atelier"}
           </Text>
         </View>
+        {streak && streak.current > 0 ? (
+          <View style={styles.streakPill} testID="streak-pill">
+            <Text style={styles.streakFlame}>🔥</Text>
+            <View>
+              <Text style={styles.streakNum}>{streak.current}</Text>
+              <Text style={styles.streakLbl}>{streak.current === 1 ? "giorno" : "giorni"}</Text>
+            </View>
+          </View>
+        ) : null}
       </View>
+
+      {/* Nudge: inattività di pubblicazione */}
+      {streak && !streak.posted_today && !nudgeDismissed &&
+       streak.days_idle != null && streak.days_idle >= 2 ? (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => router.push("/(app)/generate")}
+          style={styles.nudge}
+          testID="streak-nudge"
+        >
+          <Text style={styles.nudgeEmoji}>📣</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nudgeTitle}>
+              Sono {streak.days_idle} giorni che non pubblichi!
+            </Text>
+            <Text style={styles.nudgeSub}>
+              La tua vetrina digitale si sta spegnendo. Genera un look e pubblicalo per riaccenderla.
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setNudgeDismissed(true)} hitSlop={10} testID="streak-nudge-dismiss">
+            <Ionicons name="close" size={18} color={theme.colors.textMuted} />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ) : null}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>La tua galleria</Text>
@@ -324,6 +367,25 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
     marginTop: 4,
   },
+  streakPill: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16,
+    borderWidth: 1, borderColor: "rgba(255,150,60,0.5)",
+    backgroundColor: "rgba(255,120,40,0.12)",
+  },
+  streakFlame: { fontSize: 22 },
+  streakNum: { color: theme.colors.text, fontSize: 18, fontWeight: "800", lineHeight: 20 },
+  streakLbl: { color: theme.colors.textSecondary, fontSize: 9, letterSpacing: 1, textTransform: "uppercase" },
+  nudge: {
+    marginHorizontal: 24, marginTop: 6, marginBottom: 2,
+    flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 14, borderRadius: 14,
+    borderWidth: 1, borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.surface,
+  },
+  nudgeEmoji: { fontSize: 24 },
+  nudgeTitle: { color: theme.colors.text, fontSize: 14, fontWeight: "700" },
+  nudgeSub: { color: theme.colors.textSecondary, fontSize: 11, lineHeight: 15, marginTop: 3 },
   bellEmoji: { fontSize: 22, lineHeight: 26 },
   bell: {
     width: 44, height: 44,
