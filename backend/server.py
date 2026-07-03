@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import asyncio
+import hashlib
 from pathlib import Path
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
@@ -323,6 +324,8 @@ import secrets as _secrets
 
 _OTP_TTL = timedelta(minutes=15)
 _OTP_RESEND_COOLDOWN = timedelta(seconds=60)
+_AUTH_WINDOW_SHORT = timedelta(minutes=15)
+_AUTH_WINDOW_LONG = timedelta(hours=1)
 
 
 def _hash_password(p: str) -> str:
@@ -352,6 +355,72 @@ def _is_strong_enough_password(p: str) -> bool:
     # Light-touch: ≥8 chars. We keep MVP friction low — bcrypt cost handles
     # offline brute force, server-side rate limiting handles online.
     return isinstance(p, str) and len(p) >= 8
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return forwarded or (request.client.host if request.client else "unknown")
+
+
+def _rate_limit_bucket(action: str, identifier: str) -> str:
+    digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
+    return f"auth:{action}:{digest}"
+
+
+async def _check_rate_limit(action: str, identifier: str, max_attempts: int, window: timedelta) -> None:
+    now = datetime.now(timezone.utc)
+    bucket = _rate_limit_bucket(action, identifier)
+    doc = await db.auth_rate_limits.find_one({"bucket": bucket}, {"_id": 0})
+    window_start = doc.get("window_start") if doc else None
+    if window_start and window_start.tzinfo is None:
+        window_start = window_start.replace(tzinfo=timezone.utc)
+
+    if not doc or not window_start or now - window_start >= window:
+        await db.auth_rate_limits.update_one(
+            {"bucket": bucket},
+            {"$set": {
+                "bucket": bucket,
+                "action": action,
+                "attempts": 1,
+                "window_start": now,
+                "expires_at": now + window + timedelta(minutes=5),
+            }},
+            upsert=True,
+        )
+        return
+
+    attempts = int(doc.get("attempts") or 0)
+    if attempts >= max_attempts:
+        retry_after = max(1, int((window - (now - window_start)).total_seconds()))
+        raise HTTPException(
+            status_code=429,
+            detail=f"Troppi tentativi. Riprova tra {retry_after // 60 + 1} minuti.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    await db.auth_rate_limits.update_one(
+        {"bucket": bucket},
+        {"$inc": {"attempts": 1}, "$set": {"expires_at": window_start + window + timedelta(minutes=5)}},
+    )
+
+
+async def _check_auth_rate_limits(
+    request: Request,
+    action: str,
+    email: str,
+    max_attempts: int,
+    window: timedelta,
+    ip_max_attempts: Optional[int] = None,
+) -> None:
+    ip = _client_ip(request)
+    await _check_rate_limit(action, f"email:{email}:ip:{ip}", max_attempts, window)
+    if ip_max_attempts:
+        await _check_rate_limit(f"{action}:ip", f"ip:{ip}", ip_max_attempts, window)
+
+
+async def _clear_auth_rate_limit(action: str, request: Request, email: str) -> None:
+    ip = _client_ip(request)
+    await db.auth_rate_limits.delete_one({"bucket": _rate_limit_bucket(action, f"email:{email}:ip:{ip}")})
 
 
 def _send_email_sync(to: str, subject: str, html: str, text: str) -> bool:
@@ -455,8 +524,9 @@ async def _issue_session(user_id: str) -> str:
 
 
 @api_router.post("/auth/email/register")
-async def email_register(payload: _EmailRegisterPayload):
+async def email_register(payload: _EmailRegisterPayload, request: Request):
     email = payload.email.lower().strip()
+    await _check_auth_rate_limits(request, "register", email, 5, _AUTH_WINDOW_LONG, ip_max_attempts=20)
     if not _is_valid_email(email):
         raise HTTPException(status_code=400, detail="Indirizzo email non valido")
     if not _is_strong_enough_password(payload.password):
@@ -502,16 +572,15 @@ async def email_register(payload: _EmailRegisterPayload):
 
 
 @api_router.post("/auth/email/verify")
-async def email_verify(payload: _EmailVerifyPayload):
+async def email_verify(payload: _EmailVerifyPayload, request: Request):
     email = payload.email.lower().strip()
     code = (payload.code or "").strip()
+    await _check_auth_rate_limits(request, "verify", email, 5, _AUTH_WINDOW_SHORT, ip_max_attempts=30)
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Email non registrata")
     if user.get("is_verified"):
-        # Idempotent: produce a fresh session so the client can proceed.
-        token = await _issue_session(user["user_id"])
-        return {"session_token": token, "user": {"user_id": user["user_id"], "email": user["email"], "name": user.get("name"), "picture": user.get("picture")}}
+        raise HTTPException(status_code=409, detail="Account gia verificato. Accedi con email e password.")
     if user.get("verification_code") != code:
         raise HTTPException(status_code=400, detail="Codice non valido")
     expires = user.get("verification_expires_at")
@@ -524,13 +593,15 @@ async def email_verify(payload: _EmailVerifyPayload):
         {"$set": {"is_verified": True, "verified_at": datetime.now(timezone.utc)},
          "$unset": {"verification_code": "", "verification_expires_at": "", "verification_sent_at": ""}},
     )
+    await _clear_auth_rate_limit("verify", request, email)
     token = await _issue_session(user["user_id"])
     return {"session_token": token, "user": {"user_id": user["user_id"], "email": user["email"], "name": user.get("name"), "picture": user.get("picture")}}
 
 
 @api_router.post("/auth/email/login")
-async def email_login(payload: _EmailLoginPayload):
+async def email_login(payload: _EmailLoginPayload, request: Request):
     email = payload.email.lower().strip()
+    await _check_auth_rate_limits(request, "login", email, 8, _AUTH_WINDOW_SHORT, ip_max_attempts=40)
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not user.get("password_hash"):
         raise HTTPException(status_code=401, detail="Email o password non corretti")
@@ -538,13 +609,15 @@ async def email_login(payload: _EmailLoginPayload):
         raise HTTPException(status_code=401, detail="Email o password non corretti")
     if not user.get("is_verified"):
         raise HTTPException(status_code=403, detail="Account non ancora verificato. Controlla la tua email.")
+    await _clear_auth_rate_limit("login", request, email)
     token = await _issue_session(user["user_id"])
     return {"session_token": token, "user": {"user_id": user["user_id"], "email": user["email"], "name": user.get("name"), "picture": user.get("picture")}}
 
 
 @api_router.post("/auth/email/forgot")
-async def email_forgot(payload: _EmailForgotPayload):
+async def email_forgot(payload: _EmailForgotPayload, request: Request):
     email = payload.email.lower().strip()
+    await _check_auth_rate_limits(request, "forgot", email, 5, _AUTH_WINDOW_LONG, ip_max_attempts=20)
     user = await db.users.find_one({"email": email}, {"_id": 0})
     # Do NOT leak whether the email exists.
     if user and user.get("password_hash"):
@@ -568,9 +641,10 @@ async def email_forgot(payload: _EmailForgotPayload):
 
 
 @api_router.post("/auth/email/reset")
-async def email_reset(payload: _EmailResetPayload):
+async def email_reset(payload: _EmailResetPayload, request: Request):
     email = payload.email.lower().strip()
     code = (payload.code or "").strip()
+    await _check_auth_rate_limits(request, "reset", email, 5, _AUTH_WINDOW_SHORT, ip_max_attempts=30)
     if not _is_strong_enough_password(payload.password):
         raise HTTPException(status_code=400, detail="La password deve essere di almeno 8 caratteri")
     user = await db.users.find_one({"email": email}, {"_id": 0})
@@ -588,12 +662,14 @@ async def email_reset(payload: _EmailResetPayload):
                   "updated_at": datetime.now(timezone.utc)},
          "$unset": {"reset_code": "", "reset_expires_at": "", "reset_sent_at": ""}},
     )
+    await _clear_auth_rate_limit("reset", request, email)
     return {"ok": True}
 
 
 @api_router.post("/auth/email/resend-code")
-async def email_resend_code(payload: _EmailResendPayload):
+async def email_resend_code(payload: _EmailResendPayload, request: Request):
     email = payload.email.lower().strip()
+    await _check_auth_rate_limits(request, "resend", email, 5, _AUTH_WINDOW_LONG, ip_max_attempts=20)
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         # Don't leak existence — pretend success.
@@ -3694,6 +3770,7 @@ async def debug_whoami(authorization: Optional[str] = Header(None)):
 
 @app.get("/api/debug/garments-by-email", include_in_schema=False)
 async def debug_garments_by_email(email: str):
+    raise HTTPException(status_code=404, detail="Not found")
     """Public debug endpoint (no auth) that returns the garment count and
     a sample of garment ids for the given email. Used to verify Atlas data
     is correctly visible from the deploy backend."""
@@ -3988,6 +4065,7 @@ async def zernio_publish(
             raise HTTPException(502, f"Zernio publish error: {r.text[:300]}")
         data = r.json() or {}
         post = data.get("post") or data
+        await _record_post_event(user["user_id"])  # streak: pubblicazione IG/FB
         return {
             "ok": True,
             "post_id": post.get("_id") or post.get("id"),
@@ -4164,6 +4242,77 @@ async def update_user_settings(payload: UserSettingsUpdate, authorization: Optio
     return await get_user_settings(authorization)
 
 
+# =================== Posting streak ===================
+# Incentivo a pubblicare con regolarità: un "giorno valido" = almeno una
+# pubblicazione (qualsiasi canale) in quel giorno di calendario (ora di Roma).
+def _parse_ymd(v) -> Optional[datetime]:
+    if not v:
+        return None
+    try:
+        return datetime.strptime(v, "%Y-%m-%d")
+    except Exception:
+        return None
+
+
+async def _record_post_event(user_id: str) -> None:
+    """Aggiorna la streak di pubblicazione. Idempotente nello stesso giorno
+    (più post in un giorno non gonfiano la streak, solo total_posts)."""
+    today = now_rome().date()
+    s = await db.user_settings.find_one(
+        {"user_id": user_id},
+        {"_id": 0, "last_post_date": 1, "streak_current": 1, "streak_longest": 1, "total_posts": 1},
+    ) or {}
+    last_dt = _parse_ymd(s.get("last_post_date"))
+    last = last_dt.date() if last_dt else None
+    cur = int(s.get("streak_current") or 0)
+    longest = int(s.get("streak_longest") or 0)
+    total = int(s.get("total_posts") or 0) + 1
+
+    if last == today:
+        new_cur = cur if cur > 0 else 1
+    elif last is not None and (today - last).days == 1:
+        new_cur = cur + 1
+    else:
+        new_cur = 1
+    new_longest = max(longest, new_cur)
+
+    await db.user_settings.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "user_id": user_id,
+            "last_post_date": today.isoformat(),
+            "streak_current": new_cur,
+            "streak_longest": new_longest,
+            "total_posts": total,
+            "last_post_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+
+
+@api_router.get("/streak")
+async def get_streak(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    s = await db.user_settings.find_one(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "last_post_date": 1, "streak_current": 1, "streak_longest": 1, "total_posts": 1},
+    ) or {}
+    today = now_rome().date()
+    last_dt = _parse_ymd(s.get("last_post_date"))
+    last = last_dt.date() if last_dt else None
+    stored_cur = int(s.get("streak_current") or 0)
+    # La streak "vale" solo se hai postato oggi o ieri; altrimenti è spezzata.
+    current = stored_cur if (last is not None and (today - last).days <= 1) else 0
+    return {
+        "current": current,
+        "longest": int(s.get("streak_longest") or 0),
+        "posted_today": last == today,
+        "days_idle": (today - last).days if last is not None else None,  # None = mai postato
+        "last_post_date": last.isoformat() if last else None,
+        "total_posts": int(s.get("total_posts") or 0),
+    }
+
+
 @api_router.post("/archive/cleanup")
 async def archive_cleanup(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
@@ -4307,6 +4456,8 @@ async def startup_db():
     await db.user_sessions.create_index("session_token", unique=True)
     await db.user_sessions.create_index("user_id")
     await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+    await db.auth_rate_limits.create_index("bucket", unique=True)
+    await db.auth_rate_limits.create_index("expires_at", expireAfterSeconds=0)
     await db.garments.create_index("user_id")
     await db.garments.create_index("id", unique=True)
     await db.generations.create_index("user_id")
