@@ -3916,6 +3916,62 @@ async def zernio_status(authorization: Optional[str] = Header(None)):
     }
 
 
+@api_router.get("/instagram/followers")
+async def instagram_followers(authorization: Optional[str] = Header(None)):
+    """Near-real-time Instagram follower counter con storico.
+
+    Legge il conteggio da Zernio (l'unica connessione IG attuale, owner-only),
+    salva uno snapshot giornaliero e calcola la crescita settimanale. Non è
+    "live" (Meta stessa ha ritardo): è aggiornato a ogni chiamata."""
+    user = await get_current_user(authorization)
+    if not _zernio_enabled() or not _is_zernio_owner(user):
+        return {"connected": False}
+
+    followers: Optional[int] = None
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.get(f"{ZERNIO_BASE}/accounts", headers=_zernio_headers())
+            if r.status_code == 200:
+                for a in ((r.json() or {}).get("accounts") or []):
+                    if a.get("platform") == "instagram" and (a.get("isActive", True) and a.get("enabled", True)):
+                        fc = a.get("followersCount")
+                        if fc is not None:
+                            followers = int(fc)
+                            break
+    except Exception as e:
+        logger.warning(f"[followers] Zernio fetch failed: {e}")
+
+    if followers is None:
+        return {"connected": False}
+
+    uid = user["user_id"]
+    today = now_rome().date()
+    # Snapshot giornaliero (upsert: un valore per giorno).
+    await db.follower_snapshots.update_one(
+        {"user_id": uid, "platform": "instagram", "date": today.isoformat()},
+        {"$set": {
+            "user_id": uid, "platform": "instagram", "date": today.isoformat(),
+            "count": followers, "at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+
+    # Crescita ~7 giorni: snapshot più recente con data <= oggi-7.
+    week_cutoff = (today - timedelta(days=7)).isoformat()
+    prior = await db.follower_snapshots.find(
+        {"user_id": uid, "platform": "instagram", "date": {"$lte": week_cutoff}},
+        {"_id": 0, "count": 1, "date": 1},
+    ).sort("date", -1).limit(1).to_list(1)
+    weekly_delta = (followers - int(prior[0]["count"])) if prior else None
+
+    return {
+        "connected": True,
+        "followers": followers,
+        "weekly_delta": weekly_delta,   # None = storico insufficiente (<7gg)
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @api_router.get("/zernio/connect-url")
 async def zernio_connect_url(
     platform: str,
@@ -4477,6 +4533,7 @@ async def startup_db():
     await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
     await db.auth_rate_limits.create_index("bucket", unique=True)
     await db.auth_rate_limits.create_index("expires_at", expireAfterSeconds=0)
+    await db.follower_snapshots.create_index([("user_id", 1), ("platform", 1), ("date", 1)], unique=True)
     await db.garments.create_index("user_id")
     await db.garments.create_index("id", unique=True)
     await db.generations.create_index("user_id")
@@ -4498,10 +4555,6 @@ async def startup_db():
     await db.info_requests.create_index("created_at")
     await db.model_presets.create_index("id", unique=True)
     await db.model_presets.create_index([("gender", 1), ("active", 1), ("order", 1)])
-    # Rate-limit dei tentativi auth: TTL su `expires_at` per purgare i bucket
-    # scaduti (altrimenti la collection cresce all'infinito).
-    await db.auth_rate_limits.create_index("bucket", unique=True)
-    await db.auth_rate_limits.create_index("expires_at", expireAfterSeconds=0)
     logger.info("DressVibe API started")
 
     # One-shot thumbnail backfill — generate `thumb_base64` for any garment

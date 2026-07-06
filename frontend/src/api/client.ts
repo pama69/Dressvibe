@@ -316,6 +316,13 @@ export const api = {
       "/user-settings",
       { method: "PUT", body }
     ),
+  getInstagramFollowers: () =>
+    request<{
+      connected: boolean;
+      followers?: number;
+      weekly_delta?: number | null;
+      updated_at?: string;
+    }>("/instagram/followers"),
   getStreak: () =>
     request<{
       current: number;

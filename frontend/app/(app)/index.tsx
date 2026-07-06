@@ -100,6 +100,9 @@ export default function Galleria() {
     current: number; longest: number; posted_today: boolean; days_idle: number | null;
   } | null>(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const [followers, setFollowers] = useState<{
+    connected: boolean; followers?: number; weekly_delta?: number | null;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -114,6 +117,10 @@ export default function Galleria() {
     try {
       const st = await api.getStreak();
       setStreak(st);
+    } catch {}
+    try {
+      const f = await api.getInstagramFollowers();
+      setFollowers(f);
     } catch {}
   }, []);
 
@@ -156,15 +163,28 @@ export default function Galleria() {
             {user?.name?.split(" ")[0] || "Atelier"}
           </Text>
         </View>
-        {streak && streak.current > 0 ? (
-          <View style={styles.streakPill} testID="streak-pill">
-            <Text style={styles.streakFlame}>🔥</Text>
-            <View>
-              <Text style={styles.streakNum}>{streak.current}</Text>
-              <Text style={styles.streakLbl}>{streak.current === 1 ? "giorno" : "giorni"}</Text>
+        <View style={{ gap: 8, alignItems: "flex-end" }}>
+          {streak && streak.current > 0 ? (
+            <View style={styles.streakPill} testID="streak-pill">
+              <Text style={styles.streakFlame}>🔥</Text>
+              <View>
+                <Text style={styles.streakNum}>{streak.current}</Text>
+                <Text style={styles.streakLbl}>{streak.current === 1 ? "giorno" : "giorni"}</Text>
+              </View>
             </View>
-          </View>
-        ) : null}
+          ) : null}
+          {followers?.connected && followers.followers != null ? (
+            <View style={styles.followerPill} testID="follower-pill">
+              <Ionicons name="logo-instagram" size={16} color="#dd2a7b" />
+              <Text style={styles.followerNum}>{followers.followers.toLocaleString("it-IT")}</Text>
+              {followers.weekly_delta != null && followers.weekly_delta !== 0 ? (
+                <Text style={[styles.followerDelta, { color: followers.weekly_delta > 0 ? "#22c55e" : theme.colors.error }]}>
+                  {followers.weekly_delta > 0 ? "▲" : "▼"} {Math.abs(followers.weekly_delta)}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
       </View>
 
       {/* Nudge: inattività di pubblicazione */}
@@ -376,6 +396,14 @@ const styles = StyleSheet.create({
   streakFlame: { fontSize: 22 },
   streakNum: { color: theme.colors.text, fontSize: 18, fontWeight: "800", lineHeight: 20 },
   streakLbl: { color: theme.colors.textSecondary, fontSize: 9, letterSpacing: 1, textTransform: "uppercase" },
+  followerPill: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16,
+    borderWidth: 1, borderColor: "rgba(221,42,123,0.45)",
+    backgroundColor: "rgba(221,42,123,0.10)",
+  },
+  followerNum: { color: theme.colors.text, fontSize: 14, fontWeight: "700" },
+  followerDelta: { fontSize: 11, fontWeight: "700" },
   nudge: {
     marginHorizontal: 24, marginTop: 6, marginBottom: 2,
     flexDirection: "row", alignItems: "center", gap: 12,
