@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.bg },
   scroll: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24 },
   eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
-  title: { color: theme.colors.text, fontSize: 30, lineHeight: 34, fontWeight: "300", letterSpacing: -1, marginTop: 6 },
+  title: { color: theme.colors.text, fontFamily: theme.font.display, fontSize: 30, lineHeight: 36, fontWeight: "500", letterSpacing: -0.5, marginTop: 6 },
   step: { marginTop: 28, gap: 12 },
   stepHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   stepLabel: { color: theme.colors.text, fontSize: 12, letterSpacing: 2, textTransform: "uppercase" },

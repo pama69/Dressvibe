@@ -542,7 +542,7 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.bg },
   header: { paddingHorizontal: 24, paddingTop: 16, paddingBottom: 16 },
   eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
-  title: { color: theme.colors.text, fontSize: 28, fontWeight: "300", letterSpacing: -0.5, marginTop: 6 },
+  title: { color: theme.colors.text, fontFamily: theme.font.display, fontSize: 30, fontWeight: "500", letterSpacing: -0.5, marginTop: 6 },
   email: { color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 },
   statsRow: { flexDirection: "row", paddingHorizontal: 24, gap: 10 },
   statCard: {

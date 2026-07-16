@@ -143,7 +143,16 @@ Il pulsante indietro in [results/[id].tsx](frontend/app/(app)/results/[id].tsx) 
 ### 2026-07-02 — CTA "Carica Altro" al posto del "+" in header (Galleria) ✅
 Il pulsante "+" in alto a destra nella Galleria [index.tsx](frontend/app/(app)/index.tsx) era poco visibile (piccolo, in un angolo, vicino alla campanella notifiche). Rimosso e sostituito con una barra fissa **"Carica Altro"** sopra la tab bar (icona + testo, stessa posizione/ombra della barra azioni già usata in `history.tsx`), mostrata solo quando la galleria ha già almeno un capo — la schermata vuota mantiene il suo CTA esistente "+ Carica capo". Rimossi gli stili `uploadFab`/`fabPlus` non più usati; riattivato e ristilizzato `uploadFabBig` (era dead code da una versione precedente).
 
+### 2026-07-16 — Restyling "Noir Atelier" · Fase 1 fondamenta ✅
+Restyling completo dell'app verso un dark **neutro** ed editoriale (mockup approvati su Claude Design, progetto "DressVibe — Noir Atelier"). Fase 1 = fondamenta che re-skinnano tutta l'app perché ogni schermata legge dai token.
+- **Token** [theme.ts](frontend/src/theme.ts): via il viola-navy (`#1a1836`) → nero neutro `#0B0B0F`; superfici "vetro" (`#16161C`/`#1D1D24`), bordi hairline bianchi (9%/18%), testo a contrasto AA (15.8/8.3/4.8:1). Gradiente-firma **Aurora** (violet→rose→amber) riordinando `magic1/2/3` — così `MAGIC_GRADIENT` cambia ovunque è già usato (7 file). Aggiunto token `font.display`/`serif` (Georgia iOS/web, `serif` Android — nessun font file spedito) e raggi più morbidi (`sm` 13, `lg` 22).
+- **Tab bar** [_layout.tsx](frontend/app/(app)/_layout.tsx): dock flottante in vetro scuro; pill attiva col gradiente Aurora (testo scuro leggibile) al posto del viola. Campanella notifiche: da quadrato a pill arrotondata (raggio 16), badge sul colore `error`.
+- **Titoli editoriali serif** su Galleria/Storia/Profilo/Genera/Login (via `theme.font.display`, peso 500) al posto del sans sottile.
+- Verifica: `tsc --noEmit` pulito sui file toccati (restano i 3 errori pre-esistenti non correlati).
+- ⏳ **Fase 2 (da valutare):** rifinitura per-schermata verso il mockup pixel-perfect (tile scure con chip categoria, chip a bordo-gradiente, schermata "Generando" con skeleton) — da fare con l'app in esecuzione per QA visiva.
+
 ### Prossimi step
+- [ ] Restyling Fase 2: rifinitura per-schermata (tile galleria, chip, Generando) con QA visiva sull'app.
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] Eseguire il deploy su Railway secondo la procedura sopra.
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.

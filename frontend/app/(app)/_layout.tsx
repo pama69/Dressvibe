@@ -3,7 +3,7 @@ import { Tabs, Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useNotifications } from "@/src/contexts/NotificationsContext";
-import { theme } from "@/src/theme";
+import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import {
   View,
   Text,
@@ -75,10 +75,7 @@ function CustomTabBar({ state, navigation }: any) {
 
   return (
     <View style={[tb.wrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-      <LinearGradient
-        colors={["#201e44", "#17153a"]}
-        style={tb.bar}
-      >
+      <View style={tb.bar}>
         {TABS.map((tab) => {
           const routeIndex = state.routes.findIndex((r: any) => r.name === tab.name);
           const active = state.index === routeIndex;
@@ -90,13 +87,18 @@ function CustomTabBar({ state, navigation }: any) {
               android_ripple={null}
             >
               {active ? (
-                <LinearGradient
-                  colors={["#3d3a80", "#28265e"]}
-                  style={tb.pillActive}
-                >
-                  <Ionicons name={tab.icon} size={18} color="#c4b5fd" />
-                  <Text style={tb.labelActive}>{tab.label}</Text>
-                </LinearGradient>
+                <View style={tb.pillActive}>
+                  <LinearGradient
+                    colors={MAGIC_GRADIENT}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                  />
+                  <View style={tb.pillActiveInner}>
+                    <Ionicons name={tab.icon} size={18} color="#14060B" />
+                    <Text style={tb.labelActive}>{tab.label}</Text>
+                  </View>
+                </View>
               ) : (
                 <View style={tb.pillInactive}>
                   <Ionicons name={tab.icon} size={18} color={theme.colors.textMuted} />
@@ -106,7 +108,7 @@ function CustomTabBar({ state, navigation }: any) {
             </Pressable>
           );
         })}
-      </LinearGradient>
+      </View>
     </View>
   );
 }
@@ -188,42 +190,44 @@ const tb = StyleSheet.create({
   },
   bar: {
     flexDirection: "row",
-    borderRadius: 20,
+    borderRadius: 24,
     paddingHorizontal: 6,
     paddingVertical: 6,
     gap: 4,
     borderWidth: 1,
-    borderColor: "rgba(180,150,255,0.15)",
-    shadowColor: "#7c3aed",
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 10,
+    borderColor: theme.colors.border,
+    backgroundColor: "#101016",
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
   },
   pill: { flex: 1 },
   pillActive: {
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  pillActiveInner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 5,
-    paddingVertical: 8,
+    paddingVertical: 9,
     paddingHorizontal: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(180,150,255,0.35)",
   },
   pillInactive: {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 8,
+    paddingVertical: 9,
     paddingHorizontal: 6,
     gap: 2,
   },
   labelActive: {
-    color: "#c4b5fd",
+    color: "#14060B",
     fontSize: 11,
-    fontWeight: "600",
+    fontWeight: "700",
     letterSpacing: 0.3,
   },
   labelInactive: {
@@ -238,27 +242,28 @@ const tb = StyleSheet.create({
 const bellStyles = StyleSheet.create({
   btn: {
     position: "absolute",
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
+    backgroundColor: "rgba(16,16,22,0.82)",
   },
-  emoji: { fontSize: 20, lineHeight: 24 },
+  emoji: { fontSize: 19, lineHeight: 23 },
   badge: {
     position: "absolute",
     top: 1,
     right: 1,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "#E11D48",
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: theme.colors.error,
     paddingHorizontal: 3,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: theme.colors.bg,
   },
   badgeText: {

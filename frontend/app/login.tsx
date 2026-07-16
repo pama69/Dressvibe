@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ImageBackground,
-  Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -100,15 +99,16 @@ const styles = StyleSheet.create({
   },
   brand: {
     color: theme.colors.text,
-    fontSize: 38,
-    fontWeight: "300",
-    letterSpacing: -1,
+    fontSize: 40,
+    fontWeight: "500",
+    letterSpacing: -0.5,
     marginTop: 6,
-    fontFamily: Platform.select({ ios: "Cormorant Garamond", default: undefined }),
+    fontFamily: theme.font.display,
   },
   middle: { gap: 16 },
   headline: {
     color: theme.colors.text,
+    fontFamily: theme.font.display,
     fontSize: 44,
     lineHeight: 48,
     fontWeight: "300",

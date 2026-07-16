@@ -319,9 +319,10 @@ const styles = StyleSheet.create({
   eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
   title: {
     color: theme.colors.text,
-    fontSize: 32,
-    fontWeight: "300",
-    letterSpacing: -1,
+    fontFamily: theme.font.display,
+    fontSize: 34,
+    fontWeight: "500",
+    letterSpacing: -0.5,
     marginTop: 4,
   },
   bellEmoji: { fontSize: 22, lineHeight: 26 },

@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between",
   },
   eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
-  title: { color: theme.colors.text, fontSize: 30, fontWeight: "300", letterSpacing: -1, marginTop: 6 },
+  title: { color: theme.colors.text, fontFamily: theme.font.display, fontSize: 32, fontWeight: "500", letterSpacing: -0.5, marginTop: 6 },
   headerActions: { flexDirection: "row", gap: 8, alignItems: "center" },
   actionBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
