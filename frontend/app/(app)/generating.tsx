@@ -1,14 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, Animated, Easing, Image, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
 import { genStore } from "@/src/state/genStore";
-
-const MAGIC_AURA =
-  "https://static.prod-images.emergentagent.com/jobs/c1b3d46b-a98d-4423-a9d4-2841a2073b32/images/33ab703b0e70fdfd1677d39ea98e5abb9630c2c54be49fc70ee4e3d4ff3c8e24.png";
 
 const STEPS = [
   "Analisi dei capi…",
@@ -178,7 +175,7 @@ export default function Generating() {
                   style={StyleSheet.absoluteFill}
                 />
               ) : null}
-              <Ionicons name="refresh" size={16} color={canRetry ? "#fff" : theme.colors.textSecondary} />
+              <Ionicons name="refresh" size={16} color={canRetry ? "#14060B" : theme.colors.textSecondary} />
               <Text style={[s.retryText, !canRetry && s.retryTextDisabled]}>
                 {canRetry ? "Riprova ora" : `Attendere ${secondsLeft}s`}
               </Text>
@@ -203,23 +200,42 @@ export default function Generating() {
 
   return (
     <View style={s.c}>
-      <LinearGradient colors={["#050505", "#0b0b0b", "#050505"]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={["#050505", theme.colors.bg, "#050505"]} style={StyleSheet.absoluteFill} />
 
-      <Animated.View style={[s.auraWrap, { transform: [{ rotate: rotateDeg }, { scale }] }]}>
-        <Image source={{ uri: MAGIC_AURA }} style={s.aura} />
+      {/* Native Aurora glow — replaces the old remote Emergent aura image.
+          A soft rotating gradient halo behind the sparkle bubble. */}
+      <Animated.View style={[s.auraWrap, { opacity: 0.4, transform: [{ rotate: rotateDeg }, { scale }] }]}>
+        <LinearGradient
+          colors={MAGIC_GRADIENT}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={s.aura}
+        />
       </Animated.View>
 
       <View style={s.center}>
-        <View style={s.iconBubble}>
+        <Animated.View style={[s.iconBubble, { transform: [{ scale }] }]}>
           <LinearGradient colors={MAGIC_GRADIENT} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-          <Ionicons name="sparkles" size={28} color="#fff" />
-        </View>
+          <Ionicons name="sparkles" size={28} color="#14060B" />
+        </Animated.View>
 
-        <Text style={s.headline}>Creazione della{"\n"}magia in corso…</Text>
+        <Text style={s.headline}>La modella sta{"\n"}<Text style={s.headlineEm}>indossando i tuoi capi</Text></Text>
         <Text style={s.step} testID="generating-step">{STEPS[step]}</Text>
 
+        {/* Skeleton dei 3 scatti in arrivo (feedback di caricamento) */}
+        <View style={s.skelRow}>
+          {[0, 1, 2].map((i) => (
+            <Animated.View
+              key={i}
+              style={[s.skel, { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.7] }) }]}
+            />
+          ))}
+        </View>
+
         <View style={s.barTrack}>
-          <Animated.View style={[s.bar, { transform: [{ scaleX: pulse }] }]} />
+          <Animated.View style={[s.bar, { transform: [{ scaleX: pulse }] }]}>
+            <LinearGradient colors={MAGIC_GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+          </Animated.View>
         </View>
 
         <Text style={s.tip}>Tempo medio: 20–40 secondi</Text>
@@ -230,23 +246,30 @@ export default function Generating() {
 
 const s = StyleSheet.create({
   c: { flex: 1, backgroundColor: theme.colors.bg, alignItems: "center", justifyContent: "center" },
-  auraWrap: { position: "absolute", width: 520, height: 520, opacity: 0.35 },
-  aura: { width: "100%", height: "100%" },
-  center: { alignItems: "center", gap: 24, paddingHorizontal: 32 },
+  auraWrap: { position: "absolute", width: 420, height: 420 },
+  aura: { width: "100%", height: "100%", borderRadius: 210 },
+  center: { alignItems: "center", gap: 22, paddingHorizontal: 32 },
   iconBubble: {
-    width: 80, height: 80, alignItems: "center", justifyContent: "center", overflow: "hidden",
-    shadowColor: "#E11D48", shadowOpacity: 0.6, shadowRadius: 28, shadowOffset: { width: 0, height: 0 },
+    width: 76, height: 76, borderRadius: 30, alignItems: "center", justifyContent: "center", overflow: "hidden",
+    shadowColor: theme.colors.magic2, shadowOpacity: 0.55, shadowRadius: 30, shadowOffset: { width: 0, height: 10 },
     elevation: 12,
   },
   headline: {
-    color: theme.colors.text, fontSize: 30, lineHeight: 36, fontWeight: "300",
-    textAlign: "center", letterSpacing: -0.8,
+    color: theme.colors.text, fontFamily: theme.font.display, fontSize: 27, lineHeight: 32, fontWeight: "500",
+    textAlign: "center", letterSpacing: -0.4,
   },
-  step: { color: theme.colors.textSecondary, fontSize: 13, letterSpacing: 1.5 },
+  headlineEm: { fontStyle: "italic", color: theme.colors.magic2 },
+  step: { color: theme.colors.textSecondary, fontSize: 12, letterSpacing: 1.5, textTransform: "uppercase" },
+  skelRow: { flexDirection: "row", gap: 12, marginVertical: 2 },
+  skel: {
+    width: 78, height: 104, borderRadius: 16,
+    backgroundColor: theme.colors.surfaceAlt,
+    borderWidth: 1, borderColor: theme.colors.border,
+  },
   barTrack: {
-    width: 220, height: 2, backgroundColor: theme.colors.border, marginTop: 4, overflow: "hidden",
+    width: 220, height: 5, borderRadius: 3, backgroundColor: theme.colors.surfaceAlt, marginTop: 2, overflow: "hidden",
   },
-  bar: { width: "100%", height: 2, backgroundColor: theme.colors.text },
+  bar: { width: "100%", height: 5, borderRadius: 3, overflow: "hidden" },
   tip: { color: theme.colors.textMuted, fontSize: 11, letterSpacing: 1 },
 
   // Error UI
@@ -257,8 +280,8 @@ const s = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   errTitle: {
-    color: theme.colors.text, fontSize: 22, fontWeight: "600",
-    textAlign: "center", letterSpacing: -0.4,
+    color: theme.colors.text, fontFamily: theme.font.display, fontSize: 23, fontWeight: "500",
+    textAlign: "center", letterSpacing: -0.3,
   },
   errMsg: {
     color: theme.colors.textSecondary, fontSize: 14, lineHeight: 20,
@@ -270,10 +293,10 @@ const s = StyleSheet.create({
   actions: { width: "100%", gap: 12, marginTop: 8, maxWidth: 320 },
   retryBtn: {
     paddingVertical: 16, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 10, overflow: "hidden", borderWidth: 1, borderColor: theme.colors.border,
+    gap: 10, overflow: "hidden", borderRadius: 16, borderWidth: 1, borderColor: theme.colors.border,
   },
   retryBtnDisabled: { opacity: 0.6 },
-  retryText: { color: "#fff", fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
+  retryText: { color: "#14060B", fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
   retryTextDisabled: { color: theme.colors.textSecondary },
   cancelBtn: { paddingVertical: 12, alignItems: "center", justifyContent: "center" },
   cancelText: {

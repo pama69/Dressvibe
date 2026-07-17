@@ -151,8 +151,14 @@ Restyling completo dell'app verso un dark **neutro** ed editoriale (mockup appro
 - Verifica: `tsc --noEmit` pulito sui file toccati (restano i 3 errori pre-esistenti non correlati).
 - ⏳ **Fase 2 (da valutare):** rifinitura per-schermata verso il mockup pixel-perfect (tile scure con chip categoria, chip a bordo-gradiente, schermata "Generando" con skeleton) — da fare con l'app in esecuzione per QA visiva.
 
+### 2026-07-16 — Restyling "Noir Atelier" · Fase 2 (Galleria + Generando) ✅
+Rifiniture per-schermata verso il mockup.
+- **Galleria** [index.tsx](frontend/app/(app)/index.tsx): le tile passano da cornice bianca a **tile scure editoriali** — foto edge-to-edge con angoli morbidi (18px) e bordo hairline, **chip categoria** in alto a sinistra (pill in vetro), pulsante elimina in alto a destra, scrim in basso con nome + prezzo.
+- **Generando** [generating.tsx](frontend/app/(app)/generating.tsx): rimosso il **remote aura di Emergent** (`static.prod-images.emergentagent.com` — una delle dipendenze da togliere) → sostituito con un **glow Aurora nativo** (gradiente rotante). Titolo serif editoriale ("La modella sta *indossando i tuoi capi*"), **skeleton dei 3 scatti** in arrivo (feedback di caricamento, regola priorità-1 ui-ux-pro-max), barra progresso col gradiente Aurora, pulsante Riprova arrotondato con testo scuro leggibile sul gradiente.
+- Verifica: `tsc --noEmit` pulito sui file toccati (restano i 3 errori pre-esistenti non correlati).
+
 ### Prossimi step
-- [ ] Restyling Fase 2: rifinitura per-schermata (tile galleria, chip, Generando) con QA visiva sull'app.
+- [ ] Restyling Fase 2 (resto): chip a bordo-gradiente in Genera, rifinitura Studio/Risultati/Profilo — con QA visiva sull'app.
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] Eseguire il deploy su Railway secondo la procedura sopra.
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.

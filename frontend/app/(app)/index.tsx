@@ -210,6 +210,14 @@ export default function Galleria() {
                     }}
                     style={styles.cardImg}
                   />
+                  {/* Category chip (top-left) — hairline glass pill */}
+                  {item.category ? (
+                    <View style={styles.catChip}>
+                      <Text style={styles.catChipText} numberOfLines={1}>
+                        {item.category}
+                      </Text>
+                    </View>
+                  ) : null}
                   <TouchableOpacity
                     onPress={() => handleDelete(item)}
                     style={styles.deleteBtn}
@@ -217,19 +225,20 @@ export default function Galleria() {
                     activeOpacity={0.7}
                     hitSlop={8}
                   >
-                    <Ionicons name="close" size={14} color={theme.colors.text} />
+                    <Ionicons name="close" size={14} color="#fff" />
                   </TouchableOpacity>
-                  <View style={styles.cardOverlay}>
-                    {displayName ? (
-                      <Text style={styles.cardName} numberOfLines={1}>
-                        {displayName}
-                      </Text>
-                    ) : null}
-                    <Text style={styles.cardMeta}>
-                      {item.category}
-                      {item.price ? ` · €${item.price}` : ""}
-                    </Text>
-                  </View>
+                  {(displayName || item.price) ? (
+                    <View style={styles.cardOverlay}>
+                      {displayName ? (
+                        <Text style={styles.cardName} numberOfLines={1}>
+                          {displayName}
+                        </Text>
+                      ) : null}
+                      {item.price ? (
+                        <Text style={styles.cardMeta}>€{item.price}</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
                 </View>
               </TouchableOpacity>
             );
@@ -365,27 +374,38 @@ const styles = StyleSheet.create({
   emptyBtnText: { color: theme.colors.primaryFg, fontWeight: "600", letterSpacing: 0.4 },
   list: { paddingHorizontal: PADDING, paddingBottom: 96 },
   card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    overflow: "visible",
+    borderRadius: 18,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     shadowColor: "#000",
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
   cardInner: {
-    borderRadius: 16,
+    borderRadius: 18,
     overflow: "hidden",
     flex: 1,
-    padding: 6,
-    backgroundColor: "#fff",
   },
-  cardImg: { width: "100%", height: "100%", borderRadius: 10 },
+  cardImg: { width: "100%", height: "100%" },
+  catChip: {
+    position: "absolute", top: 9, left: 9,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.22)",
+    borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4,
+    maxWidth: "70%",
+  },
+  catChipText: {
+    color: "#fff", fontSize: 9, fontWeight: "700",
+    letterSpacing: 1, textTransform: "uppercase",
+  },
   deleteBtn: {
-    position: "absolute", top: 6, right: 6,
+    position: "absolute", top: 8, right: 8,
     width: 26, height: 26, borderRadius: 13,
-    backgroundColor: "rgba(0,0,0,0.65)",
+    backgroundColor: "rgba(0,0,0,0.5)",
     alignItems: "center", justifyContent: "center",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
   },
@@ -394,11 +414,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    padding: 10,
+    paddingHorizontal: 11,
+    paddingTop: 22,
+    paddingBottom: 11,
     backgroundColor: "rgba(0,0,0,0.55)",
   },
-  cardName: { color: theme.colors.text, fontSize: 13, fontWeight: "500" },
-  cardMeta: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 2 },
+  cardName: { color: "#fff", fontSize: 12.5, fontWeight: "600", letterSpacing: 0.2 },
+  cardMeta: { color: "rgba(255,255,255,0.82)", fontSize: 11, marginTop: 2, fontWeight: "600" },
   generateCta: {
     position: "absolute",
     bottom: 96,
