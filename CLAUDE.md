@@ -157,8 +157,12 @@ Rifiniture per-schermata verso il mockup.
 - **Generando** [generating.tsx](frontend/app/(app)/generating.tsx): rimosso il **remote aura di Emergent** (`static.prod-images.emergentagent.com` — una delle dipendenze da togliere) → sostituito con un **glow Aurora nativo** (gradiente rotante). Titolo serif editoriale ("La modella sta *indossando i tuoi capi*"), **skeleton dei 3 scatti** in arrivo (feedback di caricamento, regola priorità-1 ui-ux-pro-max), barra progresso col gradiente Aurora, pulsante Riprova arrotondato con testo scuro leggibile sul gradiente.
 - Verifica: `tsc --noEmit` pulito sui file toccati (restano i 3 errori pre-esistenti non correlati).
 
+### 2026-07-16 — Restyling "Noir Atelier" · Fase 2 (chip Genera) ✅
+- **Genera** [generate.tsx](frontend/app/(app)/generate.tsx): le chip di selezione (età/modella/look) passano dal riempimento bianco pieno a un **bordo-gradiente Aurora** su pill scura (tecnica border-box: `LinearGradient` con padding 1.5px attorno a un inner View scuro). Applicato al componente condiviso `ChipRow` (età/modella) e alle chip Look; testo attivo bianco/bold, inattivo secondario. Touch target ≥44px, pill piene (raggio 999).
+- Verifica: `tsc --noEmit` pulito sul file toccato (restano i 3 errori pre-esistenti non correlati).
+
 ### Prossimi step
-- [ ] Restyling Fase 2 (resto): chip a bordo-gradiente in Genera, rifinitura Studio/Risultati/Profilo — con QA visiva sull'app.
+- [ ] Restyling Fase 2 (resto, opzionale): rifinitura Studio/Risultati/Profilo — con QA visiva sull'app.
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] Eseguire il deploy su Railway secondo la procedura sopra.
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.

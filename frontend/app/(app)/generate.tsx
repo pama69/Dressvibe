@@ -66,17 +66,36 @@ function ChipRow({
         {leading}
         {options.map((o) => {
           const active = value === o.value;
+          // Active = Aurora gradient border on a dark pill (border-box look).
+          // Inactive = plain hairline pill. The gradient wraps an inner View
+          // padded by 1.5px so only the rim shows the gradient.
           return (
             <TouchableOpacity
               key={o.value}
               onPress={() => onChange(o.value)}
-              style={[chipStyles.chip, active && chipStyles.chipActive]}
               testID={`${testIDPrefix}-${o.value}`}
               activeOpacity={0.8}
             >
-              <Text style={[chipStyles.chipText, active && chipStyles.chipTextActive]}>
-                {o.emoji ? `${o.emoji}  ` : ""}{o.label}
-              </Text>
+              {active ? (
+                <LinearGradient
+                  colors={MAGIC_GRADIENT}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={chipStyles.chipActiveBorder}
+                >
+                  <View style={chipStyles.chipActiveInner}>
+                    <Text style={chipStyles.chipTextActive}>
+                      {o.emoji ? `${o.emoji}  ` : ""}{o.label}
+                    </Text>
+                  </View>
+                </LinearGradient>
+              ) : (
+                <View style={chipStyles.chip}>
+                  <Text style={chipStyles.chipText}>
+                    {o.emoji ? `${o.emoji}  ` : ""}{o.label}
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -463,13 +482,25 @@ export default function Generate() {
                       curr.includes(ls.id) ? curr.filter((x) => x !== ls.id) : [...curr, ls.id]
                     );
                   }}
-                  style={[chipStyles.chip, active && chipStyles.chipActive]}
                   activeOpacity={0.85}
                   testID={`look-${ls.id}`}
                 >
-                  <Text style={[chipStyles.chipText, active && chipStyles.chipTextActive]}>
-                    {ls.emoji}  {ls.label}
-                  </Text>
+                  {active ? (
+                    <LinearGradient
+                      colors={MAGIC_GRADIENT}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={chipStyles.chipActiveBorder}
+                    >
+                      <View style={chipStyles.chipActiveInner}>
+                        <Text style={chipStyles.chipTextActive}>{ls.emoji}  {ls.label}</Text>
+                      </View>
+                    </LinearGradient>
+                  ) : (
+                    <View style={chipStyles.chip}>
+                      <Text style={chipStyles.chipText}>{ls.emoji}  {ls.label}</Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
               );
             })}
@@ -791,11 +822,16 @@ const chipStyles = StyleSheet.create({
   label: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2, textTransform: "uppercase" },
   row: { gap: 8, paddingRight: 12 },
   chip: {
-    paddingVertical: 10, paddingHorizontal: 16,
+    paddingVertical: 11, paddingHorizontal: 16, minHeight: 44, justifyContent: "center",
     borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 20,
+    backgroundColor: theme.colors.surface, borderRadius: 999,
   },
-  chipActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
-  chipText: { color: theme.colors.text, fontSize: 13, letterSpacing: 0.3 },
-  chipTextActive: { color: theme.colors.primaryFg, fontWeight: "600" },
+  // Active chip: Aurora gradient rim (1.5px) around a dark inner pill.
+  chipActiveBorder: { borderRadius: 999, padding: 1.5 },
+  chipActiveInner: {
+    paddingVertical: 9.5, paddingHorizontal: 15, minHeight: 41, justifyContent: "center",
+    backgroundColor: theme.colors.surfaceAlt, borderRadius: 999,
+  },
+  chipText: { color: theme.colors.textSecondary, fontSize: 13, letterSpacing: 0.3 },
+  chipTextActive: { color: theme.colors.text, fontSize: 13, letterSpacing: 0.3, fontWeight: "700" },
 });
