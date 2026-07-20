@@ -3,8 +3,7 @@ import { Tabs, Redirect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useNotifications } from "@/src/contexts/NotificationsContext";
-import { theme, MAGIC_GRADIENT, AURORA_ANGLE } from "@/src/theme";
-import { GradientText, shadowAurora, shadowCard } from "@/src/components/noir";
+import { theme } from "@/src/theme";
 import {
   View,
   Text,
@@ -17,7 +16,6 @@ import {
 import { api } from "@/src/api/client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
 
 // Tab icon factory (module-level — prevents component remount on each render).
 const tabIcon = (name: keyof typeof Ionicons.glyphMap) =>
@@ -62,48 +60,53 @@ function GlobalNotifBell() {
   );
 }
 
-// Dock order: Galleria · Storia · [FAB Genera] · Profilo.
-// (The handoff's dock also shows a "Richieste" tab, but it isn't a built
-// feature yet — no route exists for it — so the real dock keeps the 4
-// tabs that already exist, with Genera promoted to the elevated FAB.)
-const SIDE_TABS = [
-  { name: "index",   label: "Galleria", icon: "grid-outline"   as const },
-  { name: "history", label: "Storia",   icon: "time-outline"   as const },
-];
-const SIDE_TABS_RIGHT = [
-  { name: "profile", label: "Profilo", icon: "person-outline" as const },
+const TABS = [
+  { name: "index",    label: "Galleria", icon: "grid-outline"     as const },
+  { name: "generate", label: "Genera",   icon: "sparkles-outline" as const },
+  { name: "history",  label: "Storia",   icon: "time-outline"     as const },
+  { name: "profile",  label: "Profilo",  icon: "person-outline"   as const },
 ];
 
 function CustomTabBar({ state, navigation }: any) {
   const insets = useSafeAreaInsets();
-  const routeIndex = (name: string) => state.routes.findIndex((r: any) => r.name === name);
-
-  const renderTab = (tab: { name: string; label: string; icon: any }) => {
-    const active = state.index === routeIndex(tab.name);
-    return (
-      <Pressable key={tab.name} onPress={() => navigation.navigate(tab.name)} style={tb.tab}>
-        <Ionicons name={tab.icon} size={19} color={active ? theme.colors.text : theme.colors.textMuted} />
-        {active ? (
-          <GradientText style={tb.label}>{tab.label}</GradientText>
-        ) : (
-          <Text style={[tb.label, { color: theme.colors.textMuted }]}>{tab.label}</Text>
-        )}
-      </Pressable>
-    );
-  };
+  const visibleRoutes = state.routes.filter((_: any, i: number) =>
+    TABS.some((t) => t.name === state.routes[i].name)
+  );
 
   return (
-    <View style={[tb.wrap, { paddingBottom: Math.max(insets.bottom, 14) }]} pointerEvents="box-none">
-      <BlurView intensity={40} tint="dark" style={[tb.bar, shadowCard]}>
-        {SIDE_TABS.map(renderTab)}
-        <Pressable onPress={() => navigation.navigate("generate")} style={tb.fabWrap}>
-          <LinearGradient colors={MAGIC_GRADIENT} {...AURORA_ANGLE} style={[tb.fab, shadowAurora]}>
-            <Ionicons name="sparkles" size={24} color={theme.colors.onGradient} />
-          </LinearGradient>
-          <GradientText style={tb.fabLabel}>Genera</GradientText>
-        </Pressable>
-        {SIDE_TABS_RIGHT.map(renderTab)}
-      </BlurView>
+    <View style={[tb.wrap, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+      <LinearGradient
+        colors={["#201e44", "#17153a"]}
+        style={tb.bar}
+      >
+        {TABS.map((tab) => {
+          const routeIndex = state.routes.findIndex((r: any) => r.name === tab.name);
+          const active = state.index === routeIndex;
+          return (
+            <Pressable
+              key={tab.name}
+              onPress={() => navigation.navigate(tab.name)}
+              style={tb.pill}
+              android_ripple={null}
+            >
+              {active ? (
+                <LinearGradient
+                  colors={["#3d3a80", "#28265e"]}
+                  style={tb.pillActive}
+                >
+                  <Ionicons name={tab.icon} size={18} color="#c4b5fd" />
+                  <Text style={tb.labelActive}>{tab.label}</Text>
+                </LinearGradient>
+              ) : (
+                <View style={tb.pillInactive}>
+                  <Ionicons name={tab.icon} size={18} color={theme.colors.textMuted} />
+                  <Text style={tb.labelInactive}>{tab.label}</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
+      </LinearGradient>
     </View>
   );
 }
@@ -176,54 +179,59 @@ export default function AppTabs() {
 const tb = StyleSheet.create({
   wrap: {
     position: "absolute",
-    bottom: 14,
-    left: 16,
-    right: 16,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    backgroundColor: "transparent",
   },
   bar: {
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around",
-    height: 66,
-    paddingHorizontal: 10,
-    borderRadius: theme.radius.lg + 2,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: "rgba(16,16,22,0.72)",
-    overflow: "hidden",
-  },
-  tab: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 3,
-    minWidth: 60,
+    borderRadius: 20,
+    paddingHorizontal: 6,
     paddingVertical: 6,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(180,150,255,0.15)",
+    shadowColor: "#7c3aed",
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
   },
-  label: {
-    fontSize: 9.5,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    fontWeight: "700",
-  },
-  fabWrap: {
-    alignItems: "center",
-    gap: 3,
-    marginTop: -30,
-  },
-  fab: {
-    width: 58,
-    height: 58,
-    borderRadius: theme.radius.lg,
+  pill: { flex: 1 },
+  pillActive: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 5,
-    borderColor: theme.colors.bg,
+    gap: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(180,150,255,0.35)",
   },
-  fabLabel: {
-    fontSize: 9.5,
-    letterSpacing: 1.2,
+  pillInactive: {
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    gap: 2,
+  },
+  labelActive: {
+    color: "#c4b5fd",
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  labelInactive: {
+    color: theme.colors.textMuted,
+    fontSize: 9,
+    letterSpacing: 1.5,
     textTransform: "uppercase",
-    fontWeight: "700",
+    marginTop: 1,
   },
 });
 
@@ -232,31 +240,31 @@ const bellStyles = StyleSheet.create({
     position: "absolute",
     width: 40,
     height: 40,
-    borderRadius: theme.radius.md,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
-  emoji: { fontSize: 17, lineHeight: 20 },
+  emoji: { fontSize: 20, lineHeight: 24 },
   badge: {
     position: "absolute",
-    top: -4,
-    right: -4,
-    minWidth: 17,
-    height: 17,
-    borderRadius: 9,
-    backgroundColor: theme.colors.magic2,
+    top: 1,
+    right: 1,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#E11D48",
     paddingHorizontal: 3,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: theme.colors.bg,
   },
   badgeText: {
     color: "#fff",
     fontSize: 9,
-    fontWeight: "800",
+    fontWeight: "700",
+    letterSpacing: 0.2,
   },
 });

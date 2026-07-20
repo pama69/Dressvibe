@@ -1,29 +1,23 @@
-// Centralized theme tokens for DressVibe — "Noir Atelier" (dark, editorial, glass)
-import { Platform } from "react-native";
-
+// Centralized theme tokens for DressVibe (dark, high-fashion editorial)
 export const theme = {
   colors: {
-    bg: "#0B0B0F",
-    bgElevated: "#101016",
-    surface: "rgba(255,255,255,0.045)",
-    surfaceAlt: "rgba(255,255,255,0.075)",
-    border: "rgba(255,255,255,0.09)",
-    borderStrong: "rgba(255,255,255,0.18)",
-    text: "#F5F5F7",
-    textSecondary: "#A6ABB8",
-    textMuted: "#7A8090",
-    primary: "#F5F5F7",
-    primaryFg: "#0B0B0F",
-    // Aurora — signature AI gradient (violet → rose → amber). Never used decoratively,
-    // only where the AI is acting (generate CTA, magic tweaks, active states, badges).
-    magic1: "#7C5CFF",
-    magic2: "#FF4D8D",
-    magic3: "#FFB86B",
-    onGradient: "#14060B",
-    glow: "rgba(255,77,141,0.3)",
-    success: "#34D399",
-    error: "#FB7185",
-    overlay: "rgba(0,0,0,0.55)",
+    bg: "#1a1836",
+    surface: "#22204a",
+    surfaceAlt: "#2b2858",
+    border: "rgba(180,150,255,0.18)",
+    borderStrong: "rgba(180,150,255,0.38)",
+    text: "#FAFAFA",
+    textSecondary: "#A1A1AA",
+    textMuted: "#71717A",
+    primary: "#FFFFFF",
+    primaryFg: "#000000",
+    magic1: "#F59E0B",
+    magic2: "#E11D48",
+    magic3: "#9D4CDD",
+    glow: "rgba(225,29,72,0.4)",
+    success: "#10B981",
+    error: "#EF4444",
+    overlay: "rgba(0,0,0,0.6)",
   },
   space: {
     xs: 4,
@@ -35,14 +29,14 @@ export const theme = {
   },
   radius: {
     none: 0,
-    sm: 13,
-    md: 16,
-    lg: 22,
+    xs: 2,
+    sm: 4,
+    md: 8,
     pill: 999,
   },
   font: {
-    serif: Platform.select({ ios: "Georgia", android: "serif", default: "Georgia" }),
-    sans: Platform.select({ ios: "System", android: "sans-serif", default: undefined }),
+    serif: "Cormorant Garamond",
+    sans: "Outfit",
   },
 };
 
@@ -51,5 +45,3 @@ export const MAGIC_GRADIENT: [string, string, string] = [
   theme.colors.magic2,
   theme.colors.magic3,
 ];
-
-export const AURORA_ANGLE = { start: { x: 0, y: 0.3 }, end: { x: 1, y: 0.7 } };

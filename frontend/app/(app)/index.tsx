@@ -1,13 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   FlatList,
+  Image,
   RefreshControl,
   ActivityIndicator,
-  ScrollView,
   useWindowDimensions,
   Animated,
   Easing,
@@ -18,7 +18,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api/client";
 import { theme, MAGIC_GRADIENT } from "@/src/theme";
-import { GradientText, Button, Chip, type as noirType, PhotoFrame } from "@/src/components/noir";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
 
@@ -57,17 +56,7 @@ export default function Galleria() {
   const { width: winW } = useWindowDimensions();
   const numColumns = colsFor(winW);
   const tileW = Math.floor((winW - PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
-  const TILE_H = 210;
-
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const categories = useMemo(
-    () => Array.from(new Set(items.map((i) => i.category).filter(Boolean))),
-    [items]
-  );
-  const displayedItems = useMemo(
-    () => (selectedCategory ? items.filter((i) => i.category === selectedCategory) : items),
-    [items, selectedCategory]
-  );
+  const tileH = Math.round(tileW / 0.78);
 
   // Welcome splash — minimalist intro shown only the first time per session.
   // Just the animated "DressVibe" logo, then auto-dismisses with a soft fade.
@@ -168,14 +157,11 @@ export default function Galleria() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <View style={{ flex: 1 }} testID="galleria-title">
-          <Text style={noirType.eyebrow}>
-            BENVENUTO, {user?.name?.split(" ")[0] || user?.email || "Atelier"}
+        <View>
+          <Text style={styles.eyebrow}>BENVENUTO</Text>
+          <Text style={styles.title} testID="galleria-title">
+            {user?.name?.split(" ")[0] || "Atelier"}
           </Text>
-          <View style={styles.titleRow}>
-            <Text style={styles.title}>Il tuo </Text>
-            <GradientText style={[styles.title, styles.titleItalic]}>guardaroba</GradientText>
-          </View>
         </View>
         <View style={{ gap: 8, alignItems: "flex-end" }}>
           {streak && streak.current > 0 ? (
@@ -225,22 +211,10 @@ export default function Galleria() {
         </TouchableOpacity>
       ) : null}
 
-      {!loading && items.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
-        >
-          <Chip active={selectedCategory === null} onPress={() => setSelectedCategory(null)}>
-            {`Tutti · ${items.length}`}
-          </Chip>
-          {categories.map((cat) => (
-            <Chip key={cat} active={selectedCategory === cat} onPress={() => setSelectedCategory(cat)}>
-              {cat}
-            </Chip>
-          ))}
-        </ScrollView>
-      ) : null}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>La tua galleria</Text>
+        <Text style={styles.sectionSub}>{items.length} capi caricati</Text>
+      </View>
 
       {loading ? (
         <View style={styles.loadingWrap}>
@@ -253,13 +227,17 @@ export default function Galleria() {
           <Text style={styles.emptySub}>
             Carica la prima foto del tuo capo per iniziare a creare outfit magici.
           </Text>
-          <Button variant="white" onPress={() => router.push("/upload")} style={{ marginTop: 8 }}>
-            + Carica capo
-          </Button>
+          <TouchableOpacity
+            onPress={() => router.push("/upload")}
+            style={styles.emptyBtn}
+            testID="empty-upload-btn"
+          >
+            <Text style={styles.emptyBtnText}>+ Carica capo</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
-          data={displayedItems}
+          data={items}
           key={`cols-${numColumns}`}
           keyExtractor={(i) => i.id}
           numColumns={numColumns}
@@ -279,29 +257,43 @@ export default function Galleria() {
             // (e.g. "Vestito €59, pantalone €67") are shown normally.
             const isAutoName = /^Cap\s+\d{3,5}$/i.test((item.name || "").trim());
             const displayName = isAutoName ? "" : (item.name || "");
-            const tagLabel = displayName
-              ? `${displayName}${item.price ? ` · €${item.price}` : ""}`
-              : item.price
-              ? `€${item.price}`
-              : undefined;
             return (
               <TouchableOpacity
-                style={{ width: tileW, height: TILE_H }}
+                style={[styles.card, { width: tileW, height: tileH }]}
                 testID={`garment-card-${item.id}`}
                 activeOpacity={0.85}
                 onPress={() => router.push(`/(app)/garment/${item.id}`)}
               >
-                <PhotoFrame
-                  source={{
-                    uri: item.thumb_base64
-                      ? `data:image/jpeg;base64,${item.thumb_base64}`
-                      : `data:image/png;base64,${item.image_base64}`,
-                  }}
-                  style={{ width: "100%", height: "100%" }}
-                  categoryLabel={item.category}
-                  tagLabel={tagLabel}
-                  onRemove={() => handleDelete(item)}
-                />
+                <View style={styles.cardInner}>
+                  <Image
+                    source={{
+                      uri: item.thumb_base64
+                        ? `data:image/jpeg;base64,${item.thumb_base64}`
+                        : `data:image/png;base64,${item.image_base64}`,
+                    }}
+                    style={styles.cardImg}
+                  />
+                  <TouchableOpacity
+                    onPress={() => handleDelete(item)}
+                    style={styles.deleteBtn}
+                    testID={`garment-delete-${item.id}`}
+                    activeOpacity={0.7}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close" size={14} color={theme.colors.text} />
+                  </TouchableOpacity>
+                  <View style={styles.cardOverlay}>
+                    {displayName ? (
+                      <Text style={styles.cardName} numberOfLines={1}>
+                        {displayName}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.cardMeta}>
+                      {item.category}
+                      {item.price ? ` · €${item.price}` : ""}
+                    </Text>
+                  </View>
+                </View>
               </TouchableOpacity>
             );
           }}
@@ -313,10 +305,15 @@ export default function Galleria() {
           galleria ha già almeno un capo (la schermata vuota ha già il suo
           CTA "+ Carica capo"). */}
       {!loading && items.length > 0 ? (
-        <Button variant="white" onPress={() => router.push("/upload")} style={styles.uploadFabBig}>
+        <TouchableOpacity
+          onPress={() => router.push("/upload")}
+          style={styles.uploadFabBig}
+          testID="upload-fab-big"
+          activeOpacity={0.85}
+        >
           <Ionicons name="add" size={18} color={theme.colors.primaryFg} />
           <Text style={styles.uploadFabBigText}>Carica Altro</Text>
-        </Button>
+        </TouchableOpacity>
       ) : null}
 
       {/* Welcome splash — minimal black overlay with the animated DressVibe
@@ -382,16 +379,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-end",
   },
-  titleRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 6 },
+  eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
   title: {
-    fontFamily: theme.font.serif,
     color: theme.colors.text,
-    fontSize: 34,
-    fontWeight: "500",
-    letterSpacing: -0.5,
-    lineHeight: 38,
+    fontSize: 32,
+    fontWeight: "300",
+    letterSpacing: -1,
+    marginTop: 4,
   },
-  titleItalic: { fontStyle: "italic" },
   streakPill: {
     flexDirection: "row", alignItems: "center", gap: 8,
     paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16,
@@ -436,18 +431,63 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: theme.colors.bg,
   },
   badgeText: { color: "#fff", fontSize: 9, fontWeight: "700", letterSpacing: 0.2 },
-  filterRow: {
-    flexDirection: "row",
-    gap: 8,
+  section: {
     paddingHorizontal: 24,
     paddingTop: 24,
     paddingBottom: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
   },
+  sectionTitle: { color: theme.colors.text, fontSize: 14, letterSpacing: 1 },
+  sectionSub: { color: theme.colors.textMuted, fontSize: 12 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, gap: 12 },
   emptyTitle: { color: theme.colors.text, fontSize: 18, fontWeight: "400" },
   emptySub: { color: theme.colors.textSecondary, fontSize: 13, textAlign: "center", lineHeight: 20 },
+  emptyBtn: {
+    marginTop: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    backgroundColor: theme.colors.primary,
+  },
+  emptyBtnText: { color: theme.colors.primaryFg, fontWeight: "600", letterSpacing: 0.4 },
   list: { paddingHorizontal: PADDING, paddingBottom: 96 },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "visible",
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  cardInner: {
+    borderRadius: 16,
+    overflow: "hidden",
+    flex: 1,
+    padding: 6,
+    backgroundColor: "#fff",
+  },
+  cardImg: { width: "100%", height: "100%", borderRadius: 10 },
+  deleteBtn: {
+    position: "absolute", top: 6, right: 6,
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)",
+  },
+  cardOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 10,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  cardName: { color: theme.colors.text, fontSize: 13, fontWeight: "500" },
+  cardMeta: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 2 },
   generateCta: {
     position: "absolute",
     bottom: 96,
@@ -465,9 +505,16 @@ const styles = StyleSheet.create({
   generateCtaText: { color: theme.colors.text, fontSize: 14, letterSpacing: 0.5 },
   uploadFabBig: {
     position: "absolute",
-    bottom: 96,
+    bottom: 90,
     left: 24,
     right: 24,
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: theme.colors.primary,
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
     shadowColor: "#000",
     shadowOpacity: 0.25,
     shadowRadius: 12,
@@ -496,7 +543,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
     marginBottom: 18,
-    shadowColor: theme.colors.magic2,
+    shadowColor: "#E11D48",
     shadowOpacity: 0.55,
     shadowRadius: 22,
     shadowOffset: { width: 0, height: 0 },
@@ -516,7 +563,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
     width: 60,
     height: 1.5,
-    backgroundColor: theme.colors.magic2,
+    backgroundColor: "#E11D48",
   },
   splashInner: {
     width: "100%",
