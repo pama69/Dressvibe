@@ -10,11 +10,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api/client";
-import { theme, MAGIC_GRADIENT } from "@/src/theme";
+import { theme, MAGIC_GRADIENT, AURORA_ANGLE } from "@/src/theme";
+import { GradientText, Button, Chip, Card, Badge, PhotoFrame, type as noirType } from "@/src/components/noir";
 import {
   GENDERS,
   AGES,
@@ -31,7 +32,7 @@ import { presetSelectionStore } from "@/src/state/presetSelection";
 import AccessoryPicker from "@/src/components/AccessoryPicker";
 import PromptTweaks, { EMPTY_TWEAKS, hasTweaks, tweaksToPayload, type Tweaks } from "@/src/components/PromptTweaks";
 
-// Aesthetic modifiers shown as a 5-button toggle row in Step 4 (Look).
+// Aesthetic modifiers shown as a toggle row in the Posa & Look card.
 // IDs must match the LOOK_STYLES_PROMPTS dict on the backend (server.py).
 type LookStyle = { id: string; label: string; emoji: string };
 const LOOK_STYLES: LookStyle[] = [
@@ -43,6 +44,27 @@ const LOOK_STYLES: LookStyle[] = [
 ];
 
 type Garment = { id: string; name: string; image_base64?: string; thumb_base64?: string; category: string };
+
+// A single toggle chip, restyled with the shared <Chip> primitive but wrapped
+// in its own TouchableOpacity so we keep the testID + press handling — <Chip>
+// itself doesn't forward testID/onPress-less "display only" usage.
+function OptionChip({
+  option,
+  active,
+  onPress,
+  testID,
+}: {
+  option: Option;
+  active: boolean;
+  onPress: () => void;
+  testID?: string;
+}) {
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85} testID={testID}>
+      <Chip active={active}>{(option.emoji ? `${option.emoji}  ` : "") + option.label}</Chip>
+    </TouchableOpacity>
+  );
+}
 
 function ChipRow({
   label,
@@ -60,26 +82,19 @@ function ChipRow({
   leading?: React.ReactNode;
 }) {
   return (
-    <View style={chipStyles.wrap}>
-      <Text style={chipStyles.label}>{label}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={chipStyles.row}>
+    <View style={{ gap: 8 }}>
+      <Text style={noirType.label}>{label}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 12 }}>
         {leading}
-        {options.map((o) => {
-          const active = value === o.value;
-          return (
-            <TouchableOpacity
-              key={o.value}
-              onPress={() => onChange(o.value)}
-              style={[chipStyles.chip, active && chipStyles.chipActive]}
-              testID={`${testIDPrefix}-${o.value}`}
-              activeOpacity={0.8}
-            >
-              <Text style={[chipStyles.chipText, active && chipStyles.chipTextActive]}>
-                {o.emoji ? `${o.emoji}  ` : ""}{o.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+        {options.map((o) => (
+          <OptionChip
+            key={o.value}
+            option={o}
+            active={value === o.value}
+            onPress={() => onChange(o.value)}
+            testID={`${testIDPrefix}-${o.value}`}
+          />
+        ))}
       </ScrollView>
     </View>
   );
@@ -114,6 +129,7 @@ export default function Generate() {
   const [accessories, setAccessories] = useState<AccessoryItem[]>([]);
   // Guided per-generation "ritocchi" (togli / cambia colore / sfondo / posa / altro)
   const [tweaks, setTweaks] = useState<Tweaks>(EMPTY_TWEAKS);
+  const [tweaksOpen, setTweaksOpen] = useState(false);
   const [providers, setProviders] = useState<any[]>([]);
   const [aiProvider, setAiProvider] = useState<string>("gemini_nano_banana");
   const [customBgs, setCustomBgs] = useState<{ id: string; name: string; description?: string; image_base64: string }[]>([]);
@@ -247,23 +263,64 @@ export default function Generate() {
     router.push("/generating");
   };
 
+  // ---- derived, display-only state (progress stepper + AI-hint line) ----
+  const capiValid = selected.length > 0;
+  const modellaValid = Boolean(gender) && Boolean(age); // always true (both have defaults)
+  const posaValid = Boolean(pose); // always true (has a default)
+  const readyToSubmit = capiValid; // same condition as the CTA
+  const stepsCompleted = [capiValid, modellaValid, posaValid, readyToSubmit].filter(Boolean).length;
+
+  const selectedGarmentNames = garments.filter((g) => selected.includes(g.id)).map((g) => g.name);
+  const modelHintLabel = presetId && presetName
+    ? presetName
+    : [AGES.find((a) => a.value === age)?.label, GENDERS.find((g) => g.value === gender)?.label]
+        .filter(Boolean)
+        .join(" ");
+  const hintText = capiValid
+    ? `${modelHintLabel || "La modella"} indosserà ${selectedGarmentNames.join(", ")} · ~40 sec`
+    : "Seleziona almeno un capo per iniziare.";
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={styles.eyebrow}>MAGIC OUTFIT GENERATOR</Text>
-        <Text style={styles.title}>Crea il tuo{"\n"}servizio fotografico.</Text>
+        <GradientText style={noirType.eyebrow}>MAGIC OUTFIT GENERATOR</GradientText>
+        <View style={{ marginTop: 6 }}>
+          <Text style={[noirType.display, styles.titleLine]}>Crea il tuo</Text>
+          <GradientText style={[noirType.display, styles.titleLine, styles.titleItalic]}>
+            servizio fotografico
+          </GradientText>
+        </View>
 
-        {/* Step 1 - garments */}
-        <View style={styles.step}>
-          <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>1 — Capi</Text>
-            <Text style={styles.stepHint}>{selected.length} selezionati</Text>
+        {/* Progress stepper — purely visual, derived from existing selection state. */}
+        <View style={styles.stepper}>
+          {[0, 1, 2, 3].map((i) => (
+            <View
+              key={i}
+              style={[
+                styles.stepperSeg,
+                i < stepsCompleted && styles.stepperSegDone,
+                i === stepsCompleted && styles.stepperSegCurrent,
+              ]}
+            >
+              {i < stepsCompleted ? (
+                <LinearGradient colors={MAGIC_GRADIENT} {...AURORA_ANGLE} style={StyleSheet.absoluteFillObject} />
+              ) : null}
+            </View>
+          ))}
+        </View>
+
+        {/* 1 · Capi */}
+        <Card style={styles.card}>
+          <View style={styles.cardHead}>
+            <Text style={noirType.h2}>1 · Capi</Text>
+            <Badge>{selected.length} scelti</Badge>
           </View>
           {garments.length === 0 ? (
             <TouchableOpacity
               style={styles.emptyGarment}
               onPress={() => router.push("/upload")}
               testID="generate-empty-upload"
+              activeOpacity={0.85}
             >
               <Ionicons name="cloud-upload-outline" size={20} color={theme.colors.text} />
               <Text style={styles.emptyGarmentText}>Carica il tuo primo capo</Text>
@@ -276,41 +333,37 @@ export default function Generate() {
                   <TouchableOpacity
                     key={g.id}
                     onPress={() => toggle(g.id)}
-                    style={[styles.garment, active && styles.garmentActive]}
                     activeOpacity={0.85}
                     testID={`select-garment-${g.id}`}
                   >
-                    <Image
+                    <PhotoFrame
                       source={{
                         uri: g.thumb_base64
                           ? `data:image/jpeg;base64,${g.thumb_base64}`
                           : `data:image/png;base64,${g.image_base64}`,
                       }}
-                      style={styles.garmentImg}
+                      selected={active}
+                      dimmed={!active}
+                      tagLabel={g.name}
+                      style={styles.garmentFrame}
                     />
-                    {active && (
-                      <View style={styles.checkBadge}>
-                        <Ionicons name="checkmark" size={14} color={theme.colors.primaryFg} />
-                      </View>
-                    )}
-                    <Text style={styles.garmentName} numberOfLines={1}>{g.name}</Text>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
           )}
-        </View>
+        </Card>
 
-        {/* Step 2 — Model */}
-        <View style={styles.step}>
-          <Text style={styles.stepLabel}>2 — Modello</Text>
+        {/* 2 · Modella */}
+        <Card style={styles.card}>
+          <Text style={[noirType.h2, { marginBottom: 4 }]}>2 · Modella</Text>
           <ChipRow label="Genere" options={GENDERS} value={gender} onChange={setGender} testIDPrefix="gender" />
 
           {/* Face-library picker — only when gender = donna (no male
               presets yet). When a face is selected, the demographic chips
               below are hidden because the preset embeds them. */}
           {gender === "donna" && presetId ? (
-            <View style={styles.presetCard} testID="preset-selected-card">
+            <View style={styles.presetRow} testID="preset-selected-card">
               {presetThumb ? (
                 <Image
                   source={{ uri: `data:image/jpeg;base64,${presetThumb}` }}
@@ -322,28 +375,26 @@ export default function Generate() {
                 </View>
               )}
               <View style={{ flex: 1, gap: 4 }}>
-                <Text style={styles.presetLabel}>Modella scelta</Text>
+                <Badge style={{ alignSelf: "flex-start" }}>⭐ Testimonial</Badge>
                 <Text style={styles.presetName}>{presetName}</Text>
-                <Text style={styles.presetHint}>
+                <Text style={noirType.micro}>
                   Età, etnia e corporatura sono fissati per coerenza.
                 </Text>
               </View>
               <View style={{ gap: 6 }}>
                 <TouchableOpacity
                   onPress={() => router.push("/model-picker")}
-                  style={styles.presetChange}
                   testID="preset-change"
                   activeOpacity={0.75}
                 >
-                  <Text style={styles.presetChangeText}>Cambia</Text>
+                  <Button variant="ghost" small>Cambia</Button>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => presetSelectionStore.clear()}
-                  style={styles.presetClear}
                   testID="preset-clear"
                   activeOpacity={0.75}
                 >
-                  <Text style={styles.presetClearText}>Rimuovi</Text>
+                  <Button variant="ghost" small textStyle={{ color: theme.colors.error }}>Rimuovi</Button>
                 </TouchableOpacity>
               </View>
             </View>
@@ -365,11 +416,11 @@ export default function Generate() {
                   gender === "donna" ? (
                     <TouchableOpacity
                       onPress={() => router.push("/model-picker")}
-                      style={[chipStyles.chip, styles.modelChip]}
+                      style={styles.modelChip}
                       testID="open-model-picker"
                       activeOpacity={0.85}
                     >
-                      <Ionicons name="people-outline" size={14} color={theme.colors.primary} />
+                      <Ionicons name="people-outline" size={14} color={theme.colors.text} />
                       <Text style={styles.modelChipText}>Scegli modella</Text>
                     </TouchableOpacity>
                   ) : null
@@ -379,27 +430,35 @@ export default function Generate() {
               <ChipRow label="Etnia" options={ETHNICITIES} value={eth} onChange={setEth} testIDPrefix="eth" />
             </>
           ) : null}
-        </View>
+        </Card>
 
-        {/* Step 3 — Scene */}
-        <View style={styles.step}>
-          <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>3 — Posa modello</Text>
+        {/* 3 · Posa & Look */}
+        <Card style={styles.card}>
+          <View style={styles.cardHead}>
+            <Text style={noirType.h2}>3 · Posa & Look</Text>
+            <Text style={noirType.micro}>
+              {lookStyles.length > 0 ? `${lookStyles.length} ATTIVI` : "FACOLTATIVO"}
+            </Text>
+          </View>
+
+          <ChipRow label="Posa" options={POSES} value={pose} onChange={setPose} testIDPrefix="pose" />
+
+          <View style={styles.manageBtnRow}>
             <TouchableOpacity
               onPress={() => router.push("/backgrounds")}
-              style={styles.bgManageBtn}
+              style={styles.manageBtn}
               testID="generate-manage-backgrounds"
+              activeOpacity={0.85}
             >
               <Ionicons name="images-outline" size={12} color={theme.colors.text} />
-              <Text style={styles.bgManageText}>Galleria sfondi</Text>
+              <Text style={styles.manageBtnText}>Galleria sfondi</Text>
             </TouchableOpacity>
           </View>
-          <ChipRow label="Posa" options={POSES} value={pose} onChange={setPose} testIDPrefix="pose" />
 
           {/* Custom backgrounds */}
           {customBgs.length > 0 ? (
-            <View style={{ gap: 6 }}>
-              <Text style={styles.customBgLabel}>Sfondi personalizzati</Text>
+            <View style={{ gap: 8 }}>
+              <Text style={noirType.label}>Sfondi personalizzati</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customBgRow}>
                 {customBgs.map((b) => {
                   const active = customBgId === b.id;
@@ -423,7 +482,7 @@ export default function Generate() {
                 })}
               </ScrollView>
               {customBgId ? (
-                <Text style={styles.customBgHint}>
+                <Text style={noirType.micro}>
                   ✓ Userai uno sfondo personalizzato. Lo sfondo standard qui sotto sarà ignorato.
                 </Text>
               ) : null}
@@ -435,75 +494,68 @@ export default function Generate() {
           ) : null}
           <ChipRow label="Scarpe" options={SHOES} value={shoes} onChange={setShoes} testIDPrefix="shoes" />
           {shoes === "custom" ? (
-            <Text style={styles.customBgHint}>
+            <Text style={noirType.micro}>
               👟 La modella indosserà le scarpe presenti nelle foto dei capi, senza sostituirle
               con calzature casual inventate.
             </Text>
           ) : null}
-        </View>
 
-        {/* Step 4 — Look (aesthetic modifiers) */}
-        <View style={styles.step}>
-          <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>4 — Look</Text>
-            <Text style={styles.stepHint}>{lookStyles.length > 0 ? `${lookStyles.length} attivi` : "facoltativo"}</Text>
+          <View style={{ gap: 8 }}>
+            <Text style={noirType.label}>Look</Text>
+            <Text style={styles.lookHint}>
+              Personalizza l&apos;estetica della foto. Tocca uno o più stili — si combinano tra loro.
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 12 }}>
+              {LOOK_STYLES.map((ls) => {
+                const active = lookStyles.includes(ls.id);
+                return (
+                  <TouchableOpacity
+                    key={ls.id}
+                    onPress={() => {
+                      try { Haptics.selectionAsync(); } catch {}
+                      setLookStyles((curr) =>
+                        curr.includes(ls.id) ? curr.filter((x) => x !== ls.id) : [...curr, ls.id]
+                      );
+                    }}
+                    activeOpacity={0.85}
+                    testID={`look-${ls.id}`}
+                  >
+                    <Chip active={active}>{`${ls.emoji}  ${ls.label}`}</Chip>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
-          <Text style={styles.lookHint}>
-            Personalizza l&apos;estetica della foto. Tocca uno o più stili — si combinano tra loro.
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={chipStyles.row}>
-            {LOOK_STYLES.map((ls) => {
-              const active = lookStyles.includes(ls.id);
-              return (
-                <TouchableOpacity
-                  key={ls.id}
-                  onPress={() => {
-                    try { Haptics.selectionAsync(); } catch {}
-                    setLookStyles((curr) =>
-                      curr.includes(ls.id) ? curr.filter((x) => x !== ls.id) : [...curr, ls.id]
-                    );
-                  }}
-                  style={[chipStyles.chip, active && chipStyles.chipActive]}
-                  activeOpacity={0.85}
-                  testID={`look-${ls.id}`}
-                >
-                  <Text style={[chipStyles.chipText, active && chipStyles.chipTextActive]}>
-                    {ls.emoji}  {ls.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
+        </Card>
 
         {/* Inserisci prezzi nell'immagine — opt-in toggle. When ON, the
             backend reads the "Descrizione e prezzi" of each selected garment
             (non-auto-placeholder names) and tells Gemini to render price
             tags next to the matching garments. */}
-        <View style={styles.step}>
+        <Card style={styles.card}>
           <TouchableOpacity
             onPress={() => setAddPriceTags((v) => !v)}
             activeOpacity={0.8}
-            style={styles.priceToggleRow}
+            style={styles.toggleRow}
             testID="generate-toggle-prices"
           >
             <View style={[styles.checkbox, addPriceTags && styles.checkboxOn]}>
               {addPriceTags ? <Text style={styles.checkboxMark}>✓</Text> : null}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.priceToggleLabel}>Inserisci prezzi nell&apos;immagine</Text>
-              <Text style={styles.priceToggleHint}>
+              <Text style={styles.toggleLabel}>Inserisci prezzi nell&apos;immagine</Text>
+              <Text style={noirType.micro}>
                 Aggiunge cartellini con i prezzi (presi dalla &quot;Descrizione e prezzi&quot; del capo) accanto ai capi corrispondenti nella foto generata.
               </Text>
             </View>
           </TouchableOpacity>
-        </View>
+        </Card>
 
         {/* Aggiungi accessori — opt-in toggle. When ON, the shop owner can
             attach up to ACCESSORY_MAX extra photos that the AI MUST wear on
             the model. Each photo carries a category that drives a focused
             "worn on the X" instruction in the backend prompt. */}
-        <View style={styles.step}>
+        <Card style={styles.card}>
           <TouchableOpacity
             onPress={() => {
               setAddAccessories((v) => !v);
@@ -511,15 +563,15 @@ export default function Generate() {
               // toggle back without losing already-picked accessories.
             }}
             activeOpacity={0.8}
-            style={styles.priceToggleRow}
+            style={styles.toggleRow}
             testID="generate-toggle-accessories"
           >
             <View style={[styles.checkbox, addAccessories && styles.checkboxOn]}>
               {addAccessories ? <Text style={styles.checkboxMark}>✓</Text> : null}
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.priceToggleLabel}>Aggiungi accessori</Text>
-              <Text style={styles.priceToggleHint}>
+              <Text style={styles.toggleLabel}>Aggiungi accessori</Text>
+              <Text style={noirType.micro}>
                 Carica foto di scarpe, borse, gioielli, cappelli, occhiali ecc. che la modella DEVE indossare nella foto generata.
               </Text>
             </View>
@@ -533,23 +585,39 @@ export default function Generate() {
               testIdScope="acc-gen"
             />
           ) : null}
-        </View>
+        </Card>
 
-        {/* Step — Ritocchi (guided prompt overrides) */}
-        <View style={styles.step}>
-          <View style={styles.stepHead}>
-            <Text style={styles.stepLabel}>Ritocchi</Text>
-            <Text style={styles.stepHint}>{hasTweaks(tweaks) ? "attivi" : "facoltativo"}</Text>
-          </View>
-          <Text style={styles.lookHint}>
-            Rispondi solo se serve. Lascia vuoto ciò che va già bene.
-          </Text>
-          <PromptTweaks value={tweaks} onChange={setTweaks} testIdScope="gen-tweaks" />
-        </View>
+        {/* Ritocchi (guided prompt overrides) — collapsed by default. */}
+        <Card style={styles.card}>
+          <TouchableOpacity
+            onPress={() => setTweaksOpen((v) => !v)}
+            activeOpacity={0.8}
+            style={styles.cardHead}
+            testID="generate-tweaks-toggle"
+          >
+            <Text style={noirType.h2}>🎯 Ritocchi</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={noirType.micro}>{hasTweaks(tweaks) ? "ATTIVI" : "FACOLTATIVI"}</Text>
+              <Ionicons
+                name={tweaksOpen ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={theme.colors.textSecondary}
+              />
+            </View>
+          </TouchableOpacity>
+          {tweaksOpen ? (
+            <View style={{ marginTop: 14, gap: 10 }}>
+              <Text style={styles.lookHint}>
+                Rispondi solo se serve. Lascia vuoto ciò che va già bene.
+              </Text>
+              <PromptTweaks value={tweaks} onChange={setTweaks} testIdScope="gen-tweaks" />
+            </View>
+          ) : null}
+        </Card>
 
-        {/* Step 5 — Variations */}
-        <View style={styles.step}>
-          <Text style={styles.stepLabel}>5 — Variazioni</Text>
+        {/* Variazioni */}
+        <Card style={styles.card}>
+          <Text style={[noirType.h2, { marginBottom: 4 }]}>Variazioni</Text>
           <View style={styles.varsRow}>
             {VARIATIONS.map((n) => {
               const active = variations === n;
@@ -565,12 +633,12 @@ export default function Generate() {
               );
             })}
           </View>
-        </View>
+        </Card>
 
-        {/* Step 5 — AI provider */}
+        {/* Provider AI */}
         {providers.length > 0 && (
-          <View style={styles.step}>
-            <Text style={styles.stepLabel}>6 — Provider AI</Text>
+          <Card style={styles.card}>
+            <Text style={[noirType.h2, { marginBottom: 4 }]}>Provider AI</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 12 }}>
               {providers.map((p) => {
                 const active = aiProvider === p.id;
@@ -587,9 +655,7 @@ export default function Generate() {
                     ]}
                     testID={`provider-${p.id}`}
                   >
-                    <Text style={[styles.providerName, active && styles.providerNameActive]}>
-                      {p.name}
-                    </Text>
+                    <Text style={styles.providerName}>{p.name}</Text>
                     <Text style={styles.providerDesc}>
                       {disabled ? `🔒 ${p.missing_keys?.join(', ')}` : p.description}
                     </Text>
@@ -597,27 +663,30 @@ export default function Generate() {
                 );
               })}
             </ScrollView>
-          </View>
+          </Card>
         )}
 
-        {/* Clearance so the last section (Provider AI) scrolls fully above the
-            floating CTA (which sits at bottom:80 and is ~110px tall). */}
+        {/* Clearance so the last section scrolls fully above the floating CTA
+            (which sits at bottom:80 and is ~130px tall). */}
         <View style={{ height: 220 }} />
       </ScrollView>
 
       {/* Magic button */}
       <View style={styles.ctaWrap}>
-        <TouchableOpacity activeOpacity={0.9} onPress={onGenerate} testID="genera-outfit-button">
-          <LinearGradient
-            colors={MAGIC_GRADIENT}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.cta}
-          >
-            <Ionicons name="sparkles" size={20} color="#fff" />
-            <Text style={styles.ctaText}>Genera Outfit Realistico</Text>
-          </LinearGradient>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={onGenerate}
+          disabled={!capiValid}
+          testID="genera-outfit-button"
+        >
+          <Button variant="grad" disabled={!capiValid}>
+            {`✦ Genera ${variations} scatti`}
+          </Button>
         </TouchableOpacity>
+        <View style={styles.hintRow}>
+          <GradientText style={styles.hintSpark}>✦</GradientText>
+          <Text style={styles.hintText} numberOfLines={2}>{hintText}</Text>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -625,177 +694,96 @@ export default function Generate() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.bg },
-  scroll: { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24 },
-  eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
-  title: { color: theme.colors.text, fontSize: 30, lineHeight: 34, fontWeight: "300", letterSpacing: -1, marginTop: 6 },
-  step: { marginTop: 28, gap: 12 },
-  stepHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  stepLabel: { color: theme.colors.text, fontSize: 12, letterSpacing: 2, textTransform: "uppercase" },
-  stepHint: { color: theme.colors.textSecondary, fontSize: 11 },
+  scroll: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24 },
+  titleLine: { fontSize: 30 },
+  titleItalic: { fontStyle: "italic" },
+  stepper: { flexDirection: "row", gap: 6, marginTop: 20 },
+  stepperSeg: { flex: 1, height: 3, borderRadius: 2, backgroundColor: "transparent", borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" },
+  stepperSegCurrent: { borderColor: theme.colors.borderStrong },
+  stepperSegDone: { borderWidth: 0 },
+  card: { marginTop: 16 },
+  cardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   emptyGarment: {
     borderWidth: 1, borderColor: theme.colors.border, borderStyle: "dashed",
     paddingVertical: 22, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 10,
-    borderRadius: 12,
+    borderRadius: theme.radius.md, marginTop: 12,
   },
   emptyGarmentText: { color: theme.colors.text, fontSize: 14 },
-  bgManageBtn: {
+  manageBtnRow: { alignItems: "flex-end" },
+  manageBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
     paddingVertical: 6, paddingHorizontal: 10,
     borderWidth: 1, borderColor: theme.colors.border,
-    borderRadius: 8,
+    borderRadius: theme.radius.sm,
   },
-  bgManageText: {
+  manageBtnText: {
     color: theme.colors.text, fontSize: 10, letterSpacing: 1.2, textTransform: "uppercase",
-  },
-  customBgLabel: {
-    color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2,
-    textTransform: "uppercase",
   },
   customBgRow: { gap: 10, paddingRight: 12 },
   customBg: {
     width: 110, borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: "#fff", borderRadius: 12, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4,
+    backgroundColor: theme.colors.bgElevated, borderRadius: theme.radius.sm, overflow: "hidden",
   },
-  customBgActive: { borderColor: theme.colors.text, borderWidth: 2 },
-  customBgImg: { width: "100%", height: 120, resizeMode: "cover", borderTopLeftRadius: 11, borderTopRightRadius: 11 },
+  customBgActive: { borderColor: `${theme.colors.magic2}66`, borderWidth: 2 },
+  customBgImg: { width: "100%", height: 120, resizeMode: "cover" },
   customBgName: { color: theme.colors.textSecondary, fontSize: 11, padding: 8 },
   customBgBadge: {
     position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
     backgroundColor: theme.colors.primary, alignItems: "center", justifyContent: "center",
   },
-  customBgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16 },
-  garmentRow: { gap: 12, paddingRight: 12 },
-  garment: {
-    width: 110, borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: "#fff", borderRadius: 12, overflow: "hidden",
-    shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4,
-  },
-  garmentActive: { borderColor: theme.colors.text, borderWidth: 2 },
-  garmentImg: { width: "100%", height: 120, borderTopLeftRadius: 11, borderTopRightRadius: 11 },
-  garmentName: { color: theme.colors.textSecondary, fontSize: 11, padding: 8 },
-  checkBadge: {
-    position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 11,
-    backgroundColor: theme.colors.primary, alignItems: "center", justifyContent: "center",
-  },
-  varsRow: { flexDirection: "row", gap: 10 },
+  garmentRow: { gap: 12, paddingRight: 12, marginTop: 12 },
+  garmentFrame: { width: 74, height: 92, borderRadius: 14 },
+  varsRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   varBtn: {
     flex: 1, paddingVertical: 16, borderWidth: 1, borderColor: theme.colors.border,
-    alignItems: "center", borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+    alignItems: "center", borderRadius: theme.radius.md,
     backgroundColor: theme.colors.surface,
   },
   varBtnActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
   varText: { color: theme.colors.text, fontSize: 16, fontWeight: "500" },
   varTextActive: { color: theme.colors.primaryFg },
-  lookHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: -4 },
+  lookHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16 },
   modelChip: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    // Outlined (not filled) so it reads as an ACTION, not a selected age chip —
-    // only one option in the row should ever look "selected".
-    backgroundColor: "transparent", borderColor: theme.colors.primary, borderStyle: "dashed",
+    minHeight: 44, paddingHorizontal: 17, paddingVertical: 11, borderRadius: theme.radius.pill,
+    borderWidth: 1, borderColor: theme.colors.borderStrong, borderStyle: "dashed",
+    backgroundColor: "transparent",
   },
-  modelChipText: { color: theme.colors.primary, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
-  priceToggleRow: {
-    flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
-  },
+  modelChipText: { color: theme.colors.text, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
+  toggleRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   checkbox: {
-    width: 22, height: 22, borderWidth: 1.5, borderRadius: 6,
+    width: 22, height: 22, borderWidth: 1.5, borderRadius: theme.radius.sm - 7,
     borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.bg,
     alignItems: "center", justifyContent: "center", marginTop: 2,
   },
   checkboxOn: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
   checkboxMark: { color: theme.colors.primaryFg, fontSize: 14, fontWeight: "900", lineHeight: 16 },
-  priceToggleLabel: { color: theme.colors.text, fontSize: 14, fontWeight: "600" },
-  priceToggleHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 15, marginTop: 3 },
-  accBox: {
-    marginTop: 8, gap: 12, padding: 14,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 12,
-  },
-  accSubLabel: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2, textTransform: "uppercase" },
-  accBtnRow: { flexDirection: "row", gap: 10 },
-  accBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    paddingVertical: 12, borderWidth: 1, borderStyle: "dashed", borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bg, borderRadius: 10,
-  },
-  accBtnText: { color: theme.colors.text, fontSize: 13, fontWeight: "600", letterSpacing: 0.3 },
-  accEmpty: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, fontStyle: "italic" },
-  accThumbWrap: {
-    width: 90, height: 110, backgroundColor: "#fff",
-    borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10,
-    overflow: "hidden", position: "relative",
-  },
-  accThumb: { width: "100%", height: 80 },
-  accThumbLabelWrap: { paddingHorizontal: 6, paddingVertical: 4, borderTopWidth: 1, borderTopColor: theme.colors.border },
-  accThumbLabel: { color: theme.colors.text, fontSize: 10, letterSpacing: 0.2 },
-  accRemoveBtn: {
-    position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11,
-    backgroundColor: "rgba(0,0,0,0.75)", alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.3)",
-  },
+  toggleLabel: { color: theme.colors.text, fontSize: 14, fontWeight: "600", marginBottom: 3 },
   providerChip: {
     padding: 14, borderWidth: 1, borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface, minWidth: 200, gap: 6,
-    borderRadius: 12,
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
+    borderRadius: theme.radius.md,
   },
   providerChipActive: { borderColor: theme.colors.text, borderWidth: 2 },
   providerChipDisabled: { opacity: 0.45 },
   providerName: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
-  providerNameActive: { color: theme.colors.text },
   providerDesc: { color: theme.colors.textSecondary, fontSize: 10, lineHeight: 14 },
   ctaWrap: {
     position: "absolute", left: 0, right: 0, bottom: 80,
-    padding: 20, backgroundColor: theme.colors.bg,
+    padding: 20, gap: 10, backgroundColor: theme.colors.bg,
     borderTopWidth: 1, borderTopColor: theme.colors.border,
   },
-  cta: {
-    paddingVertical: 20, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12,
-    borderRadius: 16,
-    shadowColor: "#E11D48", shadowOpacity: 0.55, shadowRadius: 18, shadowOffset: { width: 0, height: 0 },
-    elevation: 12,
-  },
-  ctaText: { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: 0.6 },
-  presetCard: {
+  hintRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6 },
+  hintSpark: { fontSize: 12, fontWeight: "700" },
+  hintText: { color: theme.colors.textMuted, fontSize: 11, letterSpacing: 0.4, textAlign: "center", flexShrink: 1 },
+  presetRow: {
     flexDirection: "row", gap: 12, padding: 12,
-    borderWidth: 1, borderColor: theme.colors.text,
-    backgroundColor: theme.colors.surface, alignItems: "center", marginTop: 4, borderRadius: 12,
+    borderWidth: 1, borderColor: `${theme.colors.magic2}66`,
+    backgroundColor: theme.colors.surfaceAlt, alignItems: "center", marginTop: 4, borderRadius: theme.radius.md,
   },
   presetThumb: {
-    width: 56, height: 84, backgroundColor: "#111",
-    borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8,
+    width: 56, height: 84, backgroundColor: theme.colors.bgElevated,
+    borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radius.sm,
   },
-  presetLabel: { color: theme.colors.textMuted, fontSize: 9, letterSpacing: 2, textTransform: "uppercase" },
   presetName: { color: theme.colors.text, fontSize: 16, fontWeight: "700" },
-  presetHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 14 },
-  presetChange: {
-    paddingVertical: 6, paddingHorizontal: 10,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.bg, borderRadius: 8,
-  },
-  presetChangeText: { color: theme.colors.text, fontSize: 11, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase" },
-  presetClear: {
-    paddingVertical: 6, paddingHorizontal: 10,
-    borderWidth: 1, borderColor: theme.colors.error, borderRadius: 8,
-  },
-  presetClearText: { color: theme.colors.error, fontSize: 11, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase" },
-});
-
-const chipStyles = StyleSheet.create({
-  wrap: { gap: 8 },
-  label: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2, textTransform: "uppercase" },
-  row: { gap: 8, paddingRight: 12 },
-  chip: {
-    paddingVertical: 10, paddingHorizontal: 16,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 20,
-  },
-  chipActive: { backgroundColor: theme.colors.text, borderColor: theme.colors.text },
-  chipText: { color: theme.colors.text, fontSize: 13, letterSpacing: 0.3 },
-  chipTextActive: { color: theme.colors.primaryFg, fontWeight: "600" },
 });

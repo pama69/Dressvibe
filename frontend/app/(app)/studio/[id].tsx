@@ -17,9 +17,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
-import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/src/api/client";
-import { theme, MAGIC_GRADIENT } from "@/src/theme";
+import { theme } from "@/src/theme";
+import { GradientText, Button, Chip, Card, Badge, type as noirType } from "@/src/components/noir";
 import VideoCard from "@/src/components/VideoCard";
 import InstagramShareSheet from "@/src/components/InstagramShareSheet";
 import PublishSheet, { type PublishChannel } from "@/src/components/PublishSheet";
@@ -90,6 +90,9 @@ export default function Studio() {
   // Guided "ritocchi" — same component/logic as the Generation screen, reused
   // to edit an already-generated photo with the identical 5 questions.
   const [tweaks, setTweaks] = useState<Tweaks>(EMPTY_TWEAKS);
+  // Purely presentational — collapses the "Ritocchi guidati" block behind a
+  // disclosure header (Noir Atelier restyle). Doesn't affect the tweaks data.
+  const [tweaksOpen, setTweaksOpen] = useState(false);
   const [capBusy, setCapBusy] = useState(false);
   const [genTitle, setGenTitle] = useState("");
   const [videoProviders, setVideoProviders] = useState<any[]>([]);
@@ -155,7 +158,6 @@ export default function Studio() {
   // one-time useEffect would only fire once. useFocusEffect runs on EVERY entry
   // into the screen, so the sheet re-opens each time we arrive with focus=publish.
   const scrollRef = useRef<ScrollView>(null);
-  const publishY = useRef(0);
   useFocusEffect(
     useCallback(() => {
       if (focus !== "publish") return;
@@ -843,35 +845,29 @@ export default function Studio() {
     }
   };
 
+  const activeTweaksCount = Object.values(tweaks).filter((v) => v.trim().length > 0).length;
+
   return (
     <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <View style={s.header}>
-          <TouchableOpacity onPress={() => router.back()} testID="studio-back">
+          <TouchableOpacity onPress={() => router.back()} testID="studio-back" hitSlop={8}>
             <Ionicons name="chevron-back" size={24} color={theme.colors.text} />
           </TouchableOpacity>
-          <Text style={s.headerTitle}>Studio</Text>
-          <TouchableOpacity onPress={resetImage} testID="studio-reset">
-            <Ionicons name="refresh-outline" size={20} color={theme.colors.text} />
+          <Text style={noirType.eyebrow}>STUDIO</Text>
+          <TouchableOpacity onPress={resetImage} testID="studio-reset" hitSlop={8}>
+            <Ionicons name="refresh" size={20} color={theme.colors.text} />
           </TouchableOpacity>
         </View>
 
-        {edited ? (
-          <View style={s.editedBanner} testID="studio-edited-banner">
-            <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
-            <Text style={s.editedText}>
-              Modifica salvata nella galleria di questa generazione
-            </Text>
-          </View>
-        ) : null}
-
-        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingBottom: 110 }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scrollRef} contentContainerStyle={s.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={s.imageWrap}>
             {loading || !image ? (
               <View style={s.imagePh}><ActivityIndicator color={theme.colors.text} /></View>
             ) : (
-              <Image source={{ uri: `data:image/png;base64,${image}` }} style={s.image} />
+              <Image source={{ uri: `data:image/png;base64,${image}` }} style={s.image} resizeMode="cover" />
             )}
+            <Badge style={s.aiBadge}>✦ AI EDIT</Badge>
             {busy && (
               <View style={s.busyOverlay}>
                 <ActivityIndicator color="#fff" />
@@ -880,83 +876,90 @@ export default function Studio() {
             )}
           </View>
 
+          {edited ? (
+            <View style={s.editedBanner} testID="studio-edited-banner">
+              <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
+              <Text style={s.editedText}>
+                Modifica salvata nella galleria di questa generazione
+              </Text>
+            </View>
+          ) : null}
+
           {/* Quick edits */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Modifiche rapide</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }}>
+          <Card style={s.card}>
+            <Text style={noirType.h2}>Modifiche rapide</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
               {QUICK_EDITS.map((q) => (
-                <TouchableOpacity
-                  key={q.label}
-                  onPress={() => applyEdit(q.prompt)}
-                  disabled={busy}
-                  style={s.quickChip}
-                  testID={`quick-${q.label}`}
-                >
-                  <Text style={s.quickText}>{q.label}</Text>
-                </TouchableOpacity>
+                <View key={q.label} testID={`quick-${q.label}`}>
+                  <Chip onPress={() => { if (!busy) applyEdit(q.prompt); }} style={busy ? s.chipDisabled : undefined}>
+                    {q.label}
+                  </Chip>
+                </View>
               ))}
             </ScrollView>
-          </View>
+          </Card>
 
           {/* "Inserisci prezzi nell'immagine" toggle — when ON, every
               edit/look call (quick-edits, custom edit, Cambia look)
               passes add_price_tags=true to the backend so Gemini
               overlays price tags using the descriptions provided in the
               garment "Descrizione e prezzi" field. */}
-          <View style={s.section}>
+          <Card style={s.card}>
             <TouchableOpacity
               onPress={() => setAddPriceTags((v) => !v)}
               activeOpacity={0.8}
-              style={s.priceToggleRow}
+              style={s.toggleRow}
               testID="studio-toggle-prices"
             >
               <View style={[s.checkbox, addPriceTags && s.checkboxOn]}>
                 {addPriceTags ? <Text style={s.checkboxMark}>✓</Text> : null}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.priceToggleLabel}>Inserisci prezzi nell&apos;immagine</Text>
-                <Text style={s.priceToggleHint}>
+                <Text style={s.toggleLabel}>Inserisci prezzi nell&apos;immagine</Text>
+                <Text style={s.hint}>
                   Aggiunge cartellini con i prezzi (presi dalla descrizione del capo) accanto ai capi corrispondenti, durante le modifiche.
                 </Text>
               </View>
             </TouchableOpacity>
-          </View>
+          </Card>
 
           {/* "Aggiungi accessori" toggle — same UX as on the Generation
               screen. When ON, the user can attach up to 5 accessory
               photos (shoes, bags, jewelry, etc.) that the AI MUST
               include in the edited photo. Each apply consumes the list
               so accessories aren't re-applied on the next edit. */}
-          <View style={s.section}>
+          <Card style={s.card}>
             <TouchableOpacity
               onPress={() => setAddAccessories((v) => !v)}
               activeOpacity={0.8}
-              style={s.priceToggleRow}
+              style={s.toggleRow}
               testID="studio-toggle-accessories"
             >
               <View style={[s.checkbox, addAccessories && s.checkboxOn]}>
                 {addAccessories ? <Text style={s.checkboxMark}>✓</Text> : null}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.priceToggleLabel}>Aggiungi accessori</Text>
-                <Text style={s.priceToggleHint}>
+                <Text style={s.toggleLabel}>Aggiungi accessori</Text>
+                <Text style={s.hint}>
                   Carica foto di scarpe, borse, gioielli, cappelli, occhiali ecc. che la modella DEVE indossare nella foto modificata.
                 </Text>
               </View>
             </TouchableOpacity>
             {addAccessories ? (
-              <AccessoryPicker
-                enabled={addAccessories}
-                items={accessories}
-                setItems={setAccessories}
-                testIdScope="acc-studio"
-              />
+              <View style={{ marginTop: 12 }}>
+                <AccessoryPicker
+                  enabled={addAccessories}
+                  items={accessories}
+                  setItems={setAccessories}
+                  testIdScope="acc-studio"
+                />
+              </View>
             ) : null}
-          </View>
+          </Card>
 
           {/* Custom edit */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>Modifica personalizzata</Text>
+          <Card style={s.card}>
+            <Text style={noirType.h2}>Modifica personalizzata</Text>
             <TextInput
               value={editPrompt} onChangeText={setEditPrompt}
               placeholder="es. Aggiungi il prezzo €49 in alto a sinistra"
@@ -965,128 +968,135 @@ export default function Studio() {
               testID="studio-prompt"
               multiline
             />
+          </Card>
 
-            {/* Ritocchi guidati — le stesse 5 domande della schermata Genera,
-                riusate qui per correggere la foto già generata. Vengono
-                applicate solo quando l'utente preme "Applica modifica". */}
-            <View style={{ marginTop: 14, gap: 8 }}>
-              <Text style={s.sectionLabel}>
-                🎯 Ritocchi guidati{" "}
-                <Text style={s.lookHint}>{hasTweaks(tweaks) ? "· attivi" : "· facoltativi"}</Text>
-              </Text>
-              <Text style={s.lookHint}>
-                Rispondi solo dove serve: rimuovere qualcosa, cambiare colori, sfondo, posa. Poi premi "Applica modifica".
-              </Text>
-              <PromptTweaks value={tweaks} onChange={setTweaks} testIdScope="studio-tweaks" />
-            </View>
+          {/* Ritocchi guidati — le stesse 5 domande della schermata Genera,
+              riusate qui per correggere la foto già generata. Vengono
+              applicate solo quando l'utente preme "Applica modifica".
+              Collassato dietro un header disclosure (solo presentazione). */}
+          <Card style={s.card}>
+            <TouchableOpacity
+              onPress={() => setTweaksOpen((v) => !v)}
+              activeOpacity={0.8}
+              style={s.collapseHeader}
+              testID="studio-tweaks-toggle"
+            >
+              <Text style={noirType.h2}>🎯 Ritocchi guidati</Text>
+              <View style={s.collapseRight}>
+                {activeTweaksCount > 0 ? <Badge>{`${activeTweaksCount} attivo`}</Badge> : null}
+                <Ionicons
+                  name={tweaksOpen ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color={theme.colors.textSecondary}
+                />
+              </View>
+            </TouchableOpacity>
+            {tweaksOpen ? (
+              <View style={{ marginTop: 14, gap: 8 }}>
+                <Text style={s.hint}>
+                  Rispondi solo dove serve: rimuovere qualcosa, cambiare colori, sfondo, posa. Poi premi "Applica modifica".
+                </Text>
+                <PromptTweaks value={tweaks} onChange={setTweaks} testIdScope="studio-tweaks" />
+              </View>
+            ) : null}
+          </Card>
 
-            {/* Genera Video — collocato fra la modifica personalizzata
-                e il bottone "Applica modifica" su richiesta dell'utente. */}
-            <View style={{ marginTop: 8, gap: 8 }}>
-              <Text style={s.sectionLabel}>🎬 Genera Video</Text>
-              <Text style={s.videoHint}>
-                Crea una clip 9:16 da questa foto: la modella gira su se stessa, cammina, mostra l'outfit. ~60–120 secondi di attesa.
-              </Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 16 }}>
-                {videoProviders.map((p) => (
-                  <TouchableOpacity
-                    key={p.id}
-                    onPress={() => handleGenerateVideo(p.id)}
-                    disabled={!p.enabled || videoBusy}
-                    style={[s.videoBtn, (!p.enabled || videoBusy) && { opacity: 0.45 }]}
-                    testID={`video-${p.id}`}
+          {/* Genera Video */}
+          <Card style={s.card}>
+            <Text style={noirType.h2}>🎬 Genera Video</Text>
+            <Text style={s.hint}>
+              Crea una clip 9:16 da questa foto: la modella gira su se stessa, cammina, mostra l'outfit. ~60–120 secondi di attesa.
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
+              {videoProviders.map((p) => (
+                <View key={p.id} testID={`video-${p.id}`}>
+                  <Chip
+                    onPress={() => { if (p.enabled && !videoBusy) handleGenerateVideo(p.id); }}
+                    style={[s.videoChip, (!p.enabled || videoBusy) && s.chipDisabled]}
                   >
-                    <Text style={s.videoBtnName}>{p.name}</Text>
-                    <Text style={s.videoBtnSub}>
-                      {p.enabled ? "✨ Pronto" : `🔒 ${p.missing_keys?.join(", ")}`}
-                    </Text>
-                  </TouchableOpacity>
+                    <View style={{ alignItems: "flex-start" }}>
+                      <Text style={s.videoBtnName}>{p.name}</Text>
+                      <Text style={s.videoBtnSub}>
+                        {p.enabled ? "✨ Pronto" : `🔒 ${p.missing_keys?.join(", ")}`}
+                      </Text>
+                    </View>
+                  </Chip>
+                </View>
+              ))}
+            </ScrollView>
+
+            {videoBusy ? (
+              <View style={s.videoBusy} testID="video-busy">
+                <ActivityIndicator color={theme.colors.text} />
+                <Text style={s.videoBusyText}>Sto generando il video… può richiedere 1–3 minuti</Text>
+              </View>
+            ) : null}
+
+            {videos.length > 0 ? (
+              <View style={{ gap: 18, marginTop: 4 }} testID="video-list">
+                <Text style={noirType.label}>I tuoi video ({videos.length})</Text>
+                {videos.map((v) => (
+                  <VideoCard
+                    key={v.id}
+                    url={v.playback_url || v.video_url}
+                    expired={!v.archived}
+                    width={300}
+                    height={Math.round(300 * (16 / 9))}
+                    onDelete={() => handleDeleteVideo(v.id)}
+                    onPublish={() => { setVideoPublishTarget(v); setPublishOpen(true); }}
+                    publishing={publishingTgVideoId === v.id || waVideoId === v.id}
+                    onSaveToGallery={() => handleSaveVideoToGallery(v)}
+                  />
                 ))}
-              </ScrollView>
-
-              {videoBusy ? (
-                <View style={s.videoBusy} testID="video-busy">
-                  <ActivityIndicator color={theme.colors.text} />
-                  <Text style={s.videoBusyText}>Sto generando il video… può richiedere 1–3 minuti</Text>
-                </View>
-              ) : null}
-
-              {videos.length > 0 ? (
-                <View style={{ gap: 18, marginTop: 4 }} testID="video-list">
-                  <Text style={s.videoListLabel}>I tuoi video ({videos.length})</Text>
-                  {videos.map((v) => (
-                    <VideoCard
-                      key={v.id}
-                      url={v.playback_url || v.video_url}
-                      expired={!v.archived}
-                      width={300}
-                      height={Math.round(300 * (16 / 9))}
-                      onDelete={() => handleDeleteVideo(v.id)}
-                      onPublish={() => { setVideoPublishTarget(v); setPublishOpen(true); }}
-                      publishing={publishingTgVideoId === v.id || waVideoId === v.id}
-                      onSaveToGallery={() => handleSaveVideoToGallery(v)}
-                    />
-                  ))}
-                </View>
-              ) : null}
-            </View>
-          </View>
+              </View>
+            ) : null}
+          </Card>
 
           {/* Cambia look — 5 preset estetici che ri-renderizzano la foto
               mantenendo modello e outfit. Tap = SELEZIONE only (no auto-run).
               The actual edit fires when the user presses "Applica modifica"
               at the bottom of the section. */}
-          <View style={s.section}>
-            <Text style={s.sectionLabel}>✨ Cambia look</Text>
-            <Text style={s.lookHint}>
+          <Card style={s.card}>
+            <Text style={noirType.h2}>✨ Cambia look</Text>
+            <Text style={s.hint}>
               Cinque stili pronti per ri-renderizzare la foto. Modello e outfit restano identici — cambia solo l'estetica. Selezionane uno e poi premi "Applica modifica" in fondo.
             </Text>
-            <View style={s.lookGrid}>
+            <View style={s.chipWrap}>
               {LOOK_PRESETS.map((lp) => {
                 const active = selectedLookId === lp.id;
                 return (
-                  <TouchableOpacity
-                    key={lp.id}
-                    onPress={() => {
-                      setSelectedLookId((curr) => (curr === lp.id ? null : lp.id));
-                    }}
-                    disabled={busy}
-                    style={[s.lookBtn, active && s.lookBtnActive, busy && { opacity: 0.45 }]}
-                    activeOpacity={0.85}
-                    testID={`studio-look-${lp.id}`}
-                  >
-                    <Text style={s.lookEmoji}>{lp.emoji}</Text>
-                    <Text style={[s.lookLabel, active && s.lookLabelActive]}>{lp.label}</Text>
-                  </TouchableOpacity>
+                  <View key={lp.id} testID={`studio-look-${lp.id}`}>
+                    <Chip
+                      active={active}
+                      onPress={() => { if (!busy) setSelectedLookId((curr) => (curr === lp.id ? null : lp.id)); }}
+                      style={busy ? s.chipDisabled : undefined}
+                    >
+                      {`${lp.emoji} ${lp.label}`}
+                    </Chip>
+                  </View>
                 );
               })}
             </View>
 
             {/* Manual "Applica modifica" button — fires only on press, and
                 combines: free text + selected look preset + add_price_tags. */}
-            <TouchableOpacity
-              onPress={runManualEdit}
-              disabled={!canApplyManual || busy}
-              activeOpacity={0.85}
-              testID="studio-apply"
-              style={{ marginTop: 12 }}
-            >
-              <LinearGradient
-                colors={MAGIC_GRADIENT}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                style={[s.applyBtn, (!canApplyManual || busy) && { opacity: 0.45 }]}
+            <View testID="studio-apply">
+              <Button
+                variant="grad"
+                disabled={!canApplyManual || busy}
+                onPress={runManualEdit}
+                style={{ marginTop: 14 }}
               >
-                <Ionicons name="sparkles" size={16} color="#fff" />
-                <Text style={s.applyText}>Applica modifica</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
+                ✦ Applica modifica
+              </Button>
+            </View>
+          </Card>
 
           {/* Testo del post — UNICO testo usato da tutti i canali
               (Instagram, Facebook, Telegram, WhatsApp). */}
-          <View style={s.section}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <Text style={s.sectionLabel}>📝 Testo del post</Text>
+          <Card style={s.card}>
+            <View style={s.rowBetween}>
+              <Text style={noirType.h2}>📝 Testo del post</Text>
               <TouchableOpacity
                 onPress={generatePostText}
                 disabled={capBusy}
@@ -1098,13 +1108,13 @@ export default function Studio() {
                   <ActivityIndicator color={theme.colors.text} size="small" />
                 ) : (
                   <>
-                    <Ionicons name="sparkles-outline" size={14} color={theme.colors.text} />
+                    <GradientText style={s.sparkText}>✦</GradientText>
                     <Text style={s.aiGenText}>Genera con AI</Text>
                   </>
                 )}
               </TouchableOpacity>
             </View>
-            <Text style={s.tgHint}>
+            <Text style={s.hint}>
               Un solo testo, usato ovunque: su Instagram/Facebook come caption, su Telegram sotto la foto,
               e su WhatsApp sopra il link "Premi qui per ricevere info".
             </Text>
@@ -1114,57 +1124,44 @@ export default function Studio() {
               multiline
               placeholder="es. Nuovo arrivo — Maglione Cashmere · €189 · Tg S/M/L · Disponibile in negozio o spedizione gratuita"
               placeholderTextColor={theme.colors.textMuted}
-              style={[s.input, { minHeight: 90, textAlignVertical: "top" }]}
+              style={[s.input, s.textarea]}
               testID="tg-description-input"
               maxLength={1000}
             />
-            <Text style={s.tgCounter}>{tgDescription.length}/1000</Text>
-          </View>
+            <Text style={s.counter}>{tgDescription.length}/1000</Text>
+          </Card>
 
-          {/* Pubblica — unico punto d'ingresso: apre un foglio con i canali. */}
-          <View
-            style={s.section}
-            onLayout={(e) => { publishY.current = e.nativeEvent.layout.y; }}
-          >
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <TouchableOpacity
-                onPress={() => { setVideoPublishTarget(null); setPublishOpen(true); }}
-                activeOpacity={0.9}
-                testID="open-publish-sheet"
-                disabled={busy || igFbBusy !== null || waBusy}
-                style={{ flex: 1 }}
-              >
-                <LinearGradient
-                  colors={MAGIC_GRADIENT}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                  style={[s.publishCta, (busy || igFbBusy !== null || waBusy) && { opacity: 0.6 }]}
-                >
-                  {busy || igFbBusy !== null || waBusy ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <>
-                      <Ionicons name="paper-plane" size={18} color="#fff" />
-                      <Text style={s.publishCtaText}>Pubblica</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={saveCurrentImage}
-                activeOpacity={0.85}
-                testID="studio-download"
-                style={s.downloadBtn}
-              >
-                <Ionicons name="download-outline" size={18} color={theme.colors.text} />
-                <Text style={s.downloadText}>Scarica</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={[s.tgHint, { textAlign: "center" }]}>
-              Instagram, Facebook, Telegram, WhatsApp o scarica — con lo stesso testo del post.
-            </Text>
-          </View>
+          <Text style={[s.hint, { textAlign: "center", marginTop: 4 }]}>
+            Instagram, Facebook, Telegram, WhatsApp o scarica — con lo stesso testo del post.
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Fixed bottom bar — Pubblica apre il foglio canali (foto corrente o,
+          se avviato da una VideoCard, il video passato in videoPublishTarget).
+          Scarica salva/scarica l'immagine corrente. */}
+      <View style={s.bottomBar}>
+        <View style={{ flex: 1 }} testID="open-publish-sheet">
+          <Button
+            variant="grad"
+            style={{ flex: 1 }}
+            disabled={busy || igFbBusy !== null || waBusy}
+            onPress={() => { setVideoPublishTarget(null); setPublishOpen(true); }}
+          >
+            {busy || igFbBusy !== null || waBusy ? (
+              <ActivityIndicator color={theme.colors.onGradient} />
+            ) : (
+              "Pubblica"
+            )}
+          </Button>
+        </View>
+        <View testID="studio-download">
+          <Button variant="ghost" style={{ width: 110 }} onPress={saveCurrentImage}>
+            ⬇ Scarica
+          </Button>
+        </View>
+      </View>
+
       <InstagramShareSheet
         visible={!!igSheet}
         onClose={() => setIgSheet(null)}
@@ -1192,102 +1189,40 @@ const s = StyleSheet.create({
     alignItems: "center", justifyContent: "space-between",
     borderBottomWidth: 1, borderBottomColor: theme.colors.border,
   },
-  headerTitle: { color: theme.colors.text, fontSize: 14, letterSpacing: 2, textTransform: "uppercase" },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
   imageWrap: {
-    marginTop: 16, aspectRatio: 9 / 16, position: "relative",
-    alignSelf: "center", width: "100%", maxWidth: 380,
-    backgroundColor: "#fff", borderRadius: 18, padding: 6,
-    shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 8,
+    marginTop: 16, height: 330, position: "relative",
+    borderRadius: 24, overflow: "hidden", backgroundColor: theme.colors.surface,
   },
-  imagePh: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.surface, borderRadius: 13 },
-  image: { width: "100%", height: "100%", borderRadius: 13 },
+  imagePh: { flex: 1, alignItems: "center", justifyContent: "center" },
+  image: { width: "100%", height: "100%" },
+  aiBadge: { position: "absolute", top: 12, left: 12 },
   busyOverlay: {
-    ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.55)",
+    ...StyleSheet.absoluteFillObject, backgroundColor: theme.colors.overlay,
     alignItems: "center", justifyContent: "center", gap: 10,
   },
   busyText: { color: "#fff", fontSize: 12, letterSpacing: 1 },
-  section: { paddingHorizontal: 24, marginTop: 24, gap: 10 },
-  sectionLabel: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2, textTransform: "uppercase" },
-  sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  captionGen: { color: theme.colors.text, fontSize: 12, fontWeight: "500" },
+  card: { marginTop: 16, gap: 10 },
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  chipRow: { gap: 8, paddingRight: 16 },
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  chipDisabled: { opacity: 0.45 },
+  hint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16 },
+  input: {
+    backgroundColor: "rgba(0,0,0,0.30)", borderWidth: 1, borderColor: theme.colors.border,
+    color: theme.colors.text, padding: 14, fontSize: 14, minHeight: 50, borderRadius: 14,
+  },
+  textarea: { minHeight: 90, textAlignVertical: "top" },
+  counter: { color: theme.colors.textMuted, fontSize: 10, textAlign: "right", marginTop: 4 },
   aiGenBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
     paddingVertical: 7, paddingHorizontal: 12,
-    borderWidth: 1, borderColor: theme.colors.borderStrong, borderRadius: 20,
+    borderWidth: 1, borderColor: theme.colors.borderStrong, borderRadius: theme.radius.pill,
     backgroundColor: theme.colors.surface,
   },
   aiGenText: { color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.2 },
-  tgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: 4, marginBottom: 8 },
-  publishCta: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
-    paddingVertical: 18, borderRadius: 16,
-    shadowColor: "#7c3aed", shadowOpacity: 0.5, shadowRadius: 16, shadowOffset: { width: 0, height: 0 }, elevation: 10,
-  },
-  publishCtaText: { color: "#fff", fontSize: 16, fontWeight: "700", letterSpacing: 0.6 },
-  downloadBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    paddingHorizontal: 16, borderRadius: 16,
-    borderWidth: 1, borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.bg,
-  },
-  downloadText: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
-  tgCounter: { color: theme.colors.textMuted, fontSize: 10, textAlign: "right", marginTop: 4 },
-  quickChip: {
-    paddingVertical: 10, paddingHorizontal: 14,
-    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", backgroundColor: "#252252",
-    borderRadius: 20,
-  },
-  quickText: { color: theme.colors.text, fontSize: 12 },
-  input: {
-    backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border,
-    color: theme.colors.text, padding: 14, fontSize: 14, minHeight: 60, borderRadius: 12,
-  },
-  applyBtn: {
-    paddingVertical: 14, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10,
-    borderRadius: 14,
-  },
-  applyText: { color: "#fff", fontWeight: "700", letterSpacing: 0.4 },
-  copyBtn: {
-    flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
-    paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.colors.border,
-    borderRadius: 10,
-  },
-  copyText: { color: theme.colors.text, fontSize: 12 },
-  shareRow: { flexDirection: "row", gap: 10, justifyContent: "center" },
-  autoPubBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    paddingVertical: 14, borderWidth: 1.5, backgroundColor: theme.colors.surface,
-    minHeight: 48, borderRadius: 14,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
-  },
-  autoPubText: { fontSize: 13, fontWeight: "700", letterSpacing: 0.4 },
-  shareIconBtn: {
-    width: 64, height: 64, alignItems: "center", justifyContent: "center",
-    backgroundColor: theme.colors.surface, borderRadius: 16,
-    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 3,
-  },
-  shareEmoji: { fontSize: 30, lineHeight: 36, textAlign: "center" },
-  shareWordBtn: {
-    flex: 1, paddingVertical: 16, paddingHorizontal: 6,
-    alignItems: "center", justifyContent: "center",
-    backgroundColor: theme.colors.surface, borderRadius: 14,
-    borderWidth: 1, borderColor: theme.colors.border, minHeight: 52,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2,
-  },
-  shareWord: { fontSize: 13, fontWeight: "700", letterSpacing: 0.2, textAlign: "center" },
-  shareBtn: {
-    flex: 1, alignItems: "center", paddingVertical: 18, gap: 6,
-    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)", backgroundColor: "#28265a",
-    borderRadius: 14,
-    shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
-  },
-  shareLabel: { color: theme.colors.text, fontSize: 11, letterSpacing: 0.6, textAlign: "center" },
-  shareSub: { color: theme.colors.textMuted, fontSize: 9, textAlign: "center" },
-  videoHint: { color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16, marginBottom: 4 },
-  videoBtn: {
-    paddingVertical: 14, paddingHorizontal: 18, borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#28265a", minWidth: 160, gap: 4, borderRadius: 12,
-    shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
-  },
+  sparkText: { fontSize: 13, fontWeight: "700" },
+  videoChip: { minHeight: 56, alignItems: "flex-start", paddingVertical: 10, minWidth: 160 },
   videoBtnName: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
   videoBtnSub: { color: theme.colors.textSecondary, fontSize: 10 },
   videoBusy: {
@@ -1296,38 +1231,16 @@ const s = StyleSheet.create({
     backgroundColor: theme.colors.surface, borderRadius: 12,
   },
   videoBusyText: { color: theme.colors.textSecondary, fontSize: 12, flex: 1 },
-  videoListLabel: { color: theme.colors.text, fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase" },
   editedBanner: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    marginHorizontal: 24, marginTop: 12, padding: 10,
+    marginTop: 12, padding: 10,
     borderWidth: 1, borderColor: theme.colors.success,
-    backgroundColor: "rgba(16,185,129,0.08)", borderRadius: 10,
+    backgroundColor: "rgba(52,211,153,0.08)", borderRadius: 10,
   },
   editedText: { color: theme.colors.success, fontSize: 12, flex: 1 },
-  lookHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, marginTop: -2 },
-  lookGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
-  lookBtn: {
-    flexBasis: "31%", flexGrow: 1,
-    paddingVertical: 14, paddingHorizontal: 8,
-    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    backgroundColor: "#28265a",
-    alignItems: "center", justifyContent: "center", gap: 4,
-    minWidth: 90, borderRadius: 12,
-    shadowColor: "#7c3aed", shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
-  },
-  lookBtnActive: {
-    borderColor: theme.colors.primary,
-    backgroundColor: "rgba(225,29,72,0.12)",
-    borderWidth: 2,
-  },
-  lookEmoji: { fontSize: 22 },
-  lookLabel: { color: theme.colors.text, fontSize: 12, fontWeight: "600", letterSpacing: 0.3 },
-  lookLabelActive: { color: theme.colors.primary, fontWeight: "700" },
-  priceToggleRow: {
-    flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 12,
-    borderWidth: 1, borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface, borderRadius: 12,
-  },
+  collapseHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  collapseRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  toggleRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   checkbox: {
     width: 22, height: 22, borderWidth: 1.5, borderRadius: 6,
     borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.bg,
@@ -1335,7 +1248,10 @@ const s = StyleSheet.create({
   },
   checkboxOn: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
   checkboxMark: { color: theme.colors.primaryFg, fontSize: 14, fontWeight: "900", lineHeight: 16 },
-  priceToggleLabel: { color: theme.colors.text, fontSize: 14, fontWeight: "600" },
-  priceToggleHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 15, marginTop: 3 },
+  toggleLabel: { color: theme.colors.text, fontSize: 14, fontWeight: "600" },
+  bottomBar: {
+    position: "absolute", left: 20, right: 20, bottom: 16,
+    flexDirection: "row", gap: 10,
+  },
 });
 

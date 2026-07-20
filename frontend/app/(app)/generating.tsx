@@ -4,7 +4,8 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
-import { theme, MAGIC_GRADIENT } from "@/src/theme";
+import { theme, MAGIC_GRADIENT, AURORA_ANGLE } from "@/src/theme";
+import { GradientText, Button, Skeleton, type as noirType, shadowAurora } from "@/src/components/noir";
 import { genStore } from "@/src/state/genStore";
 
 // Asset locale (ex Emergent CDN) — nessuna dipendenza esterna.
@@ -146,6 +147,10 @@ export default function Generating() {
     if (paramsRef.current) runGeneration(paramsRef.current);
   };
 
+  const handleCancel = () => {
+    router.replace("/(app)/generate");
+  };
+
   if (error) {
     const canRetry = secondsLeft === 0 && !!paramsRef.current;
     return (
@@ -178,7 +183,7 @@ export default function Generating() {
                   style={StyleSheet.absoluteFill}
                 />
               ) : null}
-              <Ionicons name="refresh" size={16} color={canRetry ? "#fff" : theme.colors.textSecondary} />
+              <Ionicons name="refresh" size={16} color={canRetry ? theme.colors.onGradient : theme.colors.textSecondary} />
               <Text style={[s.retryText, !canRetry && s.retryTextDisabled]}>
                 {canRetry ? "Riprova ora" : `Attendere ${secondsLeft}s`}
               </Text>
@@ -201,28 +206,54 @@ export default function Generating() {
     );
   }
 
+  const p = paramsRef.current;
+  const garmentsCount = p?.garment_ids?.length ?? 0;
+  const shotsCount = p?.num_variations ?? STEPS.length;
+  const summaryText = p
+    ? `${garmentsCount} cap${garmentsCount === 1 ? "o" : "i"} · ${shotsCount} scatt${shotsCount === 1 ? "o" : "i"} · ~20–40 secondi`
+    : "Preparazione dello scatto…";
+  const progressPercent = Math.round(((step + 1) / STEPS.length) * 100);
+
   return (
     <View style={s.c}>
-      <LinearGradient colors={["#050505", "#0b0b0b", "#050505"]} style={StyleSheet.absoluteFill} />
-
       <Animated.View style={[s.auraWrap, { transform: [{ rotate: rotateDeg }, { scale }] }]}>
         <Image source={MAGIC_AURA} style={s.aura} />
       </Animated.View>
 
       <View style={s.center}>
-        <View style={s.iconBubble}>
-          <LinearGradient colors={MAGIC_GRADIENT} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-          <Ionicons name="sparkles" size={28} color="#fff" />
+        <Animated.View style={[s.logo, shadowAurora, { transform: [{ scale }] }]}>
+          <LinearGradient colors={MAGIC_GRADIENT} {...AURORA_ANGLE} style={StyleSheet.absoluteFill} />
+          <Text style={s.logoGlyph}>✦</Text>
+        </Animated.View>
+
+        <View style={s.textBlock}>
+          <GradientText style={noirType.eyebrow}>SERVIZIO FOTOGRAFICO IN CORSO</GradientText>
+          <Text style={[noirType.display, s.heading]}>Creazione della</Text>
+          <GradientText style={[noirType.display, s.heading, s.headingItalic]}>magia in corso…</GradientText>
+          <Text style={[noirType.sub, s.summary]}>{summaryText}</Text>
         </View>
 
-        <Text style={s.headline}>Creazione della{"\n"}magia in corso…</Text>
-        <Text style={s.step} testID="generating-step">{STEPS[step]}</Text>
-
-        <View style={s.barTrack}>
-          <Animated.View style={[s.bar, { transform: [{ scaleX: pulse }] }]} />
+        <View style={s.skeletonRow}>
+          <Skeleton width={92} height={124} radius={16} delay={0} />
+          <Skeleton width={92} height={124} radius={16} delay={200} />
+          <Skeleton width={92} height={124} radius={16} delay={400} />
         </View>
 
-        <Text style={s.tip}>Tempo medio: 20–40 secondi</Text>
+        <View style={s.progressTrack}>
+          <LinearGradient
+            colors={MAGIC_GRADIENT}
+            {...AURORA_ANGLE}
+            style={[s.progressFill, { width: `${progressPercent}%` }]}
+          />
+        </View>
+
+        <Text style={[noirType.micro, s.microCenter]} testID="generating-step">
+          SCATTO {step + 1} DI {STEPS.length} · {STEPS[step]}
+        </Text>
+
+        <Button variant="ghost" small style={s.cancelBtnGrad} onPress={handleCancel}>
+          Annulla
+        </Button>
       </View>
     </View>
   );
@@ -232,22 +263,22 @@ const s = StyleSheet.create({
   c: { flex: 1, backgroundColor: theme.colors.bg, alignItems: "center", justifyContent: "center" },
   auraWrap: { position: "absolute", width: 520, height: 520, opacity: 0.35 },
   aura: { width: "100%", height: "100%" },
-  center: { alignItems: "center", gap: 24, paddingHorizontal: 32 },
-  iconBubble: {
-    width: 80, height: 80, alignItems: "center", justifyContent: "center", overflow: "hidden",
-    shadowColor: "#E11D48", shadowOpacity: 0.6, shadowRadius: 28, shadowOffset: { width: 0, height: 0 },
-    elevation: 12,
+  center: { alignItems: "center", gap: 20, paddingHorizontal: 28 },
+  logo: {
+    width: 74, height: 74, borderRadius: 30, alignItems: "center", justifyContent: "center", overflow: "hidden",
   },
-  headline: {
-    color: theme.colors.text, fontSize: 30, lineHeight: 36, fontWeight: "300",
-    textAlign: "center", letterSpacing: -0.8,
+  logoGlyph: { fontSize: 32, color: theme.colors.onGradient },
+  textBlock: { alignItems: "center", gap: 8 },
+  heading: { fontSize: 27, textAlign: "center" },
+  headingItalic: { fontStyle: "italic" },
+  summary: { textAlign: "center", maxWidth: 300 },
+  skeletonRow: { flexDirection: "row", gap: 12, justifyContent: "center" },
+  progressTrack: {
+    width: 220, height: 5, borderRadius: 3, backgroundColor: theme.colors.surfaceAlt, overflow: "hidden",
   },
-  step: { color: theme.colors.textSecondary, fontSize: 13, letterSpacing: 1.5 },
-  barTrack: {
-    width: 220, height: 2, backgroundColor: theme.colors.border, marginTop: 4, overflow: "hidden",
-  },
-  bar: { width: "100%", height: 2, backgroundColor: theme.colors.text },
-  tip: { color: theme.colors.textMuted, fontSize: 11, letterSpacing: 1 },
+  progressFill: { height: 5, borderRadius: 3 },
+  microCenter: { textAlign: "center" },
+  cancelBtnGrad: { marginTop: 26, alignSelf: "center", width: 130 },
 
   // Error UI
   errorIcon: {
@@ -273,7 +304,7 @@ const s = StyleSheet.create({
     gap: 10, overflow: "hidden", borderWidth: 1, borderColor: theme.colors.border,
   },
   retryBtnDisabled: { opacity: 0.6 },
-  retryText: { color: "#fff", fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
+  retryText: { color: theme.colors.onGradient, fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
   retryTextDisabled: { color: theme.colors.textSecondary },
   cancelBtn: { paddingVertical: 12, alignItems: "center", justifyContent: "center" },
   cancelText: {

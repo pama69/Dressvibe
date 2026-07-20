@@ -1,17 +1,11 @@
 import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ImageBackground,
-  Platform,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ImageBackground } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { theme, MAGIC_GRADIENT } from "@/src/theme";
+import { theme, MAGIC_GRADIENT, AURORA_ANGLE } from "@/src/theme";
+import { GradientText, type as noirType, shadowAurora } from "@/src/components/noir";
 
 // Asset locale (ex Emergent CDN) — nessuna dipendenza esterna.
 const HERO_BG = require("@/assets/images/login-hero.png");
@@ -27,12 +21,19 @@ export default function Login() {
       />
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
         <View style={styles.top}>
-          <Text style={styles.eyebrow} testID="login-eyebrow">
-            ATELIER DIGITALE
-          </Text>
-          <Text style={styles.brand} testID="login-brand">
-            DressVibe
-          </Text>
+          <View style={[styles.logoMark, shadowAurora]}>
+            <LinearGradient colors={MAGIC_GRADIENT} {...AURORA_ANGLE} style={StyleSheet.absoluteFill} />
+            <Text style={styles.logoGlyph}>✦</Text>
+          </View>
+
+          <View testID="login-eyebrow">
+            <GradientText style={noirType.eyebrow}>ATELIER DIGITALE</GradientText>
+          </View>
+
+          <View style={styles.brandRow} testID="login-brand">
+            <Text style={styles.brand}>Dress</Text>
+            <GradientText style={[styles.brand, styles.brandItalic]}>Vibe</GradientText>
+          </View>
         </View>
 
         <View style={styles.middle}>
@@ -50,16 +51,17 @@ export default function Login() {
             activeOpacity={0.85}
             onPress={() => router.push("/email-auth")}
             testID="login-email-button"
-            style={styles.googleBtn}
+            style={styles.primaryBtn}
           >
             <Ionicons name="mail-outline" size={20} color={theme.colors.primaryFg} />
-            <Text style={styles.googleText}>Accedi con Email</Text>
+            <Text style={styles.primaryBtnText}>Accedi con Email</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={() => router.push("/email-auth?mode=register")}
             testID="login-register-link"
+            style={styles.registerBtn}
           >
             <Text style={styles.registerLink}>
               Non hai un account?  <Text style={styles.registerLinkBold}>Registrati</Text>
@@ -67,12 +69,7 @@ export default function Login() {
           </TouchableOpacity>
 
           <View style={styles.magicHint}>
-            <LinearGradient
-              colors={MAGIC_GRADIENT}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.dot}
-            />
+            <LinearGradient colors={MAGIC_GRADIENT} {...AURORA_ANGLE} style={styles.dot} />
             <Text style={styles.hint}>
               Powered by AI · Realistico · Pronto in 30s
             </Text>
@@ -91,20 +88,28 @@ const styles = StyleSheet.create({
   bg: { flex: 1, backgroundColor: theme.colors.bg },
   safe: { flex: 1, paddingHorizontal: 28, justifyContent: "space-between" },
   top: { paddingTop: 24 },
-  eyebrow: {
-    color: theme.colors.textSecondary,
-    fontSize: 11,
-    letterSpacing: 4,
-    textTransform: "uppercase",
+  logoMark: {
+    width: 64,
+    height: 64,
+    borderRadius: 26,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 22,
   },
+  logoGlyph: {
+    color: theme.colors.onGradient,
+    fontSize: 28,
+  },
+  brandRow: { flexDirection: "row", marginTop: 10 },
   brand: {
     color: theme.colors.text,
     fontSize: 38,
-    fontWeight: "300",
+    fontWeight: "500",
     letterSpacing: -1,
-    marginTop: 6,
-    fontFamily: Platform.select({ ios: "Cormorant Garamond", default: undefined }),
+    fontFamily: theme.font.serif,
   },
+  brandItalic: { fontStyle: "italic" },
   middle: { gap: 16 },
   headline: {
     color: theme.colors.text,
@@ -112,6 +117,7 @@ const styles = StyleSheet.create({
     lineHeight: 48,
     fontWeight: "300",
     letterSpacing: -1.5,
+    fontFamily: theme.font.serif,
   },
   sub: {
     color: theme.colors.textSecondary,
@@ -120,8 +126,9 @@ const styles = StyleSheet.create({
     maxWidth: 320,
   },
   bottom: { paddingBottom: 8, gap: 18 },
-  googleBtn: {
+  primaryBtn: {
     backgroundColor: theme.colors.primary,
+    borderRadius: theme.radius.md,
     paddingVertical: 18,
     paddingHorizontal: 24,
     flexDirection: "row",
@@ -129,45 +136,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 10,
   },
-  googleText: {
+  primaryBtnText: {
     color: theme.colors.primaryFg,
     fontSize: 16,
     fontWeight: "600",
     letterSpacing: 0.3,
   },
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginVertical: 6,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.15)",
-  },
-  dividerText: {
-    color: theme.colors.textMuted,
-    fontSize: 11,
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-  },
-  emailBtn: {
+  registerBtn: {
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.35)",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  emailBtnText: {
-    color: theme.colors.text,
-    fontSize: 15,
-    fontWeight: "600",
-    letterSpacing: 0.3,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    paddingVertical: 14,
   },
   registerLink: {
     color: theme.colors.textSecondary,
@@ -176,11 +156,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   registerLinkBold: {
-    color: theme.colors.primary,
+    color: theme.colors.text,
     fontWeight: "700",
   },
   magicHint: { flexDirection: "row", alignItems: "center", gap: 8 },
-  dot: { width: 8, height: 8, borderRadius: 999 },
+  dot: { width: 8, height: 8, borderRadius: theme.radius.pill },
   hint: { color: theme.colors.textSecondary, fontSize: 12, letterSpacing: 1 },
   legal: { color: theme.colors.textMuted, fontSize: 11, textAlign: "center" },
 });

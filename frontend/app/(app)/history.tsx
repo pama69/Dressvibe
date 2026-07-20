@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
 } from "react-native";
@@ -15,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api/client";
 import { theme } from "@/src/theme";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
-import { LiquidCard } from "@/src/components/LiquidCard";
+import { GradientText, Card, PhotoFrame, type as noirType } from "@/src/components/noir";
 
 type GenItem = {
   id: string;
@@ -97,7 +96,10 @@ export default function History() {
       <View style={styles.header}>
         <View>
           <Text style={styles.eyebrow}>ARCHIVIO</Text>
-          <Text style={styles.title}>Le tue creazioni</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>Le tue </Text>
+            <GradientText style={styles.titleItalic}>creazioni</GradientText>
+          </View>
         </View>
         {!loading && items.length > 0 && (
           selecting ? (
@@ -144,54 +146,54 @@ export default function History() {
           renderItem={({ item }) => {
             const isSelected = selected.has(item.id);
             return (
-              <LiquidCard
-                style={[styles.row, isSelected && styles.rowSelected]}
-                testID={`history-item-${item.id}`}
-              >
-                {selecting && (
+              <View testID={`history-item-${item.id}`}>
+                <Card style={[styles.row, isSelected ? styles.rowSelected : undefined]}>
+                  {selecting && (
+                    <TouchableOpacity
+                      onPress={() => toggleSelect(item.id)}
+                      style={styles.checkWrap}
+                      hitSlop={8}
+                    >
+                      <View style={[styles.check, isSelected ? styles.checkActive : undefined]}>
+                        {isSelected && <Ionicons name="checkmark" size={13} color={theme.colors.onGradient} />}
+                      </View>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
-                    onPress={() => toggleSelect(item.id)}
-                    style={styles.checkWrap}
-                    hitSlop={8}
+                    activeOpacity={0.85}
+                    onPress={() => selecting ? toggleSelect(item.id) : router.push(`/results/${item.id}`)}
+                    style={styles.rowInner}
                   >
-                    <View style={[styles.check, isSelected && styles.checkActive]}>
-                      {isSelected && <Ionicons name="checkmark" size={13} color="#fff" />}
-                    </View>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => selecting ? toggleSelect(item.id) : router.push(`/results/${item.id}`)}
-                  style={styles.rowInner}
-                >
-                  <View style={styles.thumbWrap}>
                     {item.thumbnail ? (
-                      <Image source={{ uri: `data:image/jpeg;base64,${item.thumbnail}` }} style={styles.thumb} />
+                      <PhotoFrame
+                        source={{ uri: `data:image/jpeg;base64,${item.thumbnail}` }}
+                        style={styles.thumb}
+                      />
                     ) : (
                       <View style={[styles.thumb, styles.thumbEmpty]}>
                         <Ionicons name="image-outline" size={20} color={theme.colors.textMuted} />
                       </View>
                     )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowTitle} numberOfLines={1}>{item.title || "Generazione"}</Text>
-                    <Text style={styles.rowMeta}>
-                      {item.image_count || 0} immagini · {item.status === "done" ? "Pronto" : item.status}
-                    </Text>
-                  </View>
-                  {!selecting && <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />}
-                </TouchableOpacity>
-                {!selecting && (
-                  <TouchableOpacity
-                    onPress={() => handleDelete(item)}
-                    style={styles.rowDelete}
-                    testID={`history-delete-${item.id}`}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.deleteEmoji}>🗑️</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.rowTitle} numberOfLines={1}>{item.title || "Generazione"}</Text>
+                      <Text style={styles.rowMeta}>
+                        {item.image_count || 0} immagini · {item.status === "done" ? "Pronto" : item.status}
+                      </Text>
+                    </View>
+                    {!selecting && <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />}
                   </TouchableOpacity>
-                )}
-              </LiquidCard>
+                  {!selecting && (
+                    <TouchableOpacity
+                      onPress={() => handleDelete(item)}
+                      style={styles.rowDelete}
+                      testID={`history-delete-${item.id}`}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </Card>
+              </View>
             );
           }}
         />
@@ -200,15 +202,15 @@ export default function History() {
       {selecting && selected.size > 0 && (
         <View style={styles.bulkBar}>
           <TouchableOpacity
-            style={[styles.bulkBtn, deleting && { opacity: 0.5 }]}
+            style={[styles.bulkBtn, deleting ? { opacity: 0.5 } : undefined]}
             onPress={handleBulkDelete}
             disabled={deleting}
           >
             {deleting ? (
-              <ActivityIndicator color="#fff" size="small" />
+              <ActivityIndicator color={theme.colors.text} size="small" />
             ) : (
               <>
-                <Ionicons name="trash-outline" size={18} color="#fff" />
+                <Ionicons name="trash-outline" size={18} color={theme.colors.text} />
                 <Text style={styles.bulkBtnText}>
                   Elimina {selected.size} {selected.size === 1 ? "elemento" : "elementi"}
                 </Text>
@@ -227,15 +229,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24,
     flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between",
   },
-  eyebrow: { color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 3 },
-  title: { color: theme.colors.text, fontSize: 30, fontWeight: "300", letterSpacing: -1, marginTop: 6 },
+  eyebrow: { ...noirType.eyebrow, color: theme.colors.textMuted },
+  titleRow: { flexDirection: "row", alignItems: "flex-end", marginTop: 6 },
+  title: { ...noirType.display, fontSize: 28 },
+  titleItalic: { ...noirType.display, fontSize: 28, fontStyle: "italic" },
   headerActions: { flexDirection: "row", gap: 8, alignItems: "center" },
   actionBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
     paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 12, borderWidth: 1,
-    borderColor: "rgba(180,150,255,0.2)",
-    backgroundColor: "#111128",
+    borderRadius: theme.radius.sm, borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
   },
   actionBtnText: { color: theme.colors.textSecondary, fontSize: 12 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
@@ -243,65 +247,43 @@ const styles = StyleSheet.create({
   emptyTitle: { color: theme.colors.text, fontSize: 16 },
   emptySub: { color: theme.colors.textSecondary, fontSize: 13, textAlign: "center" },
   row: {
-    flexDirection: "row", alignItems: "stretch",
-    borderRadius: 16,
-    borderWidth: 1, borderColor: "rgba(180,150,255,0.18)",
-    shadowColor: "#7c3aed",
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 6,
-    overflow: "hidden",
+    flexDirection: "row", alignItems: "stretch", gap: 12, padding: 12,
   },
   rowSelected: {
-    borderColor: "rgba(180,150,255,0.55)",
-    shadowOpacity: 0.45,
+    borderColor: theme.colors.borderStrong,
   },
   checkWrap: {
-    paddingLeft: 12, alignItems: "center", justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
   },
   check: {
     width: 22, height: 22, borderRadius: 11,
-    borderWidth: 2, borderColor: "rgba(180,150,255,0.4)",
+    borderWidth: 2, borderColor: theme.colors.borderStrong,
     alignItems: "center", justifyContent: "center",
     backgroundColor: "transparent",
   },
   checkActive: {
-    backgroundColor: "#7c3aed",
-    borderColor: "#7c3aed",
+    backgroundColor: theme.colors.text,
+    borderColor: theme.colors.text,
   },
   rowInner: {
-    flex: 1, flexDirection: "row", alignItems: "center", gap: 14, padding: 12,
+    flex: 1, flexDirection: "row", alignItems: "center", gap: 14,
   },
   rowDelete: {
-    paddingHorizontal: 14, alignItems: "center", justifyContent: "center",
+    paddingLeft: 14, alignItems: "center", justifyContent: "center",
     borderLeftWidth: 1, borderLeftColor: theme.colors.border,
   },
-  deleteEmoji: { fontSize: 20, lineHeight: 24 },
-  thumbWrap: {
-    width: 64, height: 80,
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    padding: 3,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  thumb: { width: "100%", height: "100%", borderRadius: 6, backgroundColor: theme.colors.surfaceAlt },
-  thumbEmpty: { alignItems: "center", justifyContent: "center" },
-  rowTitle: { color: theme.colors.text, fontSize: 14, fontWeight: "500" },
-  rowMeta: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 4 },
+  thumb: { width: 78, height: 98, borderRadius: 14, backgroundColor: theme.colors.surfaceAlt },
+  thumbEmpty: { alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.colors.border },
+  rowTitle: { ...noirType.display, fontSize: 14.5, lineHeight: 18 },
+  rowMeta: { ...noirType.micro, marginTop: 4 },
   bulkBar: {
     position: "absolute", bottom: 90, left: 24, right: 24,
-    shadowColor: "#7c3aed", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 4 },
-    elevation: 12,
   },
   bulkBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    paddingVertical: 14, borderRadius: 16,
-    backgroundColor: "#7c3aed",
+    paddingVertical: 14, borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceAlt,
+    borderWidth: 1, borderColor: theme.colors.borderStrong,
   },
-  bulkBtnText: { color: "#fff", fontSize: 15, fontWeight: "600" },
+  bulkBtnText: { color: theme.colors.text, fontSize: 15, fontWeight: "600" },
 });
