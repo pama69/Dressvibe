@@ -361,6 +361,12 @@ export const api = {
   deleteInfoRequest: (id: string) =>
     request<{ ok: boolean }>(`/info-requests/${id}`, { method: "DELETE" }),
 
+  // Push notifications (remote)
+  pushRegister: (token: string, platform?: string) =>
+    request<{ ok: boolean }>("/push/register", { method: "POST", body: { token, platform } }),
+  pushUnregister: (token: string) =>
+    request<{ ok: boolean }>("/push/unregister", { method: "POST", body: { token } }),
+
   // stats
   stats: () => request<any>("/stats"),
 };

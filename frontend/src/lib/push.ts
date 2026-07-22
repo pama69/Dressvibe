@@ -17,9 +17,12 @@
  * richieda.
  */
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 import { storage } from "@/src/utils/storage";
+import { api } from "@/src/api/client";
 
 const PREF_KEY = "push_notifications_enabled";
+const TOKEN_KEY = "push_remote_token";
 
 // Cache del modulo nativo (import dinamico: assente su web).
 let _N: any | undefined;
@@ -123,4 +126,60 @@ export async function presentLocalNotification(title: string, body: string): Pro
       trigger: null, // null = mostra immediatamente
     });
   } catch {}
+}
+
+// ----------------------------------------------------------------------------
+// Push REMOTI (consegna anche ad app completamente chiusa).
+//
+// Richiedono un token Expo, che a sua volta richiede:
+//   • un device fisico (non funziona su simulatore né su web);
+//   • una build EAS di sviluppo o produzione (Expo Go non supporta più i push
+//     remoti da SDK 53) con un projectId EAS in app.json (extra.eas.projectId)
+//     e le credenziali push configurate (FCM per Android, APNs per iOS).
+// Il token viene poi salvato sul backend, che invia il push all'arrivo di una
+// nuova richiesta info.
+// ----------------------------------------------------------------------------
+
+/** Ottiene l'Expo push token per questo device. Null se non disponibile. */
+export async function getExpoPushToken(): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  const N = await getNative();
+  if (!N) return null;
+  try {
+    const granted = await requestPushPermission();
+    if (!granted) return null;
+    const projectId =
+      (Constants as any)?.expoConfig?.extra?.eas?.projectId ??
+      (Constants as any)?.easConfig?.projectId ??
+      undefined;
+    const resp = await N.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+    return resp?.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Registra il device sul backend per i push remoti.
+ * Ritorna true se il token è stato ottenuto e salvato.
+ */
+export async function enableRemotePush(): Promise<boolean> {
+  const token = await getExpoPushToken();
+  if (!token) return false;
+  try {
+    await api.pushRegister(token, Platform.OS);
+    await storage.setItem(TOKEN_KEY, token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Rimuove la registrazione remota dal backend (best-effort). */
+export async function disableRemotePush(): Promise<void> {
+  try {
+    const token = await storage.getItem<string>(TOKEN_KEY, "");
+    if (token) await api.pushUnregister(token);
+  } catch {}
+  await storage.removeItem(TOKEN_KEY);
 }

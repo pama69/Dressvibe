@@ -3196,6 +3196,25 @@ async def public_submit_info_request(short_id: str, payload: InfoRequestPublicCr
         "created_at": datetime.now(timezone.utc),
     }
     await db.info_requests.insert_one(doc.copy())
+
+    # Push remoto al negoziante — arriva anche ad app chiusa. Best-effort:
+    # non blocca né fa fallire la risposta al cliente.
+    try:
+        who = name or "Un cliente"
+        look = doc["look_name"]
+        if message:
+            push_body = f"{who}: {message}"
+        else:
+            push_body = f"{who} ha chiesto informazioni su “{look}”."
+        await send_expo_push(
+            sl["user_id"],
+            "Nuova richiesta cliente 👗",
+            push_body[:170],
+            data={"type": "info_request", "req_id": doc["id"]},
+        )
+    except Exception:
+        pass
+
     return {"ok": True}
 
 
@@ -3249,6 +3268,89 @@ async def delete_info_request(req_id: str, authorization: Optional[str] = Header
     res = await db.info_requests.delete_one({"id": req_id, "user_id": user["user_id"]})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Richiesta non trovata")
+    return {"ok": True}
+
+
+# =================== Push notifications (remote, app chiusa) ===================
+# I dispositivi registrano un Expo push token (collezione `push_tokens`, chiave
+# unica sul token così che un device che cambia utente venga riassegnato).
+# Quando arriva una nuova richiesta info inviamo un push via Expo Push Service,
+# che consegna anche ad app completamente chiusa (FCM su Android / APNs su iOS).
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+
+class PushTokenRegister(BaseModel):
+    token: str
+    platform: Optional[str] = None
+
+
+async def send_expo_push(user_id: str, title: str, body: str, data: Optional[dict] = None) -> None:
+    """Best-effort: invia un push a tutti i token registrati per l'utente.
+
+    Non solleva mai: un fallimento del push non deve rompere il flusso che lo
+    ha innescato (es. la risposta al cliente che invia la richiesta info).
+    """
+    try:
+        docs = await db.push_tokens.find({"user_id": user_id}, {"_id": 0, "token": 1}).to_list(50)
+        tokens = [d["token"] for d in docs if d.get("token")]
+        if not tokens:
+            return
+        messages = [{
+            "to": tok,
+            "title": title,
+            "body": body,
+            "sound": "default",
+            "priority": "high",
+            "channelId": "default",
+            **({"data": data} if data else {}),
+        } for tok in tokens]
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.post(
+                EXPO_PUSH_URL,
+                json=messages,
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+            )
+        # Pulizia token morti: Expo segnala DeviceNotRegistered nei ticket.
+        try:
+            tickets = (resp.json() or {}).get("data") or []
+            for tok, ticket in zip(tokens, tickets):
+                if isinstance(ticket, dict) and ticket.get("status") == "error":
+                    if (ticket.get("details") or {}).get("error") == "DeviceNotRegistered":
+                        await db.push_tokens.delete_many({"token": tok})
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"[push] send_expo_push failed for {user_id}: {e}")
+
+
+@api_router.post("/push/register")
+async def push_register(payload: PushTokenRegister, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    token = (payload.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token mancante")
+    await db.push_tokens.update_one(
+        {"token": token},
+        {
+            "$set": {
+                "token": token,
+                "user_id": user["user_id"],
+                "platform": (payload.platform or "")[:20],
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
+        },
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api_router.post("/push/unregister")
+async def push_unregister(payload: PushTokenRegister, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    token = (payload.token or "").strip()
+    if token:
+        await db.push_tokens.delete_one({"token": token, "user_id": user["user_id"]})
     return {"ok": True}
 
 
@@ -4553,6 +4655,8 @@ async def startup_db():
     await db.info_requests.create_index("id", unique=True)
     await db.info_requests.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
     await db.info_requests.create_index("created_at")
+    await db.push_tokens.create_index("token", unique=True)
+    await db.push_tokens.create_index("user_id")
     await db.model_presets.create_index("id", unique=True)
     await db.model_presets.create_index([("gender", 1), ("active", 1), ("order", 1)])
     logger.info("DressVibe API started")

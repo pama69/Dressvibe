@@ -13,7 +13,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { api } from "@/src/api/client";
-import { isPushEnabled, presentLocalNotification } from "@/src/lib/push";
+import { isPushEnabled, presentLocalNotification, enableRemotePush } from "@/src/lib/push";
 
 type NotificationsCtx = {
   unread: number;
@@ -123,6 +123,15 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       setUnread(0);
       return;
     }
+    // Re-sync the remote push token if the user has push enabled — tokens can
+    // rotate across reinstalls/updates, so we refresh the backend binding on
+    // every login. Best-effort: no-op on web / Expo Go / when disabled.
+    (async () => {
+      try {
+        if (await isPushEnabled()) await enableRemotePush();
+      } catch {}
+    })();
+
     // Initial fetch (no ding because prev=0 and we set guard below)
     prevUnreadRef.current = -1; // sentinel: skip ding on the very first fetch
     refresh().then(() => {

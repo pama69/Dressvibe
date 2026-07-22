@@ -28,6 +28,8 @@ import {
   setPushPref,
   requestPushPermission,
   presentLocalNotification,
+  enableRemotePush,
+  disableRemotePush,
 } from "@/src/lib/push";
 
 type Client = {
@@ -274,9 +276,20 @@ export default function Profile() {
           "Notifiche attive ✅",
           "Ti avviseremo qui quando arriva una nuova richiesta info.",
         );
+        // Registra il device per i push REMOTI (arrivano anche ad app chiusa).
+        const remoteOk = await enableRemotePush();
+        if (!remoteOk && Platform.OS !== "web") {
+          Alert.alert(
+            "Notifiche in-app attive",
+            "Riceverai gli avvisi mentre l'app è aperta o in secondo piano. " +
+              "Per riceverli anche ad app completamente chiusa serve una build " +
+              "dell'app (EAS) con le notifiche push configurate — in Expo Go non è possibile.",
+          );
+        }
       } else {
         await setPushPref(false);
         setPushEnabled(false);
+        await disableRemotePush();
       }
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile aggiornare le notifiche");
