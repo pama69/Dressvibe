@@ -61,7 +61,13 @@
       "expo-video",
       "expo-audio",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "color": "#7c3aed"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

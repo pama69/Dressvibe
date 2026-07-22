@@ -8,6 +8,8 @@ import {
   Alert,
   TextInput,
   ActivityIndicator,
+  Switch,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
@@ -21,6 +23,12 @@ import ZernioSocialSetup from "@/src/components/ZernioSocialSetup";
 import { useConfirm } from "@/src/contexts/ConfirmContext";
 import { LiquidCard, BLOCK_GRAD } from "@/src/components/LiquidCard";
 import { LinearGradient } from "expo-linear-gradient";
+import {
+  isPushEnabled,
+  setPushPref,
+  requestPushPermission,
+  presentLocalNotification,
+} from "@/src/lib/push";
 
 type Client = {
   id: string;
@@ -121,6 +129,10 @@ export default function Profile() {
   const [retentionMonths, setRetentionMonths] = useState(1);
   const [retentionSaving, setRetentionSaving] = useState(false);
 
+  // Push notifications on-device
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+
   // WhatsApp channel
   const [waChannelInput, setWaChannelInput] = useState("");
   const [waChannelSaved, setWaChannelSaved] = useState("");
@@ -137,6 +149,14 @@ export default function Profile() {
   const [businessName, setBusinessName] = useState("");
   const [address, setAddress] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setPushEnabled(await isPushEnabled());
+      } catch {}
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -228,6 +248,62 @@ export default function Profile() {
       Alert.alert("Errore", e?.message || "Impossibile salvare");
     } finally {
       setRetentionSaving(false);
+    }
+  };
+
+  const togglePush = async (value: boolean) => {
+    setPushBusy(true);
+    try {
+      if (value) {
+        const granted = await requestPushPermission();
+        if (!granted) {
+          setPushEnabled(false);
+          await setPushPref(false);
+          Alert.alert(
+            "Permesso negato",
+            Platform.OS === "web"
+              ? "Il browser ha bloccato le notifiche. Abilitale dalle impostazioni del sito e riprova."
+              : "Per ricevere le notifiche, autorizzale nelle impostazioni del telefono per DressVibe e riprova.",
+          );
+          return;
+        }
+        await setPushPref(true);
+        setPushEnabled(true);
+        // Conferma visiva immediata che il canale funziona.
+        await presentLocalNotification(
+          "Notifiche attive ✅",
+          "Ti avviseremo qui quando arriva una nuova richiesta info.",
+        );
+      } else {
+        await setPushPref(false);
+        setPushEnabled(false);
+      }
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile aggiornare le notifiche");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const testPush = async () => {
+    setPushBusy(true);
+    try {
+      const granted = await requestPushPermission();
+      if (!granted) {
+        Alert.alert(
+          "Permesso mancante",
+          "Attiva prima le notifiche con l'interruttore qui sopra.",
+        );
+        return;
+      }
+      await presentLocalNotification(
+        "Nuova richiesta cliente",
+        "Hai una nuova richiesta info da un cliente 👗",
+      );
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile inviare la notifica di prova");
+    } finally {
+      setPushBusy(false);
     }
   };
 
@@ -529,6 +605,42 @@ export default function Profile() {
           {waPhoneSaved ? (
             <Text style={s.tgInfoText} numberOfLines={1}>Attivo: {waPhoneSaved}</Text>
           ) : null}
+        </LiquidCard>
+
+        {/* Notifiche push on-device */}
+        <LiquidCard style={s.tgBlock}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.tgTitle}>🔔 Notifiche push</Text>
+              <Text style={[s.tgHint, { marginTop: 6 }]}>
+                Ricevi una notifica sul telefono quando un cliente invia una nuova
+                richiesta info — anche con l'app in secondo piano.
+              </Text>
+            </View>
+            <Switch
+              value={pushEnabled}
+              onValueChange={togglePush}
+              disabled={pushBusy}
+              trackColor={{ false: theme.colors.border, true: "#7c3aed" }}
+              thumbColor="#fff"
+              testID="push-toggle"
+            />
+          </View>
+          <TouchableOpacity
+            style={[s.tgBtnSecondary, { justifyContent: "center", marginTop: 4 }, pushBusy && { opacity: 0.5 }]}
+            onPress={testPush}
+            disabled={pushBusy}
+            testID="push-test-btn"
+          >
+            {pushBusy ? (
+              <ActivityIndicator color={theme.colors.text} />
+            ) : (
+              <>
+                <Ionicons name="notifications-outline" size={16} color={theme.colors.text} />
+                <Text style={s.tgBtnSecondaryText}>Invia notifica di prova</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </LiquidCard>
 
         {/* Telegram bot onboarding — 3-step guided flow with ToS acceptance,

@@ -3,14 +3,17 @@
  * Exposes the current count + a short "ding" sound when the count increases
  * (i.e. a new customer request has arrived while the app was open).
  *
- * Phase 1 only — no native push yet. Requests are persisted on the backend
- * so nothing is ever lost: when the user reopens the app they see the full
- * backlog.
+ * When the user has enabled push notifications (toggle in Profilo), a growth
+ * in the unread count also presents a local on-device notification — so the
+ * banner appears even when the app is in background or on another screen.
+ * Requests are persisted on the backend so nothing is ever lost: when the
+ * user reopens the app they see the full backlog.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, AppStateStatus, Platform } from "react-native";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { api } from "@/src/api/client";
+import { isPushEnabled, presentLocalNotification } from "@/src/lib/push";
 
 type NotificationsCtx = {
   unread: number;
@@ -68,28 +71,38 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     }
   }, []);
 
+  // Fire the on-device push notification (if the user enabled it) alongside
+  // the ding. `delta` = how many new requests arrived since last check.
+  const notifyGrowth = useCallback(async (delta: number) => {
+    playDing();
+    try {
+      if (!(await isPushEnabled())) return;
+      const body =
+        delta <= 1
+          ? "Hai una nuova richiesta info da un cliente 👗"
+          : `Hai ${delta} nuove richieste info dai clienti 👗`;
+      await presentLocalNotification("Nuova richiesta cliente", body);
+    } catch {
+      // push is best-effort — never block the badge update
+    }
+  }, [playDing]);
+
   const refresh = useCallback(async () => {
     if (!user) return;
     try {
       const r = await api.infoRequestsUnreadCount();
       const next = r.count || 0;
-      if (next > prevUnreadRef.current && prevUnreadRef.current >= 0) {
-        // Only ding when we actually grew (not at first load)
-        if (prevUnreadRef.current > 0 || next > 0 ? prevUnreadRef.current !== 0 : false) {
-          // Already had >0 and got more → ding
-          playDing();
-        }
-        // Also ding on first transition from 0 → N≥1 while app open
-        if (prevUnreadRef.current === 0 && next > 0) {
-          playDing();
-        }
+      const prev = prevUnreadRef.current;
+      // prev === -1 is the sentinel for the very first fetch → never notify.
+      if (prev >= 0 && next > prev) {
+        notifyGrowth(next - prev);
       }
       prevUnreadRef.current = next;
       setUnread(next);
     } catch {
       // network errors are fine — try again on next tick
     }
-  }, [user, playDing]);
+  }, [user, notifyGrowth]);
 
   const markAllRead = useCallback(async () => {
     try {
