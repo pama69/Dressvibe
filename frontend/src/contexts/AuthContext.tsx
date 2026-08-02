@@ -40,9 +40,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const u = await api.me();
       setUser(u);
-    } catch {
-      await clearToken();
-      setUser(null);
+    } catch (e: any) {
+      // Log out only on an invalid session; network/server errors must not
+      // wipe the stored token.
+      if (e?.status === 401) {
+        await clearToken();
+        setUser(null);
+      }
     }
   }, []);
 

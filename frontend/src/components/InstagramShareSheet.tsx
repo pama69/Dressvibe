@@ -110,6 +110,16 @@ export default function InstagramShareSheet({
     [genId, imageIndex, mediaType, shopName, city],
   );
 
+  const [lastTargetKey, setLastTargetKey] = useState<string>("");
+  const targetKey = `${genId || ""}|${imageIndex ?? ""}|${videoUrl || ""}|${imageBase64 ? imageBase64.length : ""}`;
+  useEffect(() => {
+    if (lastTargetKey !== targetKey) {
+      setLastTargetKey(targetKey);
+      setCaption("");
+      setTouched(false);
+    }
+  }, [targetKey, lastTargetKey]);
+
   useEffect(() => {
     if (!visible || caption) return;
     // Prefer the unified "Testo del post" coming from the Studio. Only fall
@@ -127,14 +137,18 @@ export default function InstagramShareSheet({
       // No user edits → just regenerate. If user already edited, ask first.
       fetchCaption(s, extraHint);
     } else {
-      Alert.alert?.(
-        "Sovrascrivere?",
-        "Hai modificato la caption. Vuoi rigenerare nello stile selezionato?",
-        [
-          { text: "No", style: "cancel" },
-          { text: "Rigenera", onPress: () => fetchCaption(s, extraHint) },
-        ],
-      ) ?? fetchCaption(s, extraHint);
+      if (typeof Alert.alert === "function") {
+        Alert.alert(
+          "Sovrascrivere?",
+          "Hai modificato la caption. Vuoi rigenerare nello stile selezionato?",
+          [
+            { text: "No", style: "cancel" },
+            { text: "Rigenera", onPress: () => fetchCaption(s, extraHint) },
+          ],
+        );
+      } else {
+        fetchCaption(s, extraHint);
+      }
     }
   };
 

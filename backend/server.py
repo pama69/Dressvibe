@@ -30,6 +30,10 @@ def fmt_rome(fmt: str = "%d/%m/%Y %H:%M") -> str:
 
 import httpx
 import base64
+import io
+import socket
+import ipaddress
+from urllib.parse import urlparse
 
 from providers import list_providers, get_provider, default_provider
 
@@ -137,7 +141,7 @@ class User(BaseModel):
 
 class GarmentCreate(BaseModel):
     name: str
-    image_base64: str  # without prefix
+    image_base64: str = Field(..., max_length=14_000_000)  # without prefix
     category: str  # t-shirt, pantaloni, vestito, giacca, etc.
     color: Optional[str] = None
     size: Optional[str] = None
@@ -162,7 +166,7 @@ class Garment(BaseModel):
 
 class BackgroundCreate(BaseModel):
     name: str
-    image_base64: str  # without prefix
+    image_base64: str = Field(..., max_length=14_000_000)  # without prefix
     description: Optional[str] = None  # short, e.g. "boutique vetrina sera"
 
 
@@ -174,7 +178,7 @@ class AccessoryItem(BaseModel):
     (e.g. shoes go on the feet, a bag is carried, glasses on the face).
     """
     category: str  # scarpe/borse/gioielli/cappelli/occhiali/cinture/sciarpe/altro
-    image_base64: str
+    image_base64: str = Field(..., max_length=14_000_000)
 
 
 class GenerationCreate(BaseModel):
@@ -216,7 +220,7 @@ class Generation(BaseModel):
 
 
 class StudioEditRequest(BaseModel):
-    image_base64: str
+    image_base64: str = Field(..., max_length=14_000_000)
     edit_prompt: str  # what to do (change background to beach, add price text, etc.)
     gen_id: Optional[str] = None  # if provided, append the edited image to that generation's gallery
     provider: Optional[str] = None  # image_edit provider id; None = default
@@ -234,7 +238,7 @@ class StudioEditRequest(BaseModel):
 
 class VideoGenerateRequest(BaseModel):
     """Generate a fashion video clip from a base reference image."""
-    image_base64: str
+    image_base64: str = Field(..., max_length=14_000_000)
     prompt: Optional[str] = None  # extra instructions; default fashion prompt is applied
     duration_seconds: int = 5  # 3-8
     provider: Optional[str] = None  # required video_gen provider id
@@ -277,6 +281,22 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     return user
 
 
+_SENSITIVE_USER_FIELDS = (
+    "password_hash",
+    "verification_code",
+    "verification_expires_at",
+    "verification_sent_at",
+    "reset_code",
+    "reset_expires_at",
+    "reset_sent_at",
+)
+
+
+def _safe_user_dict(user: dict) -> dict:
+    """Return a copy of the user document without credentials/OTP fields."""
+    return {k: v for k, v in (user or {}).items() if k not in _SENSITIVE_USER_FIELDS}
+
+
 # =================== Routes ===================
 @api_router.get("/")
 async def root():
@@ -295,7 +315,7 @@ async def health():
 @api_router.get("/auth/me")
 async def auth_me(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
-    return user
+    return _safe_user_dict(user)
 
 
 @api_router.post("/auth/logout")
@@ -370,38 +390,42 @@ def _rate_limit_bucket(action: str, identifier: str) -> str:
 async def _check_rate_limit(action: str, identifier: str, max_attempts: int, window: timedelta) -> None:
     now = datetime.now(timezone.utc)
     bucket = _rate_limit_bucket(action, identifier)
-    doc = await db.auth_rate_limits.find_one({"bucket": bucket}, {"_id": 0})
-    window_start = doc.get("window_start") if doc else None
+    # Atomic check-then-increment: find_one_and_update with $inc prevents the
+    # race where concurrent requests all read "attempts < max" and slip through.
+    doc = await db.auth_rate_limits.find_one_and_update(
+        {"bucket": bucket},
+        {
+            "$inc": {"attempts": 1},
+            "$setOnInsert": {
+                "bucket": bucket,
+                "action": action,
+                "window_start": now,
+                "expires_at": now + window + timedelta(minutes=5),
+            },
+        },
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    window_start = doc.get("window_start")
     if window_start and window_start.tzinfo is None:
         window_start = window_start.replace(tzinfo=timezone.utc)
 
-    if not doc or not window_start or now - window_start >= window:
+    if not window_start or now - window_start >= window:
+        # Window expired: this request opens a fresh window (attempts=1).
         await db.auth_rate_limits.update_one(
             {"bucket": bucket},
-            {"$set": {
-                "bucket": bucket,
-                "action": action,
-                "attempts": 1,
-                "window_start": now,
-                "expires_at": now + window + timedelta(minutes=5),
-            }},
-            upsert=True,
+            {"$set": {"window_start": now, "attempts": 1, "expires_at": now + window + timedelta(minutes=5)}},
         )
         return
 
     attempts = int(doc.get("attempts") or 0)
-    if attempts >= max_attempts:
+    if attempts > max_attempts:
         retry_after = max(1, int((window - (now - window_start)).total_seconds()))
         raise HTTPException(
             status_code=429,
             detail=f"Troppi tentativi. Riprova tra {retry_after // 60 + 1} minuti.",
             headers={"Retry-After": str(retry_after)},
         )
-
-    await db.auth_rate_limits.update_one(
-        {"bucket": bucket},
-        {"$inc": {"attempts": 1}, "$set": {"expires_at": window_start + window + timedelta(minutes=5)}},
-    )
 
 
 async def _check_auth_rate_limits(
@@ -662,6 +686,9 @@ async def email_reset(payload: _EmailResetPayload, request: Request):
                   "updated_at": datetime.now(timezone.utc)},
          "$unset": {"reset_code": "", "reset_expires_at": "", "reset_sent_at": ""}},
     )
+    # Revoke every existing session: a password reset must invalidate stolen tokens.
+    if user.get("user_id"):
+        await db.user_sessions.delete_many({"user_id": user["user_id"]})
     await _clear_auth_rate_limit("reset", request, email)
     return {"ok": True}
 
@@ -1358,6 +1385,7 @@ def make_thumb_b64(image_b64: str, max_size: int = 280, quality: int = 70) -> Op
         from PIL import Image
         from io import BytesIO
 
+        Image.MAX_IMAGE_PIXELS = 50_000_000
         raw = base64.b64decode(image_b64)
         img = Image.open(BytesIO(raw))
         # JPEG can't encode alpha — flatten transparency on a white background
@@ -2606,8 +2634,92 @@ async def tg_api(method: str, payload: dict, files: Optional[dict] = None):
     except Exception:
         return resp.status_code, {"raw": resp.text}
 
+
+def _is_platform_owner(user: dict) -> bool:
+    '''Only owner account(s) may manage the shared Telegram/Zernio infra.'''
+    email = (user.get("email") or "").strip().lower()
+    return bool(email) and email in ZERNIO_OWNER_EMAILS
+
+
+def _allowed_public_host(host: str) -> bool:
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    if host in ("dressvibe.app", "www.dressvibe.app", "api.dressvibe.app"):
+        return True
+    if host.endswith(".up.railway.app"):
+        return True
+    if PUBLIC_BASE_URL:
+        try:
+            if host == (urlparse(PUBLIC_BASE_URL).hostname or "").lower():
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _public_base_from_request(request: Request) -> str:
+    fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    fwd_host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or ""
+    ).split(",")[0].strip()
+    if fwd_host and _allowed_public_host(fwd_host):
+        return f"{fwd_proto}://{fwd_host}".rstrip("/")
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/")
+    return ""
+
+
+def _strip_webhook_url(info: dict) -> dict:
+    '''getWebhookInfo includes the full URL with the secret - never expose it.'''
+    safe = dict(info or {})
+    safe.pop("url", None)
+    return safe
+
+
+def _is_blocked_ip(ip) -> bool:
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _validate_public_http_url(url: str) -> str:
+    '''Reject SSRF-prone URLs: only https and public non-private hosts.'''
+    url = (url or "").strip()
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        parsed = None
+    if not parsed or parsed.scheme != "https" or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="video_url deve essere un URL https valido")
+    host = parsed.hostname
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if _is_blocked_ip(ip):
+            raise HTTPException(status_code=400, detail="video_url non consentito (host non pubblico)")
+    else:
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or 443)
+        except Exception:
+            raise HTTPException(status_code=400, detail="video_url: host non risolvibile")
+        for info in infos:
+            if _is_blocked_ip(ipaddress.ip_address(info[4][0])):
+                raise HTTPException(status_code=400, detail="video_url non consentito (host non pubblico)")
+    return url
+
+
 class TelegramPublishRequest(BaseModel):
-    image_base64: Optional[str] = None
+    image_base64: Optional[str] = Field(None, max_length=14_000_000)
     video_url: Optional[str] = None
     media_type: Optional[str] = "photo"  # "photo" | "video"
     caption: Optional[str] = None
@@ -2646,6 +2758,7 @@ async def telegram_publish(payload: TelegramPublishRequest, request: Request, au
     if media_type == "video":
         if not payload.video_url:
             raise HTTPException(status_code=400, detail="video_url richiesto per pubblicare un video")
+        payload.video_url = _validate_public_http_url(payload.video_url)
     else:
         if not payload.image_base64:
             raise HTTPException(status_code=400, detail="image_base64 richiesto per pubblicare una foto")
@@ -2837,21 +2950,18 @@ async def telegram_setup_webhook(request: Request, authorization: Optional[str] 
     place.
     """
     user = await get_current_user(authorization)
+    if not _is_platform_owner(user):
+        raise HTTPException(status_code=403, detail="Solo l'owner della piattaforma può configurare il webhook")
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="Telegram non configurato (token/secret mancanti)")
 
     # Pick the host that the client actually used to reach us (works behind the
-    # k8s ingress because the ingress forwards the public host).
-    fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    fwd_host = (
-        request.headers.get("x-forwarded-host")
-        or request.headers.get("host")
-        or ""
-    ).split(",")[0].strip()
-    if not fwd_host:
+    # k8s ingress because the ingress forwards the public host). The host is
+    # validated against an allowlist so an attacker cannot point the shared bot
+    # at their own server.
+    base = _public_base_from_request(request)
+    if not base:
         raise HTTPException(status_code=400, detail="Impossibile determinare l'host pubblico")
-
-    base = f"{fwd_proto}://{fwd_host}"
     webhook_url = f"{base}/api/telegram/webhook/{TELEGRAM_WEBHOOK_SECRET}"
 
     try:
@@ -2866,7 +2976,7 @@ async def telegram_setup_webhook(request: Request, authorization: Optional[str] 
             )
             body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {"raw": resp.text}
             ok = bool(body.get("ok"))
-            logger.info(f"[TG] setup-webhook by user={user['user_id']} url={webhook_url} ok={ok} body={body}")
+            logger.info(f"[TG] setup-webhook by user={user['user_id']} ok={ok}")
             if not ok:
                 raise HTTPException(status_code=502, detail=f"Telegram error: {body}")
         # Also fetch current webhook info for the response so the UI can show it
@@ -2875,8 +2985,8 @@ async def telegram_setup_webhook(request: Request, authorization: Optional[str] 
             info_body = info.json() if info.headers.get("content-type", "").startswith("application/json") else {}
         return {
             "ok": True,
-            "webhook_url": webhook_url,
-            "info": info_body.get("result", {}),
+            "configured": ok,
+            "info": _strip_webhook_url(info_body.get("result", {})),
         }
     except HTTPException:
         raise
@@ -2888,13 +2998,15 @@ async def telegram_setup_webhook(request: Request, authorization: Optional[str] 
 @api_router.get("/telegram/webhook-info")
 async def telegram_webhook_info(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    if not _is_platform_owner(user):
+        raise HTTPException(status_code=403, detail="Solo l'owner della piattaforma può leggere il webhook")
     if not TELEGRAM_BOT_TOKEN:
         raise HTTPException(status_code=503, detail="Telegram non configurato")
     try:
         async with httpx.AsyncClient(timeout=15.0) as http:
             info = await http.get(f"{TELEGRAM_API}/getWebhookInfo")
             body = info.json()
-        return {"ok": True, "info": body.get("result", {}), "user_id": user["user_id"]}
+        return {"ok": True, "info": _strip_webhook_url(body.get("result", {})), "user_id": user["user_id"]}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"webhook-info failed: {e}")
 
@@ -2903,7 +3015,7 @@ async def telegram_webhook_info(authorization: Optional[str] = Header(None)):
 
 @api_router.post("/telegram/webhook/{secret}")
 async def telegram_webhook(secret: str, request: Request):
-    if not TELEGRAM_WEBHOOK_SECRET or secret != TELEGRAM_WEBHOOK_SECRET:
+    if not TELEGRAM_WEBHOOK_SECRET or not _secrets.compare_digest(secret, TELEGRAM_WEBHOOK_SECRET):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
     update = await request.json()
     # Diagnostic logging: capture forwarded messages (to discover real channel IDs)
@@ -3792,119 +3904,6 @@ async def get_user_settings(authorization: Optional[str] = Header(None)):
     }
 
 
-@app.get("/api/debug/gemini-image-test", include_in_schema=False)
-async def debug_gemini_image_test(secret: str = ""):
-    raise HTTPException(status_code=404, detail="Not found")
-    """Try each model in GEMINI_IMAGE_MODEL_CHAIN with a tiny text->image
-    prompt and report which one actually returns an image with this API key.
-    Temporary diagnostic — remove after the image-gen config is fixed."""
-    if secret != os.environ.get("DEBUG_ADMIN_SECRET", ""):
-        return {"error": "forbidden"}
-    if not _gemini_client:
-        return {"error": "no gemini client (GEMINI_API_KEY missing)"}
-    from google.genai import types as _gtypes
-    loop = asyncio.get_running_loop()
-    results = []
-
-    def _probe(model_name: str):
-        try:
-            resp = _gemini_client.models.generate_content(
-                model=model_name,
-                contents=[_gtypes.Part.from_text(text="A plain red circle on white background")],
-            )
-            for c in (getattr(resp, "candidates", None) or []):
-                content = getattr(c, "content", None)
-                for p in (getattr(content, "parts", []) or []):
-                    inline = getattr(p, "inline_data", None)
-                    if inline and getattr(inline, "data", None):
-                        return {"model": model_name, "ok": True}
-            return {"model": model_name, "ok": False, "note": "no image in response"}
-        except Exception as e:
-            return {"model": model_name, "ok": False, "error": str(e)[:250]}
-
-    for m in GEMINI_IMAGE_MODEL_CHAIN:
-        results.append(await loop.run_in_executor(None, _probe, m))
-    return {"chain": GEMINI_IMAGE_MODEL_CHAIN, "text_model": GEMINI_TEXT_MODEL, "results": results}
-
-
-# Temporary debug endpoint to diagnose deploy-vs-preview DB mismatch.
-# Sanitized output (no credentials), safe to remove after the migration
-# story is closed.
-@app.get("/api/debug/db-info", include_in_schema=False)
-async def debug_db_info():
-    raise HTTPException(status_code=404, detail="Not found")
-    mongo = os.environ.get("MONGO_URL", "")
-    # Hide credentials, only keep "atlas/local" flag + host hint
-    flag = "atlas" if "mongodb+srv" in mongo else ("local" if "localhost" in mongo else "other")
-    host = mongo.split("@")[-1][:60] if "@" in mongo else mongo[:60]
-    counts = {}
-    try:
-        counts["users"] = await db.users.count_documents({})
-        counts["garments"] = await db.garments.count_documents({})
-        counts["generations"] = await db.generations.count_documents({})
-    except Exception as e:
-        counts["error"] = str(e)
-    return {
-        "flag": flag,
-        "host_hint": host,
-        "db_name": os.environ.get("DB_NAME"),
-        "counts": counts,
-    }
-
-
-
-@app.get("/api/debug/whoami", include_in_schema=False)
-async def debug_whoami(authorization: Optional[str] = Header(None)):
-    raise HTTPException(status_code=404, detail="Not found")
-    """Echo back the user_id resolved from the Bearer token so the deploy
-    issue (galleria vuota) can be diagnosed: confirms whether the token in
-    use maps to the right user_id with the expected garment count."""
-    try:
-        user = await get_current_user(authorization)
-    except Exception as e:
-        return {
-            "error": str(e),
-            "auth_header_received": bool(authorization),
-            "auth_header_prefix": (authorization or "")[:25],
-        }
-    g = await db.garments.count_documents({"user_id": user["user_id"]})
-    gen = await db.generations.count_documents({"user_id": user["user_id"]})
-    return {
-        "user_id": user.get("user_id"),
-        "email": user.get("email"),
-        "garments_count": g,
-        "generations_count": gen,
-    }
-
-
-@app.get("/api/debug/garments-by-email", include_in_schema=False)
-async def debug_garments_by_email(email: str):
-    raise HTTPException(status_code=404, detail="Not found")
-    """Public debug endpoint (no auth) that returns the garment count and
-    a sample of garment ids for the given email. Used to verify Atlas data
-    is correctly visible from the deploy backend."""
-    email_norm = (email or "").lower().strip()
-    user = await db.users.find_one({"email": email_norm}, {"_id": 0, "user_id": 1, "email": 1})
-    if not user:
-        return {"email": email_norm, "user_found": False, "garments_count": 0, "sample": []}
-    g = await db.garments.count_documents({"user_id": user["user_id"]})
-    sample = await db.garments.find(
-        {"user_id": user["user_id"]},
-        {"_id": 0, "id": 1, "name": 1, "created_at": 1},
-    ).sort("created_at", -1).limit(3).to_list(3)
-    for s in sample:
-        if "created_at" in s and hasattr(s["created_at"], "isoformat"):
-            s["created_at"] = s["created_at"].isoformat()
-    return {
-        "email": user["email"],
-        "user_id": user["user_id"],
-        "user_found": True,
-        "garments_count": g,
-        "sample": sample,
-    }
-
-
-
 # ----------------------------------------------------------------------------
 # We use Zernio as a unified wrapper around Meta Graph API (Instagram +
 # Facebook Page posting). The shop owner connects their accounts via
@@ -4356,12 +4355,13 @@ async def serve_zernio_media(gen_id: str, index: int):
     # Re-encode as JPEG for IG compatibility (Meta is picky about PNG carousels)
     try:
         from PIL import Image as _PILImage
+        _PILImage.MAX_IMAGE_PIXELS = 50_000_000
         im = _PILImage.open(io.BytesIO(data)).convert("RGB")
         buf = io.BytesIO()
         im.save(buf, format="JPEG", quality=92, optimize=True)
         data = buf.getvalue()
-    except Exception:
-        pass  # serve raw bytes if Pillow fails
+    except Exception as e:
+        logger.warning(f"[zmedia] re-encode fallito, serviti byte grezzi: {e}")
     return Response(
         content=data,
         media_type="image/jpeg",
@@ -4515,7 +4515,12 @@ async def _security_headers(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://dressvibe.app",
+        "https://www.dressvibe.app",
+        "https://api.dressvibe.app",
+    ],
+    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|https://[a-z0-9-]+\.up\.railway\.app)$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
