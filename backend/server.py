@@ -4231,6 +4231,20 @@ async def zernio_publish(
             logger.warning(f"[zernio] AI caption fallback failed: {e}")
         if not caption:
             caption = "Nuovo look DressVibe ✨"
+    elif "#" not in caption:
+        # Hashtag sempre presenti anche con testo manuale: se la caption
+        # scritta dall'utente non contiene nessun hashtag, li aggiungiamo
+        # in coda (boutique/città/categoria/stagione + generici) prima
+        # dell'invio a Zernio.
+        try:
+            tags = await _hashtags_for_generation(user, payload.gen_id)
+        except Exception as e:
+            logger.warning(f"[zernio] hashtag fallback failed: {e}")
+            tags = ""
+        if tags:
+            # Lascia sempre spazio al blocco hashtag entro il limite di Zernio.
+            max_body = max(1, 2200 - len(tags) - 2)
+            caption = caption[:max_body].rstrip() + "\n\n" + tags
 
     body = {
         "content": caption[:2200],
@@ -4356,6 +4370,51 @@ async def _ai_caption_for_generation(user: dict, gen_id: str) -> str:
     except Exception as e:
         logger.warning(f"[zernio] AI caption helper failed: {e}")
         return ""
+
+
+_DEFAULT_HASHTAGS = ["modaitaliana", "boutiqueitaliana", "shoplocal", "madeinitaly", "outfitoftheday"]
+
+
+def _slug_hashtag(value: str) -> str:
+    """Normalize a label into a lowercase hashtag (no accents/spaces)."""
+    import re as _re
+    import unicodedata as _ud
+    s = _ud.normalize("NFKD", (value or "").lower())
+    s = "".join(ch for ch in s if not _ud.combining(ch))
+    return _re.sub(r"[^a-z0-9]+", "", s)
+
+
+async def _hashtags_for_generation(user: dict, gen_id: str) -> str:
+    """Deterministic hashtag block (boutique, città, categoria, stagione,
+    generici) used to guarantee hashtags on Zernio posts even when the
+    user writes a manual caption without any. Returns "" when there is
+    nothing useful to add."""
+    tags: List[str] = []
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    shop = _slug_hashtag(settings.get("shop_name") or "")
+    city = _slug_hashtag(settings.get("city") or "")
+    if shop:
+        tags.append(shop)
+    gen = await db.generations.find_one(
+        {"id": gen_id, "user_id": user["user_id"]},
+        {"_id": 0, "garment_ids": 1},
+    )
+    if gen and gen.get("garment_ids"):
+        grms = await db.garments.find(
+            {"id": {"$in": gen["garment_ids"]}, "user_id": user["user_id"]},
+            {"_id": 0, "category": 1, "season": 1},
+        ).to_list(10)
+        for g in grms:
+            for key in ("category", "season"):
+                tag = _slug_hashtag(g.get(key) or "")
+                if tag and tag not in tags:
+                    tags.append(tag)
+    if city and city not in tags:
+        tags.append(city)
+    for tag in _DEFAULT_HASHTAGS:
+        if tag not in tags:
+            tags.append(tag)
+    return " ".join(f"#{tag}" for tag in tags[:12])
 
 
 # Public, unauthenticated endpoint Zernio uses to fetch the photo. The

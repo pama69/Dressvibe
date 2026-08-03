@@ -164,6 +164,10 @@ Tutte le foto (upload, galleria, risultati, studio, storia) ora si mostrano **co
 - **Storia** [history.tsx](frontend/app/(app)/history.tsx): lista centrata max-width 760.
 - Verifica: `tsc --noEmit` OK (resta solo l'errore ambientale pre-esistente `expo-notifications` non installato).
 
+### 2026-08-03 — Hashtag sempre presenti nei post Zernio (IG/FB) ✅
+**Backend** [backend/server.py](backend/server.py): se l'utente compila la casella "testo del post" senza hashtag, `/api/zernio/publish` ora aggiunge automaticamente in coda un blocco hashtag (`_hashtags_for_generation`: boutique, città, categoria e stagione del capo + generici `#modaitaliana #boutiqueitaliana #shoplocal #madeinitaly #outfitoftheday`), rispettando il limite 2200 caratteri di Zernio. Se la caption contiene già un `#` non viene toccata; se è vuota resta il flusso AI esistente.
+- Verifica: `python -m py_compile backend/server.py` OK.
+
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.
