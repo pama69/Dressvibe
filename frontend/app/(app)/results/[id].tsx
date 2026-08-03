@@ -48,10 +48,13 @@ export default function Results() {
   const [loading, setLoading] = useState(true);
   const confirm = useConfirm();
   const notify = useNotify();
-  const { width: winW } = useWindowDimensions();
+  const { width: rawWinW } = useWindowDimensions();
+  // Su desktop la griglia resta centrata e non si allarga a tutto schermo.
+  const winW = Math.min(rawWinW, 1000);
   const numColumns = columnsFor(winW);
   const tileW = Math.floor((winW - CONTENT_PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
-  const tileH = Math.round(tileW * (16 / 9));
+  // Tile uniformi 4:5 (come le immagini generate): sempre complete, mai croppate.
+  const tileH = Math.round(tileW * (5 / 4));
   const videoTileW = Math.min(280, Math.floor(winW * 0.7));
   const videoTileH = Math.round(videoTileW * (16 / 9));
 
@@ -136,6 +139,7 @@ export default function Results() {
           key={`cols-${numColumns}`}
           keyExtractor={(_img, i) => `${i}`}
           numColumns={numColumns}
+          style={s.listFrame}
           contentContainerStyle={{ paddingHorizontal: CONTENT_PADDING, paddingTop: 12, paddingBottom: 40 }}
           columnWrapperStyle={numColumns > 1 ? { gap: GAP, marginBottom: GAP } : undefined}
           ListHeaderComponent={
@@ -196,7 +200,7 @@ export default function Results() {
                 activeOpacity={0.85}
                 testID={`result-image-${index}`}
               >
-                <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW - 10, height: tileH - 10 }]} />
+                <Image source={{ uri: `data:image/png;base64,${item}` }} style={[s.tile, { width: tileW - 10, height: tileH - 10 }]} resizeMode="contain" />
                 <View style={s.tileOverlay}>
                   <Ionicons name="brush-outline" size={14} color={theme.colors.text} />
                   <Text style={s.tileText}>Ritocca</Text>
@@ -254,6 +258,7 @@ const s = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 6,
   },
   tile: { backgroundColor: theme.colors.surface, borderRadius: 10 },
+  listFrame: { width: "100%", maxWidth: 1000, alignSelf: "center" },
   tileOverlay: {
     position: "absolute", bottom: 13, left: 13, flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: "rgba(0,0,0,0.55)", paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8,

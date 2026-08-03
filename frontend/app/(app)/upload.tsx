@@ -224,7 +224,7 @@ export default function Upload() {
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
           {imageBase64 ? (
             <View style={s.preview}>
-              <Image source={{ uri: `data:image/png;base64,${imageBase64}` }} style={s.previewImg} />
+              <Image source={{ uri: `data:image/png;base64,${imageBase64}` }} style={s.previewImg} resizeMode="contain" />
               <TouchableOpacity style={s.previewChange} onPress={pickImage} testID="upload-change">
                 <Text style={s.previewChangeText}>Cambia</Text>
               </TouchableOpacity>
@@ -362,11 +362,11 @@ const s = StyleSheet.create({
   },
   pickText: { color: theme.colors.text, fontSize: 12, letterSpacing: 1 },
   preview: {
-    height: 280, position: "relative", marginBottom: 6,
+    width: "100%", aspectRatio: 4 / 5, maxWidth: 400, alignSelf: "center", position: "relative", marginBottom: 6,
     backgroundColor: "#fff", borderRadius: 16, padding: 5,
     shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 6,
   },
-  previewImg: { width: "100%", height: "100%", borderRadius: 12 },
+  previewImg: { width: "100%", height: "100%", borderRadius: 12, backgroundColor: "#f2f2f2" },
   previewChange: {
     position: "absolute", bottom: 14, right: 14,
     backgroundColor: "rgba(0,0,0,0.6)", paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10,

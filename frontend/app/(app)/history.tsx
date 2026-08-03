@@ -132,6 +132,7 @@ export default function History() {
         <FlatList
           data={items}
           keyExtractor={(i) => i.id}
+          style={styles.listFrame}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120 }}
           ItemSeparatorComponent={() => <View style={{ height: 14 }} />}
           refreshControl={
@@ -290,6 +291,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   thumb: { width: "100%", height: "100%", borderRadius: 6, backgroundColor: theme.colors.surfaceAlt },
+  listFrame: { width: "100%", maxWidth: 760, alignSelf: "center" },
   thumbEmpty: { alignItems: "center", justifyContent: "center" },
   rowTitle: { color: theme.colors.text, fontSize: 14, fontWeight: "500" },
   rowMeta: { color: theme.colors.textSecondary, fontSize: 11, marginTop: 4 },

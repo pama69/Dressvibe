@@ -53,10 +53,14 @@ export default function Galleria() {
   const [items, setItems] = useState<Garment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const { width: winW } = useWindowDimensions();
+  const { width: rawWinW } = useWindowDimensions();
+  // Su desktop la griglia resta centrata e non si allarga a tutto schermo.
+  const winW = Math.min(rawWinW, 1000);
   const numColumns = colsFor(winW);
   const tileW = Math.floor((winW - PADDING * 2 - GAP * (numColumns - 1)) / numColumns);
-  const tileH = Math.round(tileW / 0.78);
+  // Card uniformi 4:5: la miniatura è sempre completa (contain) e con la
+  // stessa forma, qualunque siano le proporzioni della foto caricata.
+  const tileH = Math.round(tileW * (5 / 4));
 
   // Welcome splash — minimalist intro shown only the first time per session.
   // Just the animated "DressVibe" logo, then auto-dismisses with a soft fade.
@@ -241,6 +245,7 @@ export default function Galleria() {
           key={`cols-${numColumns}`}
           keyExtractor={(i) => i.id}
           numColumns={numColumns}
+          style={styles.listFrame}
           contentContainerStyle={styles.list}
           columnWrapperStyle={numColumns > 1 ? { gap: GAP } : undefined}
           ItemSeparatorComponent={() => <View style={{ height: GAP }} />}
@@ -271,6 +276,7 @@ export default function Galleria() {
                         ? `data:image/jpeg;base64,${item.thumb_base64}`
                         : `data:image/png;base64,${item.image_base64}`,
                     }}
+                    resizeMode="contain"
                     style={styles.cardImg}
                   />
                   <TouchableOpacity
@@ -453,6 +459,7 @@ const styles = StyleSheet.create({
   },
   emptyBtnText: { color: theme.colors.primaryFg, fontWeight: "600", letterSpacing: 0.4 },
   list: { paddingHorizontal: PADDING, paddingBottom: 96 },
+  listFrame: { width: "100%", maxWidth: 1000, alignSelf: "center" },
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -470,7 +477,7 @@ const styles = StyleSheet.create({
     padding: 6,
     backgroundColor: "#fff",
   },
-  cardImg: { width: "100%", height: "100%", borderRadius: 10 },
+  cardImg: { width: "100%", height: "100%", borderRadius: 10, backgroundColor: theme.colors.surfaceAlt },
   deleteBtn: {
     position: "absolute", top: 6, right: 6,
     width: 26, height: 26, borderRadius: 13,

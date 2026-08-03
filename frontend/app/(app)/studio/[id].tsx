@@ -870,7 +870,7 @@ export default function Studio() {
             {loading || !image ? (
               <View style={s.imagePh}><ActivityIndicator color={theme.colors.text} /></View>
             ) : (
-              <Image source={{ uri: `data:image/png;base64,${image}` }} style={s.image} />
+              <Image source={{ uri: `data:image/png;base64,${image}` }} style={s.image} resizeMode="contain" />
             )}
             {busy && (
               <View style={s.busyOverlay}>
@@ -1194,8 +1194,8 @@ const s = StyleSheet.create({
   },
   headerTitle: { color: theme.colors.text, fontSize: 14, letterSpacing: 2, textTransform: "uppercase" },
   imageWrap: {
-    marginTop: 16, aspectRatio: 9 / 16, position: "relative",
-    alignSelf: "center", width: "100%", maxWidth: 380,
+    marginTop: 16, aspectRatio: 4 / 5, position: "relative",
+    alignSelf: "center", width: "100%", maxWidth: 400,
     backgroundColor: "#fff", borderRadius: 18, padding: 6,
     shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 8,
   },
