@@ -151,6 +151,10 @@ Ultimo legame runtime con Emergent rimosso: le 2 immagini ancora hot-linkate dal
 - **Verifica distacco:** nessuna env var, chiamata HTTP o asset runtime punta più a Emergent. Backend/LLM/auth/deploy/DB interamente su Railway + Atlas + Gemini. Restano solo riferimenti in **test** (`backend_test_*.py`, `tests/`) e **docs** (`design_guidelines.json`, `test_reports/`), non in produzione.
 - **→ Emergent può essere disattivato.** Unico check consigliato prima di spegnerlo: aprire login e schermata di generazione e verificare che le immagini (ora locali) si vedano.
 
+### 2026-08-03 — Rate-limit AI per utente + requirements-dev ✅
+**Backend** [backend/server.py](backend/server.py): quota giornaliera per utente sugli endpoint che consumano crediti AI o producono side-effect esterni — helper `_check_ai_quota` con azioni `ai:generate` (40/giorno, pesata per `num_variations`), `ai:studio` (40), `ai:caption` (100, condivisa dai due endpoint), `ai:zernio` (30). Applicata a `/api/generations`, `/api/studio/edit`, `/api/caption`, `/api/instagram/caption`, `/api/zernio/publish`. `_check_rate_limit` ora accetta `weight` per contare più unità per chiamata; riusa la collezione `auth_rate_limits` con bucket atomici `find_one_and_update` + `$inc`.
+**Dev** [backend/requirements-dev.txt](backend/requirements-dev.txt): nuovo file con `pytest` per i test locali (il runtime di produzione resta senza dev-deps).
+
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.
