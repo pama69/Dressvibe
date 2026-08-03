@@ -495,7 +495,7 @@ export default function Studio() {
     try {
       const captionText = tgDescription.trim() || "Disponibile in negozio ✨";
       const res = await api.telegramPublish({
-        video_url: video.video_url,
+        video_url: video.archived ? video.playback_url || video.video_url : video.video_url,
         media_type: "video",
         caption: captionText,
         gen_id: id,

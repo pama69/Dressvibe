@@ -225,7 +225,7 @@ export const api = {
       { method: "POST", body }
     ),
   telegramSetupWebhook: () =>
-    request<{ ok: boolean; webhook_url: string; info: any }>(
+    request<{ ok: boolean; configured?: boolean; info: any }>(
       "/telegram/setup-webhook",
       { method: "POST", body: {} }
     ),

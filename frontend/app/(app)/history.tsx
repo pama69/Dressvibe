@@ -145,7 +145,7 @@ export default function History() {
             const isSelected = selected.has(item.id);
             return (
               <LiquidCard
-                style={[styles.row, isSelected && styles.rowSelected]}
+                style={[styles.row, ...(isSelected ? [styles.rowSelected] : [])]}
                 testID={`history-item-${item.id}`}
               >
                 {selecting && (

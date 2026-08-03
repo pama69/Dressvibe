@@ -7,7 +7,6 @@
 # --- Web framework / server ---
 fastapi==0.110.1
 uvicorn==0.25.0
-python-multipart==0.0.28
 
 # --- Validazione / modelli ---
 pydantic==2.13.4
@@ -28,7 +27,7 @@ bcrypt==4.1.3
 python-dotenv==1.2.2
 
 # --- Immagini ---
-pillow==12.2.0
+pillow==12.3.0
 
 # --- AI: Google Gemini (SDK ufficiale, sostituisce Emergent) ---
 google-genai==2.2.0

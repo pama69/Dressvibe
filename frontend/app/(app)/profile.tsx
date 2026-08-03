@@ -345,7 +345,7 @@ export default function Profile() {
       setTgInfo(res.info || null);
       Alert.alert(
         "Webhook Telegram aggiornato ✅",
-        `Telegram ora invia gli eventi a:\n\n${res.webhook_url}\n\nProva a far premere "Richiedi info" da un cliente — riceverai la notifica qui sull'admin.`,
+        `Telegram ora invia gli eventi al server DressVibe.\n\nProva a far premere "Richiedi info" da un cliente — riceverai la notifica qui sull'admin.`,
       );
     } catch (err: any) {
       Alert.alert("Errore", err?.message || "Impossibile aggiornare il webhook");
