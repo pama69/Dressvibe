@@ -155,6 +155,15 @@ Ultimo legame runtime con Emergent rimosso: le 2 immagini ancora hot-linkate dal
 **Backend** [backend/server.py](backend/server.py): quota giornaliera per utente sugli endpoint che consumano crediti AI o producono side-effect esterni — helper `_check_ai_quota` con azioni `ai:generate` (40/giorno, pesata per `num_variations`), `ai:studio` (40), `ai:caption` (100, condivisa dai due endpoint), `ai:zernio` (30). Applicata a `/api/generations`, `/api/studio/edit`, `/api/caption`, `/api/instagram/caption`, `/api/zernio/publish`. `_check_rate_limit` ora accetta `weight` per contare più unità per chiamata; riusa la collezione `auth_rate_limits` con bucket atomici `find_one_and_update` + `$inc`.
 **Dev** [backend/requirements-dev.txt](backend/requirements-dev.txt): nuovo file con `pytest` per i test locali (il runtime di produzione resta senza dev-deps).
 
+### 2026-08-03 — Visualizzazione foto uniforme (desktop) ✅
+Tutte le foto (upload, galleria, risultati, studio, storia) ora si mostrano **complete** (mai croppate) e con proporzioni costanti, qualunque sia la dimensione originale, soprattutto su desktop:
+- **Galleria** [index.tsx](frontend/app/(app)/index.tsx): griglia limitata a 1000 px e centrata, card 4:5, miniature `resizeMode="contain"`.
+- **Risultati** [results/[id].tsx](frontend/app/(app)/results/[id].tsx): griglia limitata a 1000 px e centrata, tile 4:5 (come le immagini generate), `contain`.
+- **Studio** [studio/[id].tsx](frontend/app/(app)/studio/[id].tsx): contenitore immagine 4:5 (era 9:16 → tagliava testa/piedi delle foto 4:5), `contain`, max-width 400.
+- **Upload** [upload.tsx](frontend/app/(app)/upload.tsx): preview 4:5 max-width 400 centrata (era altezza fissa 280 + larghezza piena → su desktop la foto diventava una striscia croppata).
+- **Storia** [history.tsx](frontend/app/(app)/history.tsx): lista centrata max-width 760.
+- Verifica: `tsc --noEmit` OK (resta solo l'errore ambientale pre-esistente `expo-notifications` non installato).
+
 ### Prossimi step
 - [ ] Setup canali al-volo dal foglio Pubblica (no rimbalzo al Profilo).
 - [ ] (Consigliato) Pulizia `requirements.txt` dai pacchetti Emergent inutilizzati.
