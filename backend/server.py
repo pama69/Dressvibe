@@ -387,7 +387,9 @@ def _rate_limit_bucket(action: str, identifier: str) -> str:
     return f"auth:{action}:{digest}"
 
 
-async def _check_rate_limit(action: str, identifier: str, max_attempts: int, window: timedelta) -> None:
+async def _check_rate_limit(
+    action: str, identifier: str, max_attempts: int, window: timedelta, weight: int = 1
+) -> None:
     now = datetime.now(timezone.utc)
     bucket = _rate_limit_bucket(action, identifier)
     # Atomic check-then-increment: find_one_and_update with $inc prevents the
@@ -395,7 +397,7 @@ async def _check_rate_limit(action: str, identifier: str, max_attempts: int, win
     doc = await db.auth_rate_limits.find_one_and_update(
         {"bucket": bucket},
         {
-            "$inc": {"attempts": 1},
+            "$inc": {"attempts": weight},
             "$setOnInsert": {
                 "bucket": bucket,
                 "action": action,
@@ -445,6 +447,27 @@ async def _check_auth_rate_limits(
 async def _clear_auth_rate_limit(action: str, request: Request, email: str) -> None:
     ip = _client_ip(request)
     await db.auth_rate_limits.delete_one({"bucket": _rate_limit_bucket(action, f"email:{email}:ip:{ip}")})
+
+# --- AI quota (anti-abuse / cost protection) ---
+# Daily per-user budget on the endpoints that consume AI credits (Gemini) or
+# trigger external side effects (Zernio). Counted atomically in the same
+# `auth_rate_limits` collection used for the auth brute-force protection.
+_AI_QUOTA_WINDOW = timedelta(days=1)
+_AI_DAILY_QUOTAS = {
+    "ai:generate": 40,  # immagini generate (1 chiamata = N variazioni)
+    "ai:studio": 40,  # modifiche Studio
+    "ai:caption": 100,  # caption (i due endpoint condividono la quota)
+    "ai:zernio": 30,  # pubblicazioni social
+}
+
+
+async def _check_ai_quota(action: str, user: dict, weight: int = 1) -> None:
+    """Fail-fast daily quota for AI-consuming endpoints. `weight` lets a single
+    call count more than one unit (e.g. num_variations on image generation)."""
+    max_attempts = _AI_DAILY_QUOTAS.get(action)
+    if not max_attempts:
+        return
+    await _check_rate_limit(action, f"user:{user['user_id']}", max_attempts, _AI_QUOTA_WINDOW, weight=weight)
 
 
 def _send_email_sync(to: str, subject: str, html: str, text: str) -> bool:
@@ -1673,6 +1696,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     if not payload.garment_ids:
         raise HTTPException(status_code=400, detail="Seleziona almeno un capo")
     num = max(1, min(8, payload.num_variations))
+    await _check_ai_quota("ai:generate", user, weight=num)
 
     garments = await db.garments.find(
         {"id": {"$in": payload.garment_ids}, "user_id": user["user_id"]}, {"_id": 0}
@@ -1927,6 +1951,7 @@ async def delete_generation_image(gen_id: str, index: int, authorization: Option
 @api_router.post("/studio/edit")
 async def studio_edit(payload: StudioEditRequest, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    await _check_ai_quota("ai:studio", user)
     session_id = f"studio_{user['user_id']}_{uuid.uuid4().hex[:6]}"
 
     # Optional: if the shop owner ticked "Inserisci prezzi nell'immagine" in
@@ -2043,7 +2068,8 @@ async def delete_client(client_id: str, authorization: Optional[str] = Header(No
 # ---------- Caption generator ----------
 @api_router.post("/caption")
 async def generate_caption(payload: CaptionRequest, authorization: Optional[str] = Header(None)):
-    await get_current_user(authorization)
+    user = await get_current_user(authorization)
+    await _check_ai_quota("ai:caption", user)
     try:
         price_part = f" Il prezzo è {payload.price}€." if payload.price else ""
         system_msg = (
@@ -2144,6 +2170,7 @@ STYLE_DIRECTIVES = {
 @api_router.post("/instagram/caption")
 async def generate_instagram_caption(payload: InstagramCaptionRequest, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    await _check_ai_quota("ai:caption", user)
 
     # Try to enrich context from the generation if provided
     ctx_parts: List[str] = []
@@ -4136,6 +4163,7 @@ async def zernio_publish(
     # Instagram/Facebook workspace.
     if not _is_zernio_owner(user):
         raise HTTPException(403, "Pubblicazione automatica IG/FB non disponibile per questo account.")
+    await _check_ai_quota("ai:zernio", user)
     valid = [p for p in payload.platforms if p in ("instagram", "facebook")]
     if not valid:
         raise HTTPException(400, "Indica almeno una piattaforma (instagram/facebook)")
