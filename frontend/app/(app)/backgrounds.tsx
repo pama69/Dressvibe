@@ -223,7 +223,7 @@ export default function BackgroundsScreen() {
                 {saving ? <ActivityIndicator color="#000" /> : <Text style={s.ctaText}>Salva sfondo</Text>}
               </TouchableOpacity>
             </View>
-            <View style={{ height: 40 }} />
+            <View style={{ height: 110 }} />
           </ScrollView>
         ) : loading ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -321,7 +321,7 @@ const s = StyleSheet.create({
   ctaSecondary: { backgroundColor: "transparent", borderWidth: 1, borderColor: theme.colors.border },
   ctaSecondaryText: { color: theme.colors.text, fontWeight: "600" },
   fab: {
-    position: "absolute", right: 20, bottom: 24, flexDirection: "row",
+    position: "absolute", right: 20, bottom: 90, flexDirection: "row",
     alignItems: "center", gap: 10, backgroundColor: theme.colors.text,
     paddingHorizontal: 18, paddingVertical: 14,
     shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
