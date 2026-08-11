@@ -58,9 +58,11 @@ export default function BackgroundsScreen() {
   const router = useRouter();
   const confirm = useConfirm();
   const { width: winW } = useWindowDimensions();
-  const numCols = winW > 700 ? 3 : 2;
   const gap = 12;
   const padding = 20;
+  // Colonne derivate da una larghezza-tile target (~220px): con un numero fisso
+  // di colonne le card diventavano enormi sui monitor desktop.
+  const numCols = Math.max(2, Math.floor((winW - padding * 2 + gap) / (220 + gap)));
   const tileW = Math.floor((winW - padding * 2 - gap * (numCols - 1)) / numCols);
 
   const [items, setItems] = useState<BG[]>([]);
@@ -255,7 +257,7 @@ export default function BackgroundsScreen() {
               <View style={[s.card, { width: tileW }]}>
                 <Image
                   source={{ uri: `data:image/png;base64,${item.image_base64}` }}
-                  style={{ width: tileW, height: Math.round(tileW * (16 / 9)) }}
+                  style={{ width: tileW, height: Math.round(tileW * (3 / 4)) }}
                 />
                 <View style={s.cardBody}>
                   <Text style={s.cardName} numberOfLines={1}>{item.name}</Text>
