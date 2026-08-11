@@ -269,7 +269,7 @@ export default function Generate() {
               <Text style={styles.emptyGarmentText}>Carica il tuo primo capo</Text>
             </TouchableOpacity>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.garmentRow}>
+            <View style={styles.garmentRow}>
               {garments.map((g) => {
                 const active = selected.includes(g.id);
                 return (
@@ -297,7 +297,7 @@ export default function Generate() {
                   </TouchableOpacity>
                 );
               })}
-            </ScrollView>
+            </View>
           )}
         </View>
 
@@ -665,7 +665,10 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary, alignItems: "center", justifyContent: "center",
   },
   customBgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16 },
-  garmentRow: { gap: 12, paddingRight: 12 },
+  // Griglia a capo: prima era una riga orizzontale, con i capi oltre il
+  // bordo dello schermo di fatto irraggiungibili. La pagina scorre già in
+  // verticale, quindi basta mandare a capo.
+  garmentRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   garment: {
     width: 110, borderWidth: 1, borderColor: theme.colors.border,
     backgroundColor: "#fff", borderRadius: 12, overflow: "hidden",
