@@ -338,6 +338,22 @@ export default function Studio() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadVideos(); }, [loadVideos]);
 
+  // Il pannello di composizione (modifica, ritocchi, testo del post, look,
+  // prezzi, accessori) appartiene alla SINGOLA generazione che si sta
+  // lavorando. Studio è una tab screen che resta montata tra una visita e
+  // l'altra (vedi la nota su useFocusEffect qui sopra), quindi senza questo
+  // reset quanto scritto per una generazione si trascinava su tutte quelle
+  // aperte dopo.
+  useEffect(() => {
+    setEditPrompt("");
+    setTweaks(EMPTY_TWEAKS);
+    setTgDescription("");
+    setSelectedLookId(null);
+    setAddPriceTags(false);
+    setAddAccessories(false);
+    setAccessories([]);
+  }, [id]);
+
   // Sync local `idx` with the URL `index` param. We use useFocusEffect (not
   // a plain useEffect on [index, id]) because the URL `index` value can be
   // IDENTICAL between two visits to this screen — e.g., the user opens
@@ -390,6 +406,11 @@ export default function Studio() {
       // One-shot overrides: clear the "ritocchi" so they don't silently carry
       // over to the next edit (same behaviour as the Generation screen).
       if (hasTweaks(tweaks)) setTweaks(EMPTY_TWEAKS);
+      // Stessa regola per il testo della modifica e per il look scelto:
+      // sono istruzioni consumate da QUESTO edit. Restando scritti venivano
+      // riapplicati a cascata a ogni rigenerazione successiva.
+      setEditPrompt("");
+      setSelectedLookId(null);
       // One-shot: clear the accessory list so the user has to re-attach
       // them on the next edit. The checkbox itself stays on so they can
       // immediately add new ones if they want to iterate.
