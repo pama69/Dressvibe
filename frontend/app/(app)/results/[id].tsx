@@ -112,6 +112,15 @@ export default function Results() {
     setSelected([]);
   };
 
+  // Enter carousel mode with ALL photos preselected (in order) — the common
+  // case is "post all of them", so this is one tap. The owner can then
+  // deselect any shot before publishing.
+  const startCarousel = () => {
+    if (!gen) return;
+    setSelected(gen.images.map((_, i) => i));
+    setSelectMode(true);
+  };
+
   const toggleSelect = (index: number) => {
     setSelected((prev) =>
       prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
@@ -338,10 +347,23 @@ export default function Results() {
                   </ScrollView>
                 </View>
               ) : null}
+              {/* Prominent carousel entry point — the header "album" icon alone
+                  was not discoverable. Preselects all photos. */}
+              {!selectMode && gen.images.length > 1 ? (
+                <TouchableOpacity
+                  style={s.carouselCta}
+                  onPress={startCarousel}
+                  testID="results-start-carousel"
+                  activeOpacity={0.9}
+                >
+                  <Ionicons name="albums-outline" size={18} color={theme.colors.primaryFg} />
+                  <Text style={s.carouselCtaText}>Pubblica come carosello ({gen.images.length} foto)</Text>
+                </TouchableOpacity>
+              ) : null}
               <Text style={s.hint}>
                 {selectMode
-                  ? "Tocca le foto nell'ordine in cui vuoi il carosello · poi «Pubblica»"
-                  : `${gen.images.length} variazioni · "Pubblica" per postare subito · "Ritocca" per modificare`}
+                  ? "Tocca le foto per aggiungerle/toglierle · l'ordine dei numeri è l'ordine del carosello · poi «Pubblica»"
+                  : `${gen.images.length} variazioni · "Pubblica carosello" sopra, oppure "Pubblica" sotto ogni foto per una singola`}
               </Text>
             </View>
           }
@@ -464,6 +486,13 @@ const s = StyleSheet.create({
   emptySub: { color: theme.colors.textSecondary, fontSize: 13, textAlign: "center" },
   retry: { marginTop: 8, paddingVertical: 12, paddingHorizontal: 28, backgroundColor: theme.colors.primary, borderRadius: 12 },
   retryText: { color: theme.colors.primaryFg, fontWeight: "600" },
+  carouselCta: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: theme.colors.primary, paddingVertical: 13, borderRadius: 12,
+    marginBottom: 10,
+    shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 3,
+  },
+  carouselCtaText: { color: theme.colors.primaryFg, fontSize: 14, fontWeight: "700", letterSpacing: 0.3 },
   hint: { color: theme.colors.textSecondary, fontSize: 11, letterSpacing: 1, marginBottom: 14 },
   videosSection: { marginBottom: 22, gap: 10 },
   videosTitle: { color: theme.colors.text, fontSize: 12, letterSpacing: 1.4, textTransform: "uppercase" },
