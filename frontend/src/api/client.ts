@@ -282,6 +282,8 @@ export const api = {
   zernioPublish: (body: {
     gen_id: string;
     image_index: number;
+    /** Optional: publish several images as ONE carousel post (IG/FB, up to 10). */
+    image_indexes?: number[];
     caption: string;
     platforms: Array<"instagram" | "facebook">;
   }) =>

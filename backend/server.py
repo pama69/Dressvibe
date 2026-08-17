@@ -4253,6 +4253,10 @@ async def zernio_connect_url(
 class ZernioPublishPayload(BaseModel):
     gen_id: str
     image_index: int = 0
+    # Optional list of image indexes to publish as a SINGLE carousel post
+    # (Instagram/Facebook support up to 10 media items). When omitted or with a
+    # single element, behaves exactly like the old single-image publish.
+    image_indexes: Optional[List[int]] = None
     caption: str = ""
     platforms: List[str]  # ["instagram", "facebook"]
 
@@ -4287,8 +4291,19 @@ async def zernio_publish(
     if not gen:
         raise HTTPException(404, "Generazione non trovata")
     images = gen.get("images") or []
-    if not images or payload.image_index >= len(images):
+    if not images:
         raise HTTPException(404, "Immagine non trovata nella generazione")
+    # Resolve the list of images to publish. `image_indexes` (carousel) wins;
+    # otherwise fall back to the single `image_index`. Dedupe while preserving
+    # order and cap at 10 (Instagram/Facebook carousel limit).
+    raw_idxs = payload.image_indexes if payload.image_indexes else [payload.image_index]
+    pub_indexes: List[int] = []
+    for i in raw_idxs:
+        if isinstance(i, int) and 0 <= i < len(images) and i not in pub_indexes:
+            pub_indexes.append(i)
+    if not pub_indexes:
+        raise HTTPException(404, "Immagine non trovata nella generazione")
+    pub_indexes = pub_indexes[:10]
 
     # 2. Resolve Zernio accountIds for the requested platforms
     try:
@@ -4328,7 +4343,8 @@ async def zernio_publish(
     public_base = (request.headers.get("x-forwarded-host") or request.url.hostname or "")
     scheme = request.headers.get("x-forwarded-proto", "https")
     public_base = f"{scheme}://{public_base}" if public_base else ""
-    media_url = f"{public_base}/api/zmedia/{payload.gen_id}/{payload.image_index}.jpg"
+    media_urls = [f"{public_base}/api/zmedia/{payload.gen_id}/{i}.jpg" for i in pub_indexes]
+    media_url = media_urls[0]  # kept for the response payload / single-image case
 
     # 4. Send the post — Zernio rejects empty content, so we always generate
     # an AI caption when the user didn't write one manually. We reuse the
@@ -4360,7 +4376,9 @@ async def zernio_publish(
     body = {
         "content": caption[:2200],
         "publishNow": True,
-        "mediaItems": [{"type": "image", "url": media_url}],
+        # One media item per selected image → a single carousel post on
+        # Instagram/Facebook (or a normal single post when only one is given).
+        "mediaItems": [{"type": "image", "url": u} for u in media_urls],
         "platforms": targets,
     }
     headers = {

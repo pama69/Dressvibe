@@ -725,9 +725,6 @@ export default function Studio() {
     ...(chIgFb
       ? [{ key: "facebook", label: "Facebook", hint: "Pubblicazione automatica", icon: "logo-facebook" as const, color: "#1877F2", onPress: () => publishToSocial("facebook") }]
       : []),
-    ...(chTg
-      ? [{ key: "telegram", label: "Telegram", hint: "Pubblica sul canale con pulsante Richiedi info", icon: "paper-plane" as const, color: "#229ED9", onPress: () => downloadAndShare("telegram") }]
-      : []),
     ...(chWa
       ? [{ key: "whatsapp", label: "WhatsApp", hint: "Apre il tuo canale con testo e link pronti", icon: "logo-whatsapp" as const, color: "#25D366", onPress: shareToWhatsApp }]
       : []),
@@ -741,9 +738,6 @@ export default function Studio() {
     const url = video?.playback_url || video?.video_url;
     return [
       { key: "instagram", label: "Instagram", hint: "Salva video + caption, poi apri Instagram", icon: "logo-instagram" as const, color: "#E4405F", onPress: () => setIgSheet({ video: url }) },
-      ...(chTg
-        ? [{ key: "telegram", label: "Telegram", hint: "Pubblica sul canale con pulsante Richiedi info", icon: "paper-plane" as const, color: "#229ED9", onPress: () => handlePublishVideoTelegram(video) }]
-        : []),
       ...(chWa
         ? [{ key: "whatsapp", label: "WhatsApp", hint: "Apre il tuo canale con testo e link pronti", icon: "logo-whatsapp" as const, color: "#25D366", onPress: () => shareVideoToWhatsApp(video) }]
         : []),
