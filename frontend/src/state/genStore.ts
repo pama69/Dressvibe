@@ -19,6 +19,9 @@ type GenParams = {
   provider?: string;
   custom_background_id?: string;
   look_styles?: string[];
+  /** "Servizio vario": generate 4 deliberately-different shots (same garment,
+   *  same model, different pose/setting/look) — a mini photoshoot / carousel. */
+  variety?: boolean;
   add_price_tags?: boolean;
   /** Optional list of extra accessories (shoes, bags, hats, etc.) that the
    *  shop owner wants the AI to render onto the generated model. Each item

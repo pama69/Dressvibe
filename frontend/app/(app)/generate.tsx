@@ -103,6 +103,10 @@ export default function Generate() {
   const [bg, setBg] = useState("white_studio");
   const [shoes, setShoes] = useState("comoda_fashion");
   const [variations, setVariations] = useState(4);
+  // "Servizio vario": one tap → 4 shots of the SAME capo on the SAME modella but
+  // in 4 different settings/poses (a mini photoshoot / carosello). When ON, the
+  // "Variazioni" selector is hidden because the count is fixed at 4.
+  const [variety, setVariety] = useState(false);
   const [lookStyles, setLookStyles] = useState<string[]>([]);
   const [addPriceTags, setAddPriceTags] = useState(false);
   // Aggiungi accessori — when the checkbox is on, the shop owner can attach
@@ -224,7 +228,8 @@ export default function Generate() {
       pose,
       background: bg,
       shoes,
-      num_variations: variations,
+      num_variations: variety ? 4 : variations,
+      variety: variety || undefined,
       provider: aiProvider,
       custom_background_id: customBgId || undefined,
       look_styles: lookStyles.length > 0 ? lookStyles : undefined,
@@ -547,25 +552,61 @@ export default function Generate() {
           <PromptTweaks value={tweaks} onChange={setTweaks} testIdScope="gen-tweaks" />
         </View>
 
-        {/* Step 5 — Variations */}
+        {/* Servizio vario — opt-in toggle. When ON, the backend produces 4
+            shots of the same capo on the same modella in 4 different
+            settings/poses (a mini photoshoot / carosello), and the manual
+            "Variazioni" count below is hidden (fixed at 4). */}
         <View style={styles.step}>
-          <Text style={styles.stepLabel}>5 — Variazioni</Text>
-          <View style={styles.varsRow}>
-            {VARIATIONS.map((n) => {
-              const active = variations === n;
-              return (
-                <TouchableOpacity
-                  key={n}
-                  onPress={() => setVariations(n)}
-                  style={[styles.varBtn, active && styles.varBtnActive]}
-                  testID={`var-${n}`}
-                >
-                  <Text style={[styles.varText, active && styles.varTextActive]}>{n}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <TouchableOpacity
+            onPress={() => {
+              try { Haptics.selectionAsync(); } catch {}
+              setVariety((v) => !v);
+            }}
+            activeOpacity={0.8}
+            style={styles.priceToggleRow}
+            testID="generate-toggle-variety"
+          >
+            <View style={[styles.checkbox, variety && styles.checkboxOn]}>
+              {variety ? <Text style={styles.checkboxMark}>✓</Text> : null}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.priceToggleLabel}>🎠 Servizio vario (carosello)</Text>
+              <Text style={styles.priceToggleHint}>
+                Genera 4 scatti dello stesso capo con la stessa modella ma in
+                ambientazioni e pose diverse — come un piccolo servizio
+                fotografico. Uno userà lo sfondo che hai scelto qui sopra.
+              </Text>
+            </View>
+          </TouchableOpacity>
+          {variety && !presetId && gender === "donna" ? (
+            <Text style={styles.customBgHint}>
+              💡 Per avere lo stesso volto in tutti e 4 gli scatti, scegli una
+              modella dalla libreria (Step 2 → “Scegli modella”).
+            </Text>
+          ) : null}
         </View>
+
+        {/* Step 5 — Variations (hidden in "Servizio vario": count fixed at 4) */}
+        {!variety ? (
+          <View style={styles.step}>
+            <Text style={styles.stepLabel}>5 — Variazioni</Text>
+            <View style={styles.varsRow}>
+              {VARIATIONS.map((n) => {
+                const active = variations === n;
+                return (
+                  <TouchableOpacity
+                    key={n}
+                    onPress={() => setVariations(n)}
+                    style={[styles.varBtn, active && styles.varBtnActive]}
+                    testID={`var-${n}`}
+                  >
+                    <Text style={[styles.varText, active && styles.varTextActive]}>{n}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
         {/* Step 5 — AI provider */}
         {providers.length > 0 && (

@@ -195,6 +195,7 @@ class GenerationCreate(BaseModel):
     provider: Optional[str] = None  # image_gen provider id; None = default
     custom_background_id: Optional[str] = None  # if set, overrides `background`
     look_styles: Optional[List[str]] = None  # optional aesthetic modifiers (warm/depth/vivid/dynamic/premium)
+    variety: bool = False  # "Servizio vario": force 4 deliberately-different shots (same garment + same model, different pose/setting/look) instead of N near-identical variations
     add_price_tags: bool = False  # opt-in: when True, garment "Descrizione e prezzi" names are used to overlay price tags in the photo
     accessories: Optional[List[AccessoryItem]] = None  # optional extra items to wear (shoes/bag/jewelry/hat/glasses/belt/scarf)
     model_preset_id: Optional[str] = None  # when set, forces a specific pre-generated face (locks ethnicity/body/age to preset defaults)
@@ -1163,6 +1164,84 @@ def build_outfit_prompt(
     )
 
 
+# ---------------------------------------------------------------------------
+# "Servizio vario" (carousel) recipes
+# ---------------------------------------------------------------------------
+# When the shop owner enables `variety`, a single generation must return 4
+# shots that look like a real mini photoshoot of the SAME garment on the SAME
+# model — but each in a clearly different setting, pose and photographic mood,
+# instead of 4 near-identical variations. Each "scene card" pairs a background
+# with a complementary pose and a look modifier, curated so the four cards read
+# as visibly distinct (studio / street / boutique / home / beach) while hiding
+# the typical weaknesses of AI fashion imagery.
+import random
+
+VARIETY_SCENES = [
+    # id             background        pose               look
+    ("studio",   "white_studio",    "casual_standing", "premium"),
+    ("street",   "city_street",     "street_style",    "depth"),
+    ("boutique", "inside_shop",     "sitting_elegant", "warm"),
+    ("home",     "lifestyle_home",  "casual_standing", "warm"),
+    ("beach",    "beach",           "dynamic_walking", "vivid"),
+]
+
+# Poses used to keep the 3 auto shots from repeating the same body language.
+_VARIETY_POSE_POOL = ["casual_standing", "dynamic_walking", "sitting_elegant", "street_style"]
+
+
+def build_variety_recipes(p: "GenerationCreate") -> List[dict]:
+    """Return exactly 4 shot recipes for a "Servizio vario" carousel.
+
+    - One recipe always honours the shop owner's OWN choice (their custom
+      background if set, otherwise the selected standard background + pose),
+      exactly as a normal generation would render it.
+    - The other 3 are drawn from distinct curated scenes, avoiding the user's
+      background and repeating poses, so the four shots look different.
+    - The final order is shuffled so the first photo is NOT always the same
+      type (e.g. not always the outdoor or the in-shop one).
+
+    Each recipe is a dict: {pose, background, look, use_custom_bg}.
+    """
+    user_uses_custom = bool(p.custom_background_id)
+    user_bg = None if user_uses_custom else p.background
+
+    # The shop owner's own shot — kept verbatim (their pose + their background).
+    user_recipe = {
+        "pose": p.pose,
+        "background": p.background,
+        "look": (p.look_styles[0] if p.look_styles else None),
+        "use_custom_bg": user_uses_custom,
+    }
+
+    # Candidate scenes = curated ones whose background differs from the user's,
+    # so the auto shots never duplicate the setting the user already picked.
+    candidates = [s for s in VARIETY_SCENES if s[1] != user_bg]
+    picks = random.sample(candidates, k=min(3, len(candidates)))
+
+    used_poses = {user_recipe["pose"]}
+    auto_recipes: List[dict] = []
+    for _sid, bg, pose, look in picks:
+        # Avoid repeating a pose already used; fall back to the pool if needed.
+        if pose in used_poses:
+            alt = [q for q in _VARIETY_POSE_POOL if q not in used_poses]
+            pose = alt[0] if alt else pose
+        used_poses.add(pose)
+        auto_recipes.append({
+            "pose": pose,
+            "background": bg,
+            "look": look,
+            "use_custom_bg": False,
+        })
+
+    recipes = [user_recipe] + auto_recipes
+    # Pad (only if the curated pool was unusually small) so we always ship 4.
+    while len(recipes) < 4:
+        recipes.append(dict(user_recipe))
+    recipes = recipes[:4]
+    random.shuffle(recipes)  # first photo "gira a caso"
+    return recipes
+
+
 # Regex used to detect auto-generated placeholder names (e.g. "Cap 4521").
 # When a garment's name matches this pattern it means the shop owner did NOT
 # provide a real description/price list, so we do NOT inject a price-tag
@@ -1695,7 +1774,8 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
 
     if not payload.garment_ids:
         raise HTTPException(status_code=400, detail="Seleziona almeno un capo")
-    num = max(1, min(8, payload.num_variations))
+    # "Servizio vario" always produces exactly 4 shots (one per curated scene).
+    num = 4 if payload.variety else max(1, min(8, payload.num_variations))
     await _check_ai_quota("ai:generate", user, weight=num)
 
     garments = await db.garments.find(
@@ -1731,16 +1811,23 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
             if acc and acc.image_base64:
                 refs.append(acc.image_base64)
 
-    # Custom background: append its image as the LAST reference and pass label to prompt.
+    # Custom background: the image is used as the LAST reference and its label
+    # is passed to the prompt. In normal mode it applies to every shot, so we
+    # append it to the shared `refs` now. In "Servizio vario" mode only ONE of
+    # the 4 shots uses the custom background, so we keep the bytes aside and
+    # append them per-shot (see the variety dispatch below).
     custom_bg_label: Optional[str] = None
+    custom_bg_b64: Optional[str] = None
     if payload.custom_background_id:
         bg = await db.backgrounds.find_one(
             {"id": payload.custom_background_id, "user_id": user["user_id"]},
             {"_id": 0},
         )
         if bg and bg.get("image_base64"):
-            refs.append(bg["image_base64"])
+            custom_bg_b64 = bg["image_base64"]
             custom_bg_label = bg.get("description") or bg.get("name") or "custom background"
+            if not payload.variety:
+                refs.append(custom_bg_b64)
 
     # Resolve model preset (face library): when set, override
     # age/body/ethnicity with the preset's face_prompt and force a slim body.
@@ -1774,6 +1861,12 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     }
     await db.generations.insert_one(gen_doc.copy())
 
+    # "Servizio vario": precompute the 4 scene recipes (one per shot). The model
+    # (gender/age/body/ethnicity/preset) and the garment references stay fixed
+    # across all 4 — only pose, background and look change — so the shots read
+    # as the SAME model wearing the SAME garment in different settings.
+    variety_recipes = build_variety_recipes(payload) if payload.variety else None
+
     # Run variations with limited concurrency to avoid hammering Gemini's
     # rate limit (free tier ~5 req/min for image models). 2 in parallel is a
     # sweet spot. We collect exceptions instead of letting them tear down the
@@ -1782,6 +1875,24 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
 
     async def _bounded(i: int):
         async with sem:
+            if variety_recipes is not None:
+                r = variety_recipes[i]
+                # Per-shot copy of the request with this scene's pose/background/
+                # look; everything else (model, shoes, tweaks, prices) is kept.
+                shot = payload.model_copy(update={
+                    "pose": r["pose"],
+                    "background": r["background"],
+                    "look_styles": [r["look"]] if r.get("look") else None,
+                })
+                use_custom = r.get("use_custom_bg") and custom_bg_b64 is not None
+                shot_refs = refs + ([custom_bg_b64] if use_custom else [])
+                shot_label = custom_bg_label if use_custom else None
+                prompt = build_outfit_prompt(
+                    shot, i, shot_label, price_descriptions,
+                    model_preset_face, num_garments=num_garments,
+                    garment_categories=garment_categories,
+                )
+                return await generate_single_image(prompt, shot_refs, f"{gen_id}_{i}")
             return await generate_single_image(
                 build_outfit_prompt(
                     payload, i, custom_bg_label, price_descriptions,
