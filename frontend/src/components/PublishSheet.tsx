@@ -4,22 +4,28 @@ import { Ionicons } from "@expo/vector-icons";
 import { theme } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
 
+// Comma-joined channel keys. A value written by the old single-channel sheet
+// (just "telegram") parses as a one-element list, so nothing to migrate.
 const LAST_USED_KEY = "dv_last_publish_channel";
 
 export type PublishChannel = {
-  /** Stable id used to remember the last used channel. */
+  /** Stable id used to remember the last used channels. */
   key: string;
   label: string;
   hint?: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
-  onPress: () => void;
+  /** Opens a modal / system share sheet instead of publishing on its own.
+   *  These run last so an automatic publish can't fire under their UI. */
+  interactive?: boolean;
+  onPress: () => void | Promise<void>;
 };
 
 /**
  * Unified publish sheet: one "Pubblica" entry point that lists only the
- * channels the shop owner can actually use, remembers the last one used
- * (shown first with a badge) so the common case is a single tap.
+ * channels the shop owner can actually use. Each channel has a checkbox, so
+ * several can be posted with a single tap on the confirm button; the channels
+ * used last time come back pre-ticked, so the common case stays one tap.
  */
 export default function PublishSheet({
   visible,
@@ -32,29 +38,38 @@ export default function PublishSheet({
   channels: PublishChannel[];
   subtitle?: string;
 }) {
-  const [lastUsed, setLastUsed] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
 
   useEffect(() => {
     if (!visible) return;
     (async () => {
       const v = await storage.getItem<string>(LAST_USED_KEY, "");
-      setLastUsed(v || null);
+      const keys = (v || "").split(",").filter(Boolean);
+      setSelected(keys.filter((k) => channels.some((c) => c.key === k)));
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  const pick = async (c: PublishChannel) => {
-    try { await storage.setItem(LAST_USED_KEY, c.key); } catch {}
-    onClose();
-    // Defer so the modal is dismissed before any follow-up modal/alert opens.
-    setTimeout(() => c.onPress(), 60);
-  };
+  const toggle = (key: string) =>
+    setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
-  // Last used first, rest keep their order.
-  const ordered = [...channels].sort((a, b) => {
-    if (a.key === lastUsed) return -1;
-    if (b.key === lastUsed) return 1;
-    return 0;
-  });
+  const publish = async () => {
+    const picked = channels.filter((c) => selected.includes(c.key));
+    if (!picked.length) return;
+    try { await storage.setItem(LAST_USED_KEY, picked.map((c) => c.key).join(",")); } catch {}
+    onClose();
+    // Defer so the sheet is dismissed before any follow-up modal/alert opens.
+    setTimeout(async () => {
+      // Automatic channels first, interactive ones (share sheets) last.
+      const ordered = [...picked].sort((a, b) => Number(!!a.interactive) - Number(!!b.interactive));
+      for (const c of ordered) {
+        try { await c.onPress(); } catch {}
+        // ponytail: fixed gap between actions; if two interactive channels
+        // ever need to hand off cleanly, chain them on their sheet's onClose.
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }, 60);
+  };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -65,24 +80,44 @@ export default function PublishSheet({
           <Text style={s.subtitle}>{subtitle}</Text>
 
           <View style={{ gap: 10, marginTop: 8 }}>
-            {ordered.map((c) => (
-              <TouchableOpacity
-                key={c.key}
-                style={[s.row, { borderColor: c.color }]}
-                onPress={() => pick(c)}
-                activeOpacity={0.85}
-                testID={`publish-${c.key}`}
-              >
-                <Ionicons name={c.icon} size={22} color={c.color} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.rowLabel}>{c.label}</Text>
-                  {c.hint ? <Text style={s.rowHint}>{c.hint}</Text> : null}
-                </View>
-                {c.key === lastUsed ? <Text style={s.badge}>Ultimo usato</Text> : null}
-                <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
-              </TouchableOpacity>
-            ))}
+            {channels.map((c) => {
+              const on = selected.includes(c.key);
+              return (
+                <TouchableOpacity
+                  key={c.key}
+                  style={[s.row, { borderColor: on ? c.color : theme.colors.border }]}
+                  onPress={() => toggle(c.key)}
+                  activeOpacity={0.85}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: on }}
+                  testID={`publish-${c.key}`}
+                >
+                  <Ionicons
+                    name={on ? "checkbox" : "square-outline"}
+                    size={22}
+                    color={on ? c.color : theme.colors.textMuted}
+                  />
+                  <Ionicons name={c.icon} size={22} color={c.color} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.rowLabel}>{c.label}</Text>
+                    {c.hint ? <Text style={s.rowHint}>{c.hint}</Text> : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </View>
+
+          <TouchableOpacity
+            style={[s.cta, !selected.length && s.ctaOff]}
+            onPress={publish}
+            disabled={!selected.length}
+            activeOpacity={0.85}
+            testID="publish-confirm"
+          >
+            <Text style={s.ctaText}>
+              {selected.length > 1 ? `Pubblica su ${selected.length} canali` : "Pubblica"}
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity style={s.cancel} onPress={onClose} testID="publish-cancel">
             <Text style={s.cancelText}>Annulla</Text>
@@ -114,11 +149,12 @@ const s = StyleSheet.create({
   },
   rowLabel: { color: theme.colors.text, fontSize: 15, fontWeight: "600" },
   rowHint: { color: theme.colors.textMuted, fontSize: 11, marginTop: 2 },
-  badge: {
-    color: theme.colors.primaryFg, backgroundColor: theme.colors.primary,
-    fontSize: 9, fontWeight: "700", letterSpacing: 0.5,
-    paddingVertical: 3, paddingHorizontal: 7, borderRadius: 8, overflow: "hidden",
+  cta: {
+    marginTop: 16, paddingVertical: 15, borderRadius: 14, alignItems: "center",
+    backgroundColor: theme.colors.primary,
   },
-  cancel: { marginTop: 16, paddingVertical: 14, alignItems: "center" },
+  ctaOff: { opacity: 0.4 },
+  ctaText: { color: theme.colors.primaryFg, fontSize: 15, fontWeight: "700" },
+  cancel: { marginTop: 8, paddingVertical: 12, alignItems: "center" },
   cancelText: { color: theme.colors.textSecondary, fontSize: 14, fontWeight: "600" },
 });
