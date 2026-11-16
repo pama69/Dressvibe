@@ -4663,26 +4663,50 @@ app.add_middleware(
 # one domain — which matches the frontend's `window.location.origin` logic and
 # avoids CORS entirely. Harmless when the directory is absent (mobile-only).
 _WEB_DIR = ROOT_DIR / "web"
+
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from starlette.exceptions import HTTPException as _StarletteHTTPException  # noqa: E402
+
+
+class _WebExport(StaticFiles):
+    """Serve l'export Expo con due accorgimenti.
+
+    1. **Rotte senza estensione.** `app.json` usa `web.output: "static"`,
+       quindi l'export produce una pagina per rotta (`upload.html`,
+       `login.html`…). Gli URL che l'utente digita o ricarica sono però
+       `/upload`, `/login`: `StaticFiles` non li trova e rispondeva
+       `{"detail":"Not Found"}` a ogni refresh fuori dalla home. Qui si
+       riprova con `.html` e, se manca, con `index.html` (il router
+       client-side risolve poi la rotta, not-found incluso).
+    2. **Niente cache sull'HTML.** Gli asset hanno l'hash nel nome e restano
+       cacheabili per sempre; le pagine HTML invece *puntano* al bundle, e
+       senza `Cache-Control` il browser le tiene in cache euristica
+       continuando a caricare il bundle vecchio dopo un deploy.
+    """
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except _StarletteHTTPException as e:
+            last = path.rsplit("/", 1)[-1]
+            # Un 404 sotto /api o su un file con estensione (asset mancante)
+            # resta un 404: la fallback vale solo per le rotte dell'app.
+            if e.status_code != 404 or path.startswith("api/") or "." in last:
+                raise
+            try:
+                return await super().get_response(path + ".html", scope)
+            except _StarletteHTTPException:
+                return await super().get_response("index.html", scope)
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        if resp.headers.get("content-type", "").startswith("text/html"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 if _WEB_DIR.is_dir():
-    from fastapi.staticfiles import StaticFiles
-
-    class _NoCacheHtml(StaticFiles):
-        """`index.html` non deve finire in cache.
-
-        Gli asset di Expo hanno l'hash nel nome, quindi il browser può
-        tenerli per sempre. `index.html`, invece, è quello che *punta* al
-        bundle nuovo: senza `Cache-Control` il browser applica la cache
-        euristica e dopo un deploy continua a caricare il bundle vecchio
-        (l'utente vede la schermata precedente finché non fa Ctrl+F5).
-        """
-
-        def file_response(self, *args, **kwargs):
-            resp = super().file_response(*args, **kwargs)
-            if resp.headers.get("content-type", "").startswith("text/html"):
-                resp.headers["Cache-Control"] = "no-cache"
-            return resp
-
-    app.mount("/", _NoCacheHtml(directory=str(_WEB_DIR), html=True), name="web")
+    app.mount("/", _WebExport(directory=str(_WEB_DIR), html=True), name="web")
     logger.info(f"Serving static web export from {_WEB_DIR}")
 
 

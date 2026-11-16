@@ -16,7 +16,11 @@ Un capo può ora avere fino a 5 foto (1 copertina + 4 extra) che l'AI legge **in
 
 **Selezione multipla sin dalla prima schermata** (stessa giornata): il picker era già multiplo, ma non si capiva. Ora sopra i bottoni "Scegli foto / Scatta foto" c'è l'istruzione esplicita, e la regola è automatica: **1 foto = capo singolo, 2-5 foto = categoria `outfit`** impostata da sola (resta modificabile a mano). L'hint sotto la striscia cambia di conseguenza.
 
-**Fix cache del web export** (stessa giornata): `index.html` veniva servito senza `Cache-Control`, quindi dopo un deploy il browser continuava a caricare il bundle vecchio (nuova UI invisibile finché non si faceva Ctrl+F5). Ora il mount statico è una sottoclasse `_NoCacheHtml` di `StaticFiles` che aggiunge `Cache-Control: no-cache` alle sole risposte `text/html`; gli asset con hash nel nome restano cacheabili.
+**Fix serving del web export** (stessa giornata): il mount statico è ora la classe `_WebExport` (sottoclasse di `StaticFiles`, definita a livello di modulo in [backend/server.py](backend/server.py)) e risolve due problemi distinti.
+1. **404 su refresh fuori dalla home.** `app.json` ha `web.output: "static"`, quindi l'export produce una pagina per rotta (`upload.html`, `login.html`…). Gli URL reali sono però `/upload`, `/login`: `StaticFiles` non li trovava e rispondeva `{"detail":"Not Found"}` a ogni Ctrl+F5 o link diretto. Ora su 404 si riprova con `path + ".html"` e poi con `index.html`; restano 404 veri i path sotto `api/` e i file con estensione (asset mancanti).
+2. **Cache dell'HTML.** `index.html` veniva servito senza `Cache-Control`, quindi dopo un deploy il browser continuava a caricare il bundle vecchio. Ora le sole risposte `text/html` escono con `Cache-Control: no-cache`; gli asset con hash nel nome restano cacheabili.
+
+Check: [backend_test_web_routes.py](backend_test_web_routes.py) (estrae la classe con `ast`, la monta in una `Starlette` e verifica rotta/fallback/404/header) → `ok`.
 
 **Check**: [backend_test_multiphoto_prompt.py](backend_test_multiphoto_prompt.py) (puro, senza Mongo né server: estrae la funzione da `server.py` con `ast`) → `ok`. `npx tsc --noEmit` sul frontend: nessun errore nuovo (resta solo il preesistente `expo-notifications`).
 
