@@ -14,6 +14,8 @@ Un capo può ora avere fino a 5 foto (1 copertina + 4 extra) che l'AI legge **in
 - [upload.tsx](frontend/app/(app)/upload.tsx): stato `images: string[]`, picker con `allowsMultipleSelection`, striscia di miniature con X per rimuovere e tile "+" per aggiungere; tolto il bottone "Cambia" (ora ridondante). Invia `extra_images: images.slice(1)`.
 - [garment/[id].tsx](frontend/app/(app)/garment/[id].tsx): striscia delle foto extra sotto la copertina.
 
+**Selezione multipla sin dalla prima schermata** (stessa giornata): il picker era già multiplo, ma non si capiva. Ora sopra i bottoni "Scegli foto / Scatta foto" c'è l'istruzione esplicita, e la regola è automatica: **1 foto = capo singolo, 2-5 foto = categoria `outfit`** impostata da sola (resta modificabile a mano). L'hint sotto la striscia cambia di conseguenza.
+
 **Fix cache del web export** (stessa giornata): `index.html` veniva servito senza `Cache-Control`, quindi dopo un deploy il browser continuava a caricare il bundle vecchio (nuova UI invisibile finché non si faceva Ctrl+F5). Ora il mount statico è una sottoclasse `_NoCacheHtml` di `StaticFiles` che aggiunge `Cache-Control: no-cache` alle sole risposte `text/html`; gli asset con hash nel nome restano cacheabili.
 
 **Check**: [backend_test_multiphoto_prompt.py](backend_test_multiphoto_prompt.py) (puro, senza Mongo né server: estrae la funzione da `server.py` con `ast`) → `ok`. `npx tsc --noEmit` sul frontend: nessun errore nuovo (resta solo il preesistente `expo-notifications`).

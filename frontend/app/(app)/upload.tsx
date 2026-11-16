@@ -104,13 +104,14 @@ export default function Upload() {
   );
 
   const addImages = (b64s: string[]) => {
-    setImages((prev) => {
-      const next = [...prev, ...b64s].slice(0, MAX_PHOTOS);
-      if (prev.length + b64s.length > MAX_PHOTOS) {
-        notify("Massimo 5 foto", `Ho tenuto le prime ${MAX_PHOTOS} foto del capo.`);
-      }
-      return next;
-    });
+    const next = [...images, ...b64s].slice(0, MAX_PHOTOS);
+    if (images.length + b64s.length > MAX_PHOTOS) {
+      notify("Massimo 5 foto", `Ho tenuto le prime ${MAX_PHOTOS} foto.`);
+    }
+    setImages(next);
+    // Una foto = un capo singolo; più foto = un outfit completo spalmato su
+    // più scatti. La categoria resta modificabile a mano.
+    if (next.length > 1) setCategory("outfit");
     setError(null);
   };
 
@@ -250,9 +251,11 @@ export default function Upload() {
 
               {/* Più foto dello stesso capo/outfit: l'AI le legge tutte come
                   un'unica fonte. La prima è la copertina in galleria. */}
-              <Text style={s.fieldLabel}>Foto del capo ({images.length}/{MAX_PHOTOS})</Text>
+              <Text style={s.fieldLabel}>Foto ({images.length}/{MAX_PHOTOS})</Text>
               <Text style={s.fieldHint}>
-                Un outfit su più scatti? Aggiungi le altre foto qui: l'AI le userà tutte insieme come un'unica fonte, non come capi diversi.
+                {images.length > 1
+                  ? "Più foto = un outfit completo: l'AI le userà tutte insieme come un'unica fonte, non come capi diversi."
+                  : "Una sola foto = un capo singolo. Aggiungine altre (fino a 5) per un outfit completo spalmato su più scatti."}
               </Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
                 {images.map((b64, i) => (
@@ -275,6 +278,11 @@ export default function Upload() {
               </ScrollView>
             </>
           ) : (
+            <>
+            <Text style={s.pickHint}>
+              Seleziona 1 foto per un capo singolo, oppure fino a {MAX_PHOTOS} insieme per un outfit completo
+              (tienile selezionate tutte: diventano un'unica fonte per l'AI).
+            </Text>
             <View style={s.pickRow}>
               <TouchableOpacity style={s.pickBox} onPress={pickImage} testID="upload-from-library">
                 <Ionicons name="images-outline" size={26} color={theme.colors.text} />
@@ -285,6 +293,7 @@ export default function Upload() {
                 <Text style={s.pickText}>Scatta foto</Text>
               </TouchableOpacity>
             </View>
+            </>
           )}
 
           <Text style={s.fieldLabel}>Descrizione e prezzi</Text>
@@ -406,6 +415,7 @@ const s = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
   pickText: { color: theme.colors.text, fontSize: 12, letterSpacing: 1 },
+  pickHint: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 17, marginBottom: 10 },
   preview: {
     width: "100%", aspectRatio: 4 / 5, maxWidth: 400, alignSelf: "center", position: "relative", marginBottom: 6,
     backgroundColor: "#fff", borderRadius: 16, padding: 5,
