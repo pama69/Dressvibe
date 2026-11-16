@@ -142,6 +142,10 @@ class User(BaseModel):
 class GarmentCreate(BaseModel):
     name: str
     image_base64: str = Field(..., max_length=14_000_000)  # without prefix
+    # Foto aggiuntive dello STESSO capo/outfit (un look spalmato su più scatti:
+    # dettagli, retro, pezzi fotografati separatamente). In generazione vengono
+    # passate tutte insieme come UNICA fonte. Max 4 (5 foto in totale).
+    extra_images: List[str] = Field(default_factory=list)
     category: str  # t-shirt, pantaloni, vestito, giacca, etc.
     color: Optional[str] = None
     size: Optional[str] = None
@@ -155,6 +159,7 @@ class Garment(BaseModel):
     user_id: str
     name: str
     image_base64: str
+    extra_images: List[str] = Field(default_factory=list)
     category: str
     color: Optional[str] = None
     size: Optional[str] = None
@@ -775,6 +780,9 @@ async def create_garment(payload: GarmentCreate, authorization: Optional[str] = 
         "user_id": user["user_id"],
         "name": payload.name,
         "image_base64": payload.image_base64,
+        # Foto extra dello stesso capo — cap a 4 (5 in totale) per non far
+        # esplodere il documento Mongo né il payload verso Gemini.
+        "extra_images": [i for i in payload.extra_images if i][:4],
         # Small JPEG thumbnail used by gallery list endpoints — reduces the
         # per-card payload from ~400-2000 KB to ~6-15 KB (~50× smaller).
         # Falls back to the full image if Pillow can't decode (mainly SVG).
@@ -804,10 +812,11 @@ async def list_garments(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     items = await db.garments.find(
         {"user_id": user["user_id"]},
-        # Explicit projection: exclude the heavy base64 blob entirely.
+        # Explicit projection: exclude the heavy base64 blobs entirely.
         {
             "_id": 0,
             "image_base64": 0,
+            "extra_images": 0,
         },
     ).sort("created_at", -1).to_list(500)
     return items
@@ -1013,7 +1022,10 @@ _LOWER_CATS = {"pantaloni", "jeans", "gonna"}
 _FULL_CATS = {"vestito", "outfit"}
 
 
-def _compose_garments_block(categories: Optional[List[str]]) -> tuple[str, bool]:
+def _compose_garments_block(
+    categories: Optional[List[str]],
+    photo_counts: Optional[List[int]] = None,
+) -> tuple[str, bool]:
     """Build the clothing paragraph of the prompt from the selected capi.
 
     Returns (text, shoes_from_reference). When `categories` is provided we label
@@ -1045,11 +1057,27 @@ def _compose_garments_block(categories: Optional[List[str]]) -> tuple[str, bool]
         return text, False
 
     # Label each clothing reference by its role (1-based, matching refs order).
+    # A capo can carry several photos of ITSELF (a look spread over multiple
+    # shots): those occupy a RANGE of reference indexes and must be read as one
+    # single source, not as separate garments.
     parts: List[str] = []
-    for i, c in enumerate(cats, start=1):
+    idx = 1
+    for i, c in enumerate(cats):
         role, where = GARMENT_ROLE.get(c, (f"a {c}", "in its natural place"))
-        parts.append(f"reference #{i} = {role} (worn on the {where})")
+        n = max(1, (photo_counts or [])[i] if photo_counts and i < len(photo_counts) else 1)
+        if n > 1:
+            parts.append(
+                f"references #{idx}-#{idx + n - 1} = {n} photos of ONE SINGLE item: {role}. "
+                f"These {n} photos are different views, angles or close-up details of the SAME item "
+                f"(or of pieces belonging to the SAME single look) — combine the information from all "
+                f"of them into one garment and do NOT treat them as separate garments to be layered "
+                f"or repeated (worn on the {where})"
+            )
+        else:
+            parts.append(f"reference #{idx} = {role} (worn on the {where})")
+        idx += n
     labelled = "; ".join(parts)
+    total_refs = idx - 1
 
     upper_covered = any(c in _UPPER_CATS or c in _FULL_CATS for c in cats)
     lower_covered = any(c in _LOWER_CATS or c in _FULL_CATS for c in cats)
@@ -1062,6 +1090,11 @@ def _compose_garments_block(categories: Optional[List[str]]) -> tuple[str, bool]
             f"The clothing reference images are, in order: {labelled}. "
             "Combine ALL of these garments into ONE single, coherent, well-coordinated outfit "
             "worn AT THE SAME TIME by the same model — this is one look, not several."
+        )
+    elif total_refs > 1:
+        lines.append(
+            f"The clothing reference images are: {labelled}. "
+            "They all describe ONE single look: the model wears exactly that look, once."
         )
     else:
         lines.append(
@@ -1099,6 +1132,7 @@ def build_outfit_prompt(
     model_preset_face: Optional[str] = None,
     num_garments: int = 0,
     garment_categories: Optional[List[str]] = None,
+    garment_photo_counts: Optional[List[int]] = None,
 ) -> str:
     gender = GENDER_IT.get(p.model_gender, p.model_gender)
     age = AGE_IT.get(p.model_age, p.model_age)
@@ -1111,7 +1145,9 @@ def build_outfit_prompt(
     # Build the (possibly role-labelled) clothing paragraph. When one of the
     # selected capi is a pair of shoes, footwear must come from that reference
     # instead of the generic SHOES_IT description.
-    garments_block, shoes_from_reference = _compose_garments_block(garment_categories)
+    garments_block, shoes_from_reference = _compose_garments_block(
+        garment_categories, garment_photo_counts
+    )
     if shoes_from_reference:
         shoes = (
             "the EXACT shoes shown in the shoe reference image — reproduce them faithfully "
@@ -1708,7 +1744,15 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
     # prompt aligned with the actual reference images sent to Gemini.
     _by_id = {g["id"]: g for g in garments}
     garments = [_by_id[gid] for gid in payload.garment_ids if gid in _by_id]
-    refs = [g["image_base64"] for g in garments]
+    # Un capo può avere più foto di SÉ STESSO (outfit spalmato su più scatti):
+    # entrano tutte nei riferimenti, in fila, e il prompt le dichiara come
+    # un'unica fonte tramite garment_photo_counts.
+    refs: List[str] = []
+    garment_photo_counts: List[int] = []
+    for g in garments:
+        imgs = [g["image_base64"]] + [i for i in (g.get("extra_images") or []) if i]
+        refs.extend(imgs)
+        garment_photo_counts.append(len(imgs))
     garment_categories = [g.get("category") for g in garments]  # role labels for the prompt
     num_garments = len(refs)  # remembered before appending accessories/bg so the prompt can reference them by 1-based index
 
@@ -1787,6 +1831,7 @@ async def create_generation(payload: GenerationCreate, authorization: Optional[s
                     payload, i, custom_bg_label, price_descriptions,
                     model_preset_face, num_garments=num_garments,
                     garment_categories=garment_categories,
+                    garment_photo_counts=garment_photo_counts,
                 ),
                 refs,
                 f"{gen_id}_{i}",

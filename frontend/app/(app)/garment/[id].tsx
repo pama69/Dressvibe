@@ -201,6 +201,21 @@ export default function GarmentDetail() {
             />
           </View>
 
+          {/* Foto extra dello stesso capo: in generazione valgono come
+              un'unica fonte insieme alla copertina. */}
+          {garment.extra_images?.length ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.extraRow}>
+              {garment.extra_images.map((b64: string, i: number) => (
+                <Image
+                  key={i}
+                  source={{ uri: `data:image/png;base64,${b64}` }}
+                  style={s.extraThumb}
+                  resizeMode="cover"
+                />
+              ))}
+            </ScrollView>
+          ) : null}
+
           {/* Quick metadata badges */}
           <View style={s.metaRow}>
             {garment.category ? (
@@ -332,6 +347,8 @@ const s = StyleSheet.create({
     borderColor: theme.colors.border,
   },
   img: { width: "100%", height: "100%" },
+  extraRow: { gap: 8, paddingTop: 10 },
+  extraThumb: { width: 64, height: 80, borderRadius: 10, backgroundColor: theme.colors.surface },
   metaRow: {
     flexDirection: "row",
     flexWrap: "wrap",

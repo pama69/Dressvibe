@@ -43,6 +43,9 @@ async function assetToBase64(asset: ImagePicker.ImagePickerAsset): Promise<strin
   }
 }
 
+// Foto massime per capo (1 copertina + 4 extra) — stesso cap lato backend.
+const MAX_PHOTOS = 5;
+
 function notify(title: string, msg?: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     window.alert(msg ? `${title}\n\n${msg}` : title);
@@ -53,7 +56,11 @@ function notify(title: string, msg?: string) {
 
 export default function Upload() {
   const router = useRouter();
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  // Un capo può essere fotografato in più scatti (outfit spalmato su più foto,
+  // dettagli, retro): la prima è la copertina, tutte insieme sono UNA sola
+  // fonte per l'AI. Max 5.
+  const [images, setImages] = useState<string[]>([]);
+  const imageBase64 = images[0] ?? null;
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
   const [color, setColor] = useState("");
@@ -71,7 +78,7 @@ export default function Upload() {
   const didSaveRef = useRef(false);
 
   const resetForm = useCallback(() => {
-    setImageBase64(null);
+    setImages([]);
     setName("");
     setCategory("");
     setColor("");
@@ -96,6 +103,17 @@ export default function Upload() {
     }, [resetForm])
   );
 
+  const addImages = (b64s: string[]) => {
+    setImages((prev) => {
+      const next = [...prev, ...b64s].slice(0, MAX_PHOTOS);
+      if (prev.length + b64s.length > MAX_PHOTOS) {
+        notify("Massimo 5 foto", `Ho tenuto le prime ${MAX_PHOTOS} foto del capo.`);
+      }
+      return next;
+    });
+    setError(null);
+  };
+
   const pickImage = async () => {
     try {
       if (Platform.OS !== "web") {
@@ -112,15 +130,19 @@ export default function Upload() {
         // Skip the forced crop step — user wanted the picker to return the
         // photo as-is. They can re-pick if they want a different framing.
         allowsEditing: false,
+        // Più scatti dello stesso capo/outfit in un colpo solo.
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_PHOTOS,
       });
       if (res.canceled || !res.assets || res.assets.length === 0) return;
-      const b64 = await assetToBase64(res.assets[0]);
-      if (!b64) {
+      const b64s = (await Promise.all(res.assets.map(assetToBase64))).filter(
+        (b): b is string => !!b
+      );
+      if (b64s.length === 0) {
         notify("Errore", "Impossibile leggere la foto. Prova un'altra immagine.");
         return;
       }
-      setImageBase64(b64);
-      setError(null);
+      addImages(b64s);
     } catch (e: any) {
       console.warn("pickImage", e);
       notify("Errore", e?.message || "Impossibile aprire la galleria");
@@ -144,10 +166,7 @@ export default function Upload() {
       });
       if (res.canceled || !res.assets?.[0]) return;
       const b64 = await assetToBase64(res.assets[0]);
-      if (b64) {
-        setImageBase64(b64);
-        setError(null);
-      }
+      if (b64) addImages([b64]);
     } catch (e: any) {
       console.warn("takePhoto", e);
       notify("Errore", e?.message || "Impossibile aprire la fotocamera");
@@ -179,6 +198,7 @@ export default function Upload() {
       await api.createGarment({
         name: finalName,
         image_base64: imageBase64,
+        extra_images: images.slice(1),
         category,
         color: color.trim() || null,
         size: size.trim() || null,
@@ -223,12 +243,37 @@ export default function Upload() {
 
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
           {imageBase64 ? (
-            <View style={s.preview}>
-              <Image source={{ uri: `data:image/png;base64,${imageBase64}` }} style={s.previewImg} resizeMode="contain" />
-              <TouchableOpacity style={s.previewChange} onPress={pickImage} testID="upload-change">
-                <Text style={s.previewChangeText}>Cambia</Text>
-              </TouchableOpacity>
-            </View>
+            <>
+              <View style={s.preview}>
+                <Image source={{ uri: `data:image/png;base64,${imageBase64}` }} style={s.previewImg} resizeMode="contain" />
+              </View>
+
+              {/* Più foto dello stesso capo/outfit: l'AI le legge tutte come
+                  un'unica fonte. La prima è la copertina in galleria. */}
+              <Text style={s.fieldLabel}>Foto del capo ({images.length}/{MAX_PHOTOS})</Text>
+              <Text style={s.fieldHint}>
+                Un outfit su più scatti? Aggiungi le altre foto qui: l'AI le userà tutte insieme come un'unica fonte, non come capi diversi.
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipRow}>
+                {images.map((b64, i) => (
+                  <View key={i} style={s.thumbWrap}>
+                    <Image source={{ uri: `data:image/png;base64,${b64}` }} style={s.thumb} resizeMode="cover" />
+                    <TouchableOpacity
+                      style={s.thumbDel}
+                      onPress={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                      testID={`upload-photo-remove-${i}`}
+                    >
+                      <Ionicons name="close" size={12} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                {images.length < MAX_PHOTOS ? (
+                  <TouchableOpacity style={s.thumbAdd} onPress={pickImage} testID="upload-photo-add">
+                    <Ionicons name="add" size={22} color={theme.colors.text} />
+                  </TouchableOpacity>
+                ) : null}
+              </ScrollView>
+            </>
           ) : (
             <View style={s.pickRow}>
               <TouchableOpacity style={s.pickBox} onPress={pickImage} testID="upload-from-library">
@@ -367,11 +412,6 @@ const s = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 6,
   },
   previewImg: { width: "100%", height: "100%", borderRadius: 12, backgroundColor: "#f2f2f2" },
-  previewChange: {
-    position: "absolute", bottom: 14, right: 14,
-    backgroundColor: "rgba(0,0,0,0.6)", paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10,
-  },
-  previewChangeText: { color: theme.colors.text, fontSize: 12, letterSpacing: 0.4 },
   fieldLabel: {
     color: theme.colors.textSecondary, fontSize: 10, letterSpacing: 2,
     textTransform: "uppercase", marginTop: 14, marginBottom: 6,
@@ -380,6 +420,17 @@ const s = StyleSheet.create({
   input: {
     backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border,
     color: theme.colors.text, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, borderRadius: 10,
+  },
+  thumbWrap: { width: 64, height: 80, borderRadius: 10, overflow: "visible" },
+  thumb: { width: 64, height: 80, borderRadius: 10, backgroundColor: theme.colors.surface },
+  thumbDel: {
+    position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.75)", alignItems: "center", justifyContent: "center",
+  },
+  thumbAdd: {
+    width: 64, height: 80, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderStyle: "dashed", borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
   },
   row2: { flexDirection: "row", gap: 12 },
   chipRow: { gap: 8, paddingRight: 16 },

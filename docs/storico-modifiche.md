@@ -2,6 +2,21 @@
 
 > Spostato da `CLAUDE.md` il 2026-10-30 per non caricarlo a ogni sessione. Le voci nuove vanno in cima; avvertenze e TODO ancora aperti restano in `CLAUDE.md`.
 
+### 2026-11-16 — Capo su più foto: outfit spalmato su più scatti = fonte unica ✅
+Un capo può ora avere fino a 5 foto (1 copertina + 4 extra) che l'AI legge **insieme**, come un'unica fonte, non come capi diversi.
+
+**Backend** [backend/server.py](backend/server.py):
+- `GarmentCreate`/`Garment`: nuovo campo `extra_images: List[str]` (cap a 4 in `create_garment`, escluso dalla projection di `GET /api/garments` perché pesante; `GET /api/garments/{id}` lo restituisce).
+- `create_generation`: i riferimenti verso Gemini sono la concatenazione di `image_base64` + `extra_images` di ogni capo selezionato; `garment_photo_counts` tiene il numero di foto per capo.
+- `_compose_garments_block(categories, photo_counts)` + `build_outfit_prompt(..., garment_photo_counts=...)`: quando un capo ha più foto il prompt le dichiara come intervallo (`references #1-#3 = 3 photos of ONE SINGLE item…`) e vieta esplicitamente di trattarle come capi separati da stratificare. Gli indici dei riferimenti successivi (accessori, sfondo) restano allineati perché `num_garments = len(refs)`.
+
+**Frontend**:
+- [upload.tsx](frontend/app/(app)/upload.tsx): stato `images: string[]`, picker con `allowsMultipleSelection`, striscia di miniature con X per rimuovere e tile "+" per aggiungere; tolto il bottone "Cambia" (ora ridondante). Invia `extra_images: images.slice(1)`.
+- [garment/[id].tsx](frontend/app/(app)/garment/[id].tsx): striscia delle foto extra sotto la copertina.
+
+**Check**: [backend_test_multiphoto_prompt.py](backend_test_multiphoto_prompt.py) (puro, senza Mongo né server: estrae la funzione da `server.py` con `ast`) → `ok`. `npx tsc --noEmit` sul frontend: nessun errore nuovo (resta solo il preesistente `expo-notifications`).
+
+
 ### 2026-06-29 — Distacco LLM da Emergent ✅
 - Rimosso `from emergentintegrations.llm.chat import ...` e la variabile `EMERGENT_LLM_KEY` da [backend/server.py](backend/server.py).
 - Aggiunto helper `_gemini_direct_generate_text(system_msg, user_prompt)` (chiamata diretta `google-genai`) accanto a `_gemini_direct_generate_image`.
