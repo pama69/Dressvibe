@@ -160,6 +160,7 @@ class Garment(BaseModel):
     name: str
     image_base64: str
     extra_images: List[str] = Field(default_factory=list)
+    extra_thumbs: List[str] = Field(default_factory=list)
     category: str
     color: Optional[str] = None
     size: Optional[str] = None
@@ -775,6 +776,7 @@ async def email_resend_code(payload: _EmailResendPayload, request: Request):
 @api_router.post("/garments")
 async def create_garment(payload: GarmentCreate, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
+    _extra = [i for i in payload.extra_images if i][:4]
     doc = {
         "id": f"g_{uuid.uuid4().hex[:12]}",
         "user_id": user["user_id"],
@@ -782,7 +784,11 @@ async def create_garment(payload: GarmentCreate, authorization: Optional[str] = 
         "image_base64": payload.image_base64,
         # Foto extra dello stesso capo — cap a 4 (5 in totale) per non far
         # esplodere il documento Mongo né il payload verso Gemini.
-        "extra_images": [i for i in payload.extra_images if i][:4],
+        "extra_images": _extra,
+        # Miniature delle foto extra: la card in galleria le mostra accanto
+        # alla copertina, così si vede a colpo d'occhio che è un outfit su
+        # più scatti. Sono ~6-15 KB l'una, quindi restano nella lista.
+        "extra_thumbs": [t for t in (make_thumb_b64(i) for i in _extra) if t],
         # Small JPEG thumbnail used by gallery list endpoints — reduces the
         # per-card payload from ~400-2000 KB to ~6-15 KB (~50× smaller).
         # Falls back to the full image if Pillow can't decode (mainly SVG).
@@ -4773,6 +4779,27 @@ async def _backfill_thumbnails():
                     )
             except Exception as e:
                 logger.warning(f"[backfill] garment {g.get('id')} thumb failed: {e}")
+
+        # ---- Garments: backfill `extra_thumbs` (capi multi-foto creati
+        # prima che la galleria mostrasse il mosaico) ----
+        cursor = db.garments.find(
+            {
+                "extra_images": {"$exists": True, "$ne": []},
+                "extra_thumbs": {"$exists": False},
+            },
+            {"_id": 0, "id": 1, "extra_images": 1},
+        ).limit(25)
+        async for g in cursor:
+            try:
+                thumbs = await asyncio.gather(*[
+                    loop.run_in_executor(None, make_thumb_b64, im)
+                    for im in (g.get("extra_images") or [])
+                ])
+                await db.garments.update_one(
+                    {"id": g["id"]}, {"$set": {"extra_thumbs": [t for t in thumbs if t]}}
+                )
+            except Exception as e:
+                logger.warning(f"[backfill] garment {g.get('id')} extra_thumbs failed: {e}")
 
         # ---- Generations: backfill parallel `thumbs[]` ----
         cursor = db.generations.find(

@@ -14,6 +14,8 @@ Un capo può ora avere fino a 5 foto (1 copertina + 4 extra) che l'AI legge **in
 - [upload.tsx](frontend/app/(app)/upload.tsx): stato `images: string[]`, picker con `allowsMultipleSelection`, striscia di miniature con X per rimuovere e tile "+" per aggiungere; tolto il bottone "Cambia" (ora ridondante). Invia `extra_images: images.slice(1)`.
 - [garment/[id].tsx](frontend/app/(app)/garment/[id].tsx): striscia delle foto extra sotto la copertina.
 
+**Mosaico in galleria** (stessa giornata): la card mostrava solo la copertina, quindi un outfit su più scatti era indistinguibile da un capo singolo. Ora `create_garment` salva anche `extra_thumbs` (miniature ~6-15 KB delle foto extra, incluse nella lista perché leggere) e la card in [index.tsx](frontend/app/(app)/index.tsx) diventa copertina grande + colonna delle altre foto, con badge `+N` oltre le tre. Per i capi creati prima, `_backfill_thumbnails` ha una nuova sweep (25 doc per boot) che riempie `extra_thumbs` dove mancano.
+
 **Selezione multipla sin dalla prima schermata** (stessa giornata): il picker era già multiplo, ma non si capiva. Ora sopra i bottoni "Scegli foto / Scatta foto" c'è l'istruzione esplicita, e la regola è automatica: **1 foto = capo singolo, 2-5 foto = categoria `outfit`** impostata da sola (resta modificabile a mano). L'hint sotto la striscia cambia di conseguenza.
 
 **Fix serving del web export** (stessa giornata): il mount statico è ora la classe `_WebExport` (sottoclasse di `StaticFiles`, definita a livello di modulo in [backend/server.py](backend/server.py)) e risolve due problemi distinti.

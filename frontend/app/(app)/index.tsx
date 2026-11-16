@@ -31,6 +31,9 @@ type Garment = {
   name: string;
   image_base64: string;
   thumb_base64?: string;
+  // Miniature delle foto extra di un capo multi-scatto (outfit): la card le
+  // mostra accanto alla copertina. Assenti sui capi a foto singola.
+  extra_thumbs?: string[];
   category: string;
   price?: number | null;
 };
@@ -328,6 +331,10 @@ export default function Galleria() {
             const isAutoName = /^Cap\s+\d{3,5}$/i.test((item.name || "").trim());
             const displayName = isAutoName ? "" : (item.name || "");
             const isPicked = picked.includes(item.id);
+            const extras = item.extra_thumbs || [];
+            const coverUri = item.thumb_base64
+              ? `data:image/jpeg;base64,${item.thumb_base64}`
+              : `data:image/png;base64,${item.image_base64}`;
             return (
               <TouchableOpacity
                 style={[
@@ -350,15 +357,31 @@ export default function Galleria() {
                 }}
               >
                 <View style={styles.cardInner}>
-                  <Image
-                    source={{
-                      uri: item.thumb_base64
-                        ? `data:image/jpeg;base64,${item.thumb_base64}`
-                        : `data:image/png;base64,${item.image_base64}`,
-                    }}
-                    resizeMode="contain"
-                    style={styles.cardImg}
-                  />
+                  {extras.length ? (
+                    // Capo su più scatti: copertina grande + le altre foto in
+                    // colonna, così si riconosce subito come outfit.
+                    <View style={styles.mosaic}>
+                      <Image source={{ uri: coverUri }} resizeMode="contain" style={styles.mosaicCover} />
+                      <View style={styles.mosaicCol}>
+                        {extras.slice(0, 3).map((t, i) => (
+                          <View key={i} style={styles.mosaicCell}>
+                            <Image
+                              source={{ uri: `data:image/jpeg;base64,${t}` }}
+                              resizeMode="cover"
+                              style={styles.mosaicImg}
+                            />
+                            {i === 2 && extras.length > 3 ? (
+                              <View style={styles.mosaicMore}>
+                                <Text style={styles.mosaicMoreText}>+{extras.length - 3}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  ) : (
+                    <Image source={{ uri: coverUri }} resizeMode="contain" style={styles.cardImg} />
+                  )}
                   {selectMode ? (
                     <View
                       style={[styles.pickBadge, isPicked && styles.pickBadgeOn]}
@@ -609,6 +632,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   cardImg: { width: "100%", height: "100%", borderRadius: 10, backgroundColor: theme.colors.surfaceAlt },
+  mosaic: { flex: 1, flexDirection: "row", gap: 4 },
+  mosaicCover: { flex: 2, borderRadius: 10, backgroundColor: theme.colors.surfaceAlt },
+  mosaicCol: { flex: 1, gap: 4 },
+  mosaicCell: { flex: 1, borderRadius: 8, overflow: "hidden", backgroundColor: theme.colors.surfaceAlt },
+  mosaicImg: { width: "100%", height: "100%" },
+  mosaicMore: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center", justifyContent: "center",
+  },
+  mosaicMoreText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   deleteBtn: {
     position: "absolute", top: 6, right: 6,
     width: 26, height: 26, borderRadius: 13,
