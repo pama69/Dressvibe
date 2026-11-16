@@ -4666,7 +4666,23 @@ _WEB_DIR = ROOT_DIR / "web"
 if _WEB_DIR.is_dir():
     from fastapi.staticfiles import StaticFiles
 
-    app.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")
+    class _NoCacheHtml(StaticFiles):
+        """`index.html` non deve finire in cache.
+
+        Gli asset di Expo hanno l'hash nel nome, quindi il browser può
+        tenerli per sempre. `index.html`, invece, è quello che *punta* al
+        bundle nuovo: senza `Cache-Control` il browser applica la cache
+        euristica e dopo un deploy continua a caricare il bundle vecchio
+        (l'utente vede la schermata precedente finché non fa Ctrl+F5).
+        """
+
+        def file_response(self, *args, **kwargs):
+            resp = super().file_response(*args, **kwargs)
+            if resp.headers.get("content-type", "").startswith("text/html"):
+                resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+    app.mount("/", _NoCacheHtml(directory=str(_WEB_DIR), html=True), name="web")
     logger.info(f"Serving static web export from {_WEB_DIR}")
 
 
